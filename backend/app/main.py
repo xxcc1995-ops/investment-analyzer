@@ -1,6 +1,6 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from app.api import stocks
+from app.api import stocks, funds
 
 app = FastAPI(title="新源的Invest工具", version="1.0.0")
 
@@ -13,6 +13,7 @@ app.add_middleware(
 )
 
 app.include_router(stocks.router, prefix="/api/stocks", tags=["stocks"])
+app.include_router(funds.router, prefix="/api/funds", tags=["funds"])
 
 
 @app.get("/")

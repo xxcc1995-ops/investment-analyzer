@@ -40,6 +40,28 @@ interface SearchItem {
   name: string
 }
 
+interface FundArbitrage {
+  fund_id: string
+  fund_nm: string
+  price: number
+  fund_nav: number
+  nav_discount_rt: number
+  increase_rt: number
+  volume: number
+  turnover: number
+  amount: number
+  direction: string
+  apply_fee: string
+  redeem_fee: string
+  apply_status: string
+  redeem_status: string
+  apply_limit: string
+  nav_dt: string
+  price_dt: string
+  issuer_nm: string
+  estimated_profit: number
+}
+
 // 热门股票列表
 const HOT_STOCKS = [
   { code: '600519', name: '贵州茅台' },
@@ -69,6 +91,20 @@ function App() {
   const [selectedList, setSelectedList] = useState<'watchlist' | 'hot'>('hot')
   const [fetchTime, setFetchTime] = useState('')
   const [latestReport, setLatestReport] = useState('')
+
+  // 基金套利状态
+  const [mainView, setMainView] = useState<'stock' | 'arbitrage'>('stock')
+  const [arbFunds, setArbFunds] = useState<FundArbitrage[]>([])
+  const [arbLoading, setArbLoading] = useState(false)
+  const [arbFetchTime, setArbFetchTime] = useState('')
+  const [arbDataSource, setArbDataSource] = useState('')
+  const [arbTotalBefore, setArbTotalBefore] = useState(0)
+  const [arbLoggedIn, setArbLoggedIn] = useState(false)
+  const [showLogin, setShowLogin] = useState(false)
+  const [loginUser, setLoginUser] = useState('')
+  const [loginPass, setLoginPass] = useState('')
+  const [loginLoading, setLoginLoading] = useState(false)
+  const [loginError, setLoginError] = useState('')
 
   // 搜索股票
   const handleSearch = useCallback(async (keyword: string) => {
@@ -120,6 +156,53 @@ function App() {
     if (selectedStock && !watchlist.find(s => s.code === selectedStock.code)) {
       setWatchlist(prev => [selectedStock, ...prev])
     }
+  }
+
+  // 加载套利数据
+  const loadArbitrage = async () => {
+    setArbLoading(true)
+    try {
+      const res = await axios.get(`${API_BASE}/funds/arbitrage`, {
+        params: { min_turnover: 300, open_subscribe_only: true }
+      })
+      setArbFunds(res.data.funds || [])
+      setArbFetchTime(res.data.fetch_time || '')
+      setArbDataSource(res.data.data_source || '')
+      setArbTotalBefore(res.data.total_before_filter || 0)
+      setArbLoggedIn(res.data.logged_in || false)
+    } catch (err) {
+      console.error('加载套利数据失败:', err)
+    } finally {
+      setArbLoading(false)
+    }
+  }
+
+  // 登录集思录
+  const handleLogin = async () => {
+    if (!loginUser || !loginPass) return
+    setLoginLoading(true)
+    setLoginError('')
+    try {
+      await axios.post(`${API_BASE}/funds/login`, {
+        user_name: loginUser,
+        password: loginPass,
+      })
+      setShowLogin(false)
+      setLoginUser('')
+      setLoginPass('')
+      // 登录成功后重新加载数据
+      loadArbitrage()
+    } catch (err: any) {
+      setLoginError(err.response?.data?.detail || '登录失败')
+    } finally {
+      setLoginLoading(false)
+    }
+  }
+
+  // 切换到套利视图
+  const switchToArbitrage = () => {
+    setMainView('arbitrage')
+    loadArbitrage()
   }
 
   // 格式化数字
@@ -299,34 +382,45 @@ function App() {
 
         {/* Tab切换 */}
         <div className="list-tabs">
-          <div className={`list-tab ${selectedList === 'hot' ? 'active' : ''}`}
-            onClick={() => setSelectedList('hot')}>热门股票</div>
-          <div className={`list-tab ${selectedList === 'watchlist' ? 'active' : ''}`}
-            onClick={() => setSelectedList('watchlist')}>我的自选</div>
+          <div className={`list-tab ${mainView === 'stock' && selectedList === 'hot' ? 'active' : ''}`}
+            onClick={() => { setMainView('stock'); setSelectedList('hot') }}>热门股票</div>
+          <div className={`list-tab ${mainView === 'stock' && selectedList === 'watchlist' ? 'active' : ''}`}
+            onClick={() => { setMainView('stock'); setSelectedList('watchlist') }}>我的自选</div>
+          <div className={`list-tab ${mainView === 'arbitrage' ? 'active' : ''}`}
+            onClick={switchToArbitrage}>基金套利</div>
         </div>
 
-        <div className="stock-list">
-          {(selectedList === 'hot' ? HOT_STOCKS : watchlist).map(stock => (
-            <div
-              key={stock.code}
-              className={`stock-item ${selectedStock?.code === stock.code ? 'active' : ''}`}
-              onClick={() => loadStock(stock.code)}
-            >
-              <div className="stock-item-header">
-                <span className="code">{stock.code}</span>
-                <span className="name">{stock.name}</span>
-              </div>
-              {stock.price > 0 && (
-                <div className="stock-item-price">
-                  <span className="price">{stock.price.toFixed(2)}</span>
-                  <span className={`change ${stock.change_pct >= 0 ? 'up' : 'down'}`}>
-                    {stock.change_pct >= 0 ? '+' : ''}{stock.change_pct.toFixed(2)}%
-                  </span>
+        {mainView === 'stock' && (
+          <div className="stock-list">
+            {(selectedList === 'hot' ? HOT_STOCKS : watchlist).map(stock => (
+              <div
+                key={stock.code}
+                className={`stock-item ${selectedStock?.code === stock.code ? 'active' : ''}`}
+                onClick={() => loadStock(stock.code)}
+              >
+                <div className="stock-item-header">
+                  <span className="code">{stock.code}</span>
+                  <span className="name">{stock.name}</span>
                 </div>
-              )}
-            </div>
-          ))}
-        </div>
+                {stock.price > 0 && (
+                  <div className="stock-item-price">
+                    <span className="price">{stock.price.toFixed(2)}</span>
+                    <span className={`change ${stock.change_pct >= 0 ? 'up' : 'down'}`}>
+                      {stock.change_pct >= 0 ? '+' : ''}{stock.change_pct.toFixed(2)}%
+                    </span>
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+
+        {mainView === 'arbitrage' && (
+          <div className="stock-list" style={{ padding: '16px', color: '#999', fontSize: '13px', textAlign: 'center' }}>
+            <p>套利数据在右侧显示</p>
+            <p style={{ marginTop: '8px', fontSize: '12px' }}>集思录数据源</p>
+          </div>
+        )}
       </div>
 
       {/* 右侧内容 */}
@@ -335,6 +429,133 @@ function App() {
           <div className="loading">
             <div className="spinner"></div>
             加载中...
+          </div>
+        ) : mainView === 'arbitrage' ? (
+          /* 基金套利页面 */
+          <div className="arbitrage-page">
+            <div className="stock-header">
+              <div className="stock-title-row">
+                <div>
+                  <h2>场内外基金套利</h2>
+                  <span className="stock-code">LOF 折溢价监控 · 成交额≥300万 · 开放申购</span>
+                </div>
+                <div style={{ display: 'flex', gap: '8px' }}>
+                  <button className="btn-add" onClick={loadArbitrage}>刷新数据</button>
+                  {!arbLoggedIn && (
+                    <button className="btn-add" style={{ background: '#722ed1' }}
+                      onClick={() => setShowLogin(!showLogin)}>
+                      登录集思录
+                    </button>
+                  )}
+                </div>
+              </div>
+              <div className="data-freshness">
+                <span className="freshness-tag">数据来源: {arbDataSource}</span>
+                <span className="freshness-tag">更新时间: {arbFetchTime}</span>
+                <span className="freshness-tag">原始数据: {arbTotalBefore} 只</span>
+                <span className="freshness-tag">筛选后: {arbFunds.length} 只</span>
+                {arbLoggedIn && <span className="freshness-tag" style={{ color: '#52c41a' }}>已登录</span>}
+                {!arbLoggedIn && <span className="freshness-tag" style={{ color: '#faad14' }}>未登录(数据可能不全)</span>}
+              </div>
+            </div>
+
+            {/* 登录表单 */}
+            {showLogin && !arbLoggedIn && (
+              <div className="arb-login-box">
+                <div className="arb-login-title">登录集思录获取完整数据</div>
+                <div className="arb-login-form">
+                  <input
+                    type="text"
+                    placeholder="手机号/用户名"
+                    value={loginUser}
+                    onChange={(e) => setLoginUser(e.target.value)}
+                  />
+                  <input
+                    type="password"
+                    placeholder="密码"
+                    value={loginPass}
+                    onChange={(e) => setLoginPass(e.target.value)}
+                    onKeyDown={(e) => e.key === 'Enter' && handleLogin()}
+                  />
+                  <button className="btn-add" onClick={handleLogin} disabled={loginLoading}>
+                    {loginLoading ? '登录中...' : '登录'}
+                  </button>
+                </div>
+                {loginError && <div className="arb-login-error">{loginError}</div>}
+              </div>
+            )}
+
+            {/* 套利说明 */}
+            <div className="arb-info">
+              <div className="arb-info-item">
+                <span className="arb-info-label">溢价套利:</span>
+                <span>场外申购 → 转托管到场内 → 卖出 (T+3~T+4)</span>
+              </div>
+              <div className="arb-info-item">
+                <span className="arb-info-label">折价套利:</span>
+                <span>场内买入 → 转托管到场外 → 赎回 (T+2~T+3)</span>
+              </div>
+            </div>
+
+            {/* 套利表格 */}
+            {arbLoading ? (
+              <div className="loading">
+                <div className="spinner"></div>
+                加载中...
+              </div>
+            ) : (
+              <div className="table-container">
+                <table className="arb-table">
+                  <thead>
+                    <tr>
+                      <th>代码</th>
+                      <th>名称</th>
+                      <th>成交额(万)</th>
+                      <th>溢价率</th>
+                      <th>方向</th>
+                      <th>预估收益</th>
+                      <th>场内价</th>
+                      <th>场外净值</th>
+                      <th>申购限额</th>
+                      <th>申购状态</th>
+                      <th>赎回状态</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {arbFunds.map((f) => (
+                      <tr key={f.fund_id}>
+                        <td>{f.fund_id}</td>
+                        <td>{f.fund_nm}</td>
+                        <td>{f.turnover.toFixed(0)}</td>
+                        <td className={f.nav_discount_rt > 0 ? 'up' : 'down'}>
+                          {f.nav_discount_rt > 0 ? '+' : ''}{f.nav_discount_rt.toFixed(2)}%
+                        </td>
+                        <td>
+                          <span className={`arb-direction ${f.direction === '溢价' ? 'premium' : 'discount'}`}>
+                            {f.direction}
+                          </span>
+                        </td>
+                        <td className={f.estimated_profit > 0 ? 'up' : 'down'}>
+                          {f.estimated_profit > 0 ? '+' : ''}{f.estimated_profit.toFixed(3)}%
+                        </td>
+                        <td>{f.price.toFixed(3)}</td>
+                        <td>{f.fund_nav.toFixed(4)}</td>
+                        <td style={{ fontSize: '11px', maxWidth: '120px' }}>{f.apply_limit || '-'}</td>
+                        <td>{f.apply_status || '-'}</td>
+                        <td>{f.redeem_status || '-'}</td>
+                      </tr>
+                    ))}
+                    {arbFunds.length === 0 && (
+                      <tr>
+                        <td colSpan={11} style={{ textAlign: 'center', padding: '40px', color: '#999' }}>
+                          暂无符合条件的套利机会
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </div>
         ) : selectedStock ? (
           <>

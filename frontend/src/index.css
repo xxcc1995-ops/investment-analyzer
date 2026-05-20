@@ -596,3 +596,123 @@ tr:hover td {
 @keyframes spin {
   to { transform: rotate(360deg); }
 }
+
+/* 基金套利页面 */
+.arbitrage-page {
+  padding: 0;
+}
+
+.arb-filters {
+  background: #fff;
+  padding: 16px 20px;
+  border-radius: 8px;
+  margin-bottom: 16px;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.05);
+  display: flex;
+  align-items: center;
+  gap: 20px;
+}
+
+.filter-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.filter-group label {
+  font-size: 13px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+.filter-group select {
+  padding: 6px 12px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font-size: 13px;
+  background: #fff;
+  cursor: pointer;
+}
+
+.arb-info {
+  background: #fff;
+  padding: 12px 20px;
+  border-radius: 8px;
+  margin-bottom: 16px;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.05);
+  display: flex;
+  gap: 32px;
+  font-size: 12px;
+  color: var(--text-light);
+}
+
+.arb-info-label {
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.arb-table th,
+.arb-table td {
+  padding: 10px 12px;
+  font-size: 12px;
+}
+
+.arb-direction {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.arb-direction.premium {
+  background: rgba(255, 77, 79, 0.1);
+  color: #ff4d4f;
+}
+
+.arb-direction.discount {
+  background: rgba(82, 196, 26, 0.1);
+  color: #52c41a;
+}
+
+/* 登录框 */
+.arb-login-box {
+  background: #fff;
+  padding: 16px 20px;
+  border-radius: 8px;
+  margin-bottom: 16px;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.05);
+  border: 1px solid #f0f0f0;
+}
+
+.arb-login-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  margin-bottom: 12px;
+}
+
+.arb-login-form {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.arb-login-form input {
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font-size: 13px;
+  width: 200px;
+}
+
+.arb-login-form input:focus {
+  outline: none;
+  border-color: var(--primary);
+}
+
+.arb-login-error {
+  margin-top: 8px;
+  color: var(--danger);
+  font-size: 12px;
+}
