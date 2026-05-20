@@ -1,6 +1,9 @@
 import { useState, useEffect, useCallback } from 'react'
 import axios from 'axios'
 import ReactECharts from 'echarts-for-react'
+import HKIpoPage from './pages/HKIpoPage'
+import IndexValuation from './pages/IndexValuation'
+import USMarket from './pages/USMarket'
 
 const API_BASE = '/api'
 
@@ -18,6 +21,8 @@ interface StockBasic {
   pe: number | null
   pb: number | null
   market_cap: number
+  trade_date?: string
+  trade_time?: string
 }
 
 interface FinancialReport {
@@ -62,18 +67,40 @@ interface FundArbitrage {
   estimated_profit: number
 }
 
+interface ConvertibleBond {
+  bond_id: string
+  bond_nm: string
+  stock_id: string
+  stock_nm: string
+  price: number
+  convert_price: number
+  convert_value: number
+  premium_rt: number
+  double_low: number
+  maturity_dt: string
+  year_left: number
+  rating_cd: string
+  curr_iss_amt: number
+  turnover: number
+  stock_price: number
+  stock_change: number
+  bond_change: number
+  force_redeem: string
+  is_matured: boolean
+}
+
 // 热门股票列表
-const HOT_STOCKS = [
-  { code: '600519', name: '贵州茅台' },
-  { code: '000858', name: '五粮液' },
-  { code: '600036', name: '招商银行' },
-  { code: '601318', name: '中国平安' },
-  { code: '000333', name: '美的集团' },
-  { code: '002714', name: '牧原股份' },
-  { code: '300750', name: '宁德时代' },
-  { code: '600900', name: '长江电力' },
-  { code: '601888', name: '中国中免' },
-  { code: '000568', name: '泸州老窖' },
+const HOT_STOCKS: StockBasic[] = [
+  { code: '600519', name: '贵州茅台', price: 0, open: 0, high: 0, low: 0, pre_close: 0, change_pct: 0, volume: 0, amount: 0, pe: null, pb: null, market_cap: 0 },
+  { code: '000858', name: '五粮液', price: 0, open: 0, high: 0, low: 0, pre_close: 0, change_pct: 0, volume: 0, amount: 0, pe: null, pb: null, market_cap: 0 },
+  { code: '600036', name: '招商银行', price: 0, open: 0, high: 0, low: 0, pre_close: 0, change_pct: 0, volume: 0, amount: 0, pe: null, pb: null, market_cap: 0 },
+  { code: '601318', name: '中国平安', price: 0, open: 0, high: 0, low: 0, pre_close: 0, change_pct: 0, volume: 0, amount: 0, pe: null, pb: null, market_cap: 0 },
+  { code: '000333', name: '美的集团', price: 0, open: 0, high: 0, low: 0, pre_close: 0, change_pct: 0, volume: 0, amount: 0, pe: null, pb: null, market_cap: 0 },
+  { code: '002714', name: '牧原股份', price: 0, open: 0, high: 0, low: 0, pre_close: 0, change_pct: 0, volume: 0, amount: 0, pe: null, pb: null, market_cap: 0 },
+  { code: '300750', name: '宁德时代', price: 0, open: 0, high: 0, low: 0, pre_close: 0, change_pct: 0, volume: 0, amount: 0, pe: null, pb: null, market_cap: 0 },
+  { code: '600900', name: '长江电力', price: 0, open: 0, high: 0, low: 0, pre_close: 0, change_pct: 0, volume: 0, amount: 0, pe: null, pb: null, market_cap: 0 },
+  { code: '601888', name: '中国中免', price: 0, open: 0, high: 0, low: 0, pre_close: 0, change_pct: 0, volume: 0, amount: 0, pe: null, pb: null, market_cap: 0 },
+  { code: '000568', name: '泸州老窖', price: 0, open: 0, high: 0, low: 0, pre_close: 0, change_pct: 0, volume: 0, amount: 0, pe: null, pb: null, market_cap: 0 },
 ]
 
 function App() {
@@ -92,8 +119,30 @@ function App() {
   const [fetchTime, setFetchTime] = useState('')
   const [latestReport, setLatestReport] = useState('')
 
+  // 期权计算状态
+  const [optionTab, setOptionTab] = useState<'put' | 'call'>('put')
+  const [putPremium, setPutPremium] = useState('')
+  const [putStrike, setPutStrike] = useState('')
+  const [putDays, setPutDays] = useState('')
+  const [putResult, setPutResult] = useState<{ annualYield: number; profit: number; annualFactor: number } | null>(null)
+  const [callCurrentPrice, setCallCurrentPrice] = useState('')
+  const [callPremium, setCallPremium] = useState('')
+  const [callStrike, setCallStrike] = useState('')
+  const [callDays, setCallDays] = useState('')
+  const [callResult, setCallResult] = useState<{ annualYield: number; totalProfit: number; investment: number } | null>(null)
+
+  // 可转债双低状态
+  const [cbBonds, setCbBonds] = useState<ConvertibleBond[]>([])
+  const [cbLoading, setCbLoading] = useState(false)
+  const [cbFetchTime, setCbFetchTime] = useState('')
+  const [cbTotalBefore, setCbTotalBefore] = useState(0)
+  const [cbTotal, setCbTotal] = useState(0)
+  const [cbMaxDoubleLow, setCbMaxDoubleLow] = useState(130)
+  const [cbTopN, setCbTopN] = useState(20)
+  const [cbLoggedIn, setCbLoggedIn] = useState(false)
+
   // 基金套利状态
-  const [mainView, setMainView] = useState<'stock' | 'arbitrage'>('stock')
+  const [mainView, setMainView] = useState<'stock' | 'arbitrage' | 'option' | 'cb' | 'hki' | 'indexVal' | 'usMarket'>('stock')
   const [arbFunds, setArbFunds] = useState<FundArbitrage[]>([])
   const [arbLoading, setArbLoading] = useState(false)
   const [arbFetchTime, setArbFetchTime] = useState('')
@@ -105,6 +154,25 @@ function App() {
   const [loginPass, setLoginPass] = useState('')
   const [loginLoading, setLoginLoading] = useState(false)
   const [loginError, setLoginError] = useState('')
+
+  // 国债收益率状态
+  const [bondYields, setBondYields] = useState<{ cn: any; us: any } | null>(null)
+  const [bondLoading, setBondLoading] = useState(false)
+
+  // 加载国债收益率
+  const loadBondYields = useCallback(async () => {
+    setBondLoading(true)
+    try {
+      const res = await axios.get(`${API_BASE}/bonds/yields`)
+      setBondYields({ cn: res.data.cn, us: res.data.us })
+    } catch (e) {
+      console.error('获取国债收益率失败:', e)
+    } finally {
+      setBondLoading(false)
+    }
+  }, [])
+
+  useEffect(() => { loadBondYields() }, [loadBondYields])
 
   // 搜索股票
   const handleSearch = useCallback(async (keyword: string) => {
@@ -163,7 +231,7 @@ function App() {
     setArbLoading(true)
     try {
       const res = await axios.get(`${API_BASE}/funds/arbitrage`, {
-        params: { min_turnover: 300, open_subscribe_only: true }
+        params: { min_threshold: 3, min_turnover: 1000, open_subscribe_only: false }
       })
       setArbFunds(res.data.funds || [])
       setArbFetchTime(res.data.fetch_time || '')
@@ -203,6 +271,72 @@ function App() {
   const switchToArbitrage = () => {
     setMainView('arbitrage')
     loadArbitrage()
+  }
+
+  // 加载可转债双低数据
+  const loadCB = async (maxDoubleLow?: number, topN?: number) => {
+    setCbLoading(true)
+    try {
+      const res = await axios.get(`${API_BASE}/cb/double-low`, {
+        params: {
+          max_double_low: maxDoubleLow ?? cbMaxDoubleLow,
+          top_n: topN ?? cbTopN,
+          min_turnover: 100,
+          min_year_left: 1,
+          exclude_st: true,
+          exclude_force_redeem: true,
+        }
+      })
+      setCbBonds(res.data.bonds || [])
+      setCbFetchTime(res.data.fetch_time || '')
+      setCbTotalBefore(res.data.total_before_filter || 0)
+      setCbTotal(res.data.total || 0)
+      setCbLoggedIn(res.data.logged_in || false)
+    } catch (err) {
+      console.error('加载可转债数据失败:', err)
+    } finally {
+      setCbLoading(false)
+    }
+  }
+
+  // 切换到可转债视图
+  const switchToCB = () => {
+    setMainView('cb')
+    loadCB()
+  }
+
+  // Sell Put 计算
+  const calculatePut = () => {
+    const premium = parseFloat(putPremium)
+    const strike = parseFloat(putStrike)
+    const days = parseInt(putDays)
+    if (isNaN(premium) || isNaN(strike) || isNaN(days) || premium <= 0 || strike <= 0 || days <= 0) return
+    if (strike - premium <= 0) return
+    const profit = premium
+    const annualFactor = 365 / days
+    const annualYield = (profit / (strike - profit)) * annualFactor * 100
+    setPutResult({ annualYield, profit, annualFactor })
+  }
+
+  // Sell Call 计算
+  const calculateCall = () => {
+    const currentPrice = parseFloat(callCurrentPrice)
+    const premium = parseFloat(callPremium)
+    const strike = parseFloat(callStrike)
+    const days = parseInt(callDays)
+    if (isNaN(currentPrice) || isNaN(premium) || isNaN(strike) || isNaN(days)) return
+    if (currentPrice <= 0 || days <= 0 || currentPrice - premium <= 0) return
+    const totalProfit = strike - currentPrice + premium
+    const investment = currentPrice - premium
+    const annualYield = (totalProfit / investment) * (365 / days) * 100
+    setCallResult({ annualYield, totalProfit, investment })
+  }
+
+  // 年化收益率颜色
+  const getYieldColor = (value: number) => {
+    if (value >= 30) return '#52c41a'
+    if (value >= 15) return '#faad14'
+    return '#ff4d4f'
   }
 
   // 格式化数字
@@ -380,6 +514,83 @@ function App() {
           </div>
         </div>
 
+        {/* 国债收益率 & 股债比 */}
+        <div style={{
+          padding: '12px 16px',
+          borderBottom: '1px solid var(--border)',
+          background: 'var(--bg)',
+        }}>
+          <div style={{ fontSize: '12px', color: '#999', marginBottom: '8px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <span>十年期国债收益率 & 股债比</span>
+            <span
+              onClick={loadBondYields}
+              style={{ cursor: 'pointer', color: '#1890ff' }}
+            >
+              {bondLoading ? '...' : '刷新'}
+            </span>
+          </div>
+          <div style={{ display: 'flex', gap: '12px' }}>
+            {/* 中国 */}
+            <div style={{ flex: 1, background: 'var(--card)', borderRadius: '8px', padding: '10px' }}>
+              <div style={{ fontSize: '11px', color: '#999', marginBottom: '4px' }}>
+                中国 · 沪深300
+              </div>
+              <div style={{ fontSize: '20px', fontWeight: 700, color: '#d4380d' }}>
+                {bondYields?.cn?.yield?.toFixed(2) ?? '--'}%
+              </div>
+              <div style={{
+                fontSize: '11px',
+                marginTop: '2px',
+                color: (bondYields?.cn?.change ?? 0) >= 0 ? '#cf1322' : '#3f8600',
+              }}>
+                {bondYields?.cn?.change != null
+                  ? `${bondYields.cn.change >= 0 ? '+' : ''}${bondYields.cn.change.toFixed(3)}`
+                  : '--'}
+              </div>
+              <div style={{ fontSize: '11px', color: '#666', marginTop: '6px', borderTop: '1px dashed var(--border)', paddingTop: '6px' }}>
+                <div>PE: {bondYields?.cn?.pe ?? '--'}</div>
+                <div style={{ marginTop: '2px' }}>
+                  股债比: <span style={{
+                    fontWeight: 600,
+                    color: (bondYields?.cn?.stock_bond_ratio ?? 0) > 1 ? '#3f8600' : '#cf1322',
+                  }}>
+                    {bondYields?.cn?.stock_bond_ratio?.toFixed(2) ?? '--'}
+                  </span>
+                </div>
+              </div>
+            </div>
+            {/* 美国 */}
+            <div style={{ flex: 1, background: 'var(--card)', borderRadius: '8px', padding: '10px' }}>
+              <div style={{ fontSize: '11px', color: '#999', marginBottom: '4px' }}>
+                美国 · 标普500
+              </div>
+              <div style={{ fontSize: '20px', fontWeight: 700, color: '#096dd9' }}>
+                {bondYields?.us?.yield?.toFixed(2) ?? '--'}%
+              </div>
+              <div style={{
+                fontSize: '11px',
+                marginTop: '2px',
+                color: (bondYields?.us?.change ?? 0) >= 0 ? '#cf1322' : '#3f8600',
+              }}>
+                {bondYields?.us?.change != null
+                  ? `${bondYields.us.change >= 0 ? '+' : ''}${bondYields.us.change.toFixed(3)}`
+                  : '--'}
+              </div>
+              <div style={{ fontSize: '11px', color: '#666', marginTop: '6px', borderTop: '1px dashed var(--border)', paddingTop: '6px' }}>
+                <div>PE: {bondYields?.us?.pe ?? '--'}</div>
+                <div style={{ marginTop: '2px' }}>
+                  股债比: <span style={{
+                    fontWeight: 600,
+                    color: (bondYields?.us?.stock_bond_ratio ?? 0) > 1 ? '#3f8600' : '#cf1322',
+                  }}>
+                    {bondYields?.us?.stock_bond_ratio?.toFixed(2) ?? '--'}
+                  </span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
         {/* Tab切换 */}
         <div className="list-tabs">
           <div className={`list-tab ${mainView === 'stock' && selectedList === 'hot' ? 'active' : ''}`}
@@ -388,6 +599,16 @@ function App() {
             onClick={() => { setMainView('stock'); setSelectedList('watchlist') }}>我的自选</div>
           <div className={`list-tab ${mainView === 'arbitrage' ? 'active' : ''}`}
             onClick={switchToArbitrage}>基金套利</div>
+          <div className={`list-tab ${mainView === 'option' ? 'active' : ''}`}
+            onClick={() => setMainView('option')}>期权计算</div>
+          <div className={`list-tab ${mainView === 'cb' ? 'active' : ''}`}
+            onClick={switchToCB}>可转债</div>
+          <div className={`list-tab ${mainView === 'hki' ? 'active' : ''}`}
+            onClick={() => setMainView('hki')}>港新</div>
+          <div className={`list-tab ${mainView === 'indexVal' ? 'active' : ''}`}
+            onClick={() => setMainView('indexVal')}>指数估值</div>
+          <div className={`list-tab ${mainView === 'usMarket' ? 'active' : ''}`}
+            onClick={() => setMainView('usMarket')}>美股/币</div>
         </div>
 
         {mainView === 'stock' && (
@@ -421,6 +642,34 @@ function App() {
             <p style={{ marginTop: '8px', fontSize: '12px' }}>集思录数据源</p>
           </div>
         )}
+
+        {mainView === 'option' && (
+          <div className="stock-list" style={{ padding: '16px', color: '#999', fontSize: '13px', textAlign: 'center' }}>
+            <p>期权计算器</p>
+            <p style={{ marginTop: '8px', fontSize: '12px' }}>Sell Put / Sell Call</p>
+          </div>
+        )}
+
+        {mainView === 'cb' && (
+          <div className="stock-list" style={{ padding: '16px', color: '#999', fontSize: '13px', textAlign: 'center' }}>
+            <p>可转债双低策略</p>
+            <p style={{ marginTop: '8px', fontSize: '12px' }}>双低值 = 价格 + 溢价率</p>
+          </div>
+        )}
+
+        {mainView === 'hki' && (
+          <div className="stock-list" style={{ padding: '16px', color: '#999', fontSize: '13px', textAlign: 'center' }}>
+            <p>港股打新工具箱</p>
+            <p style={{ marginTop: '8px', fontSize: '12px' }}>新股日历 · 收益分析 · 模拟器</p>
+          </div>
+        )}
+
+        {mainView === 'indexVal' && (
+          <div className="stock-list" style={{ padding: '16px', color: '#999', fontSize: '13px', textAlign: 'center' }}>
+            <p>指数估值</p>
+            <p style={{ marginTop: '8px', fontSize: '12px' }}>PE · PB · ROE · 股息率</p>
+          </div>
+        )}
       </div>
 
       {/* 右侧内容 */}
@@ -430,6 +679,287 @@ function App() {
             <div className="spinner"></div>
             加载中...
           </div>
+        ) : mainView === 'hki' ? (
+          <HKIpoPage />
+        ) : mainView === 'indexVal' ? (
+          <IndexValuation />
+        ) : mainView === 'usMarket' ? (
+          <USMarket />
+        ) : mainView === 'option' ? (
+          /* 期权收益计算器 */
+          <div className="option-page">
+            <div className="stock-header">
+              <div className="stock-title-row">
+                <div>
+                  <h2>期权年化收益计算器</h2>
+                  <span className="stock-code">Sell Put / Sell Call 年化收益率计算</span>
+                </div>
+              </div>
+            </div>
+
+            <div className="option-tabs">
+              <div className={`option-tab ${optionTab === 'put' ? 'active' : ''}`}
+                onClick={() => setOptionTab('put')}>Sell Put</div>
+              <div className={`option-tab ${optionTab === 'call' ? 'active' : ''}`}
+                onClick={() => setOptionTab('call')}>Sell Call</div>
+            </div>
+
+            <div className="option-form-card">
+              {optionTab === 'put' ? (
+                <>
+                  <div className="option-form-group">
+                    <label>权利金收入</label>
+                    <input type="number" min="0" step="0.01" placeholder="权利金"
+                      value={putPremium} onChange={e => setPutPremium(e.target.value)} />
+                  </div>
+                  <div className="option-form-group">
+                    <label>行权价</label>
+                    <input type="number" min="0" step="0.01" placeholder="行权价"
+                      value={putStrike} onChange={e => setPutStrike(e.target.value)} />
+                  </div>
+                  <div className="option-form-group">
+                    <label>到期天数</label>
+                    <input type="number" min="1" max="365" placeholder="到期天数"
+                      value={putDays} onChange={e => setPutDays(e.target.value)} />
+                  </div>
+                  <button className="option-btn" onClick={calculatePut}>计算年化收益率</button>
+
+                  {putResult && (
+                    <div className="option-result">
+                      <div className="option-result-header">年化收益率</div>
+                      <div className="option-result-value" style={{ color: getYieldColor(putResult.annualYield) }}>
+                        {putResult.annualYield.toFixed(2)}%
+                      </div>
+                      <div className="option-result-details">
+                        <div className="option-detail-row">
+                          <span>期权利润：</span>
+                          <span>¥{putResult.profit.toFixed(2)}</span>
+                        </div>
+                        <div className="option-detail-row">
+                          <span>年化系数：</span>
+                          <span>{putResult.annualFactor.toFixed(2)}</span>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </>
+              ) : (
+                <>
+                  <div className="option-form-group">
+                    <label>现价</label>
+                    <input type="number" step="0.01" placeholder="现价"
+                      value={callCurrentPrice} onChange={e => setCallCurrentPrice(e.target.value)} />
+                  </div>
+                  <div className="option-form-group">
+                    <label>权利金收入</label>
+                    <input type="number" step="0.01" placeholder="权利金"
+                      value={callPremium} onChange={e => setCallPremium(e.target.value)} />
+                  </div>
+                  <div className="option-form-group">
+                    <label>行权价</label>
+                    <input type="number" step="0.01" placeholder="行权价"
+                      value={callStrike} onChange={e => setCallStrike(e.target.value)} />
+                  </div>
+                  <div className="option-form-group">
+                    <label>到期天数</label>
+                    <input type="number" min="1" placeholder="到期天数"
+                      value={callDays} onChange={e => setCallDays(e.target.value)} />
+                  </div>
+                  <button className="option-btn" onClick={calculateCall}>计算年化收益率</button>
+
+                  {callResult && (
+                    <div className="option-result">
+                      <div className="option-result-header">年化收益率</div>
+                      <div className="option-result-value" style={{ color: getYieldColor(callResult.annualYield) }}>
+                        {callResult.annualYield.toFixed(2)}%
+                      </div>
+                      <div className="option-result-details">
+                        <div className="option-detail-row">
+                          <span>总收益：</span>
+                          <span>¥{callResult.totalProfit.toFixed(2)}</span>
+                        </div>
+                        <div className="option-detail-row">
+                          <span>投资金额：</span>
+                          <span>¥{callResult.investment.toFixed(2)}</span>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+
+            <div className="option-notes">
+              <h3>使用说明</h3>
+              <div className="option-notes-content">
+                <div className="option-note-section">
+                  <h4>Sell Put 计算器</h4>
+                  <p>适用于未被行权的情况</p>
+                  <p className="option-formula">年化收益率 = (权利金 / (行权价 - 权利金)) × (365 / 到期天数)</p>
+                </div>
+                <div className="option-note-section">
+                  <h4>Sell Call 计算器</h4>
+                  <p>适用于被行权的情况</p>
+                  <p className="option-formula">年化收益率 = (行权价 - 现价 + 权利金) / (现价 - 权利金) × (365 / 到期天数)</p>
+                </div>
+                <div className="option-note-section">
+                  <p style={{ color: '#999', fontSize: '13px', marginTop: '8px' }}>实际交易中请考虑交易成本、滑点等因素。</p>
+                </div>
+              </div>
+            </div>
+          </div>
+        ) : mainView === 'cb' ? (
+          /* 可转债双低轮动策略 */
+          <div className="cb-page">
+            <div className="stock-header">
+              <div className="stock-title-row">
+                <div>
+                  <h2>可转债双低轮动策略</h2>
+                  <span className="stock-code">双低值 = 转债价格 + 转股溢价率 · 低价格 + 低溢价率</span>
+                </div>
+                <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                  <select value={cbMaxDoubleLow} onChange={e => { setCbMaxDoubleLow(Number(e.target.value)); loadCB(Number(e.target.value), cbTopN) }}
+                    style={{ padding: '6px 10px', border: '1px solid var(--border)', borderRadius: '4px', fontSize: '13px' }}>
+                    <option value={120}>双低 ≤ 120</option>
+                    <option value={130}>双低 ≤ 130</option>
+                    <option value={140}>双低 ≤ 140</option>
+                    <option value={150}>双低 ≤ 150</option>
+                    <option value={999}>不限</option>
+                  </select>
+                  <select value={cbTopN} onChange={e => { setCbTopN(Number(e.target.value)); loadCB(cbMaxDoubleLow, Number(e.target.value)) }}
+                    style={{ padding: '6px 10px', border: '1px solid var(--border)', borderRadius: '4px', fontSize: '13px' }}>
+                    <option value={10}>前10只</option>
+                    <option value={20}>前20只</option>
+                    <option value={30}>前30只</option>
+                    <option value={50}>前50只</option>
+                  </select>
+                  <button className="btn-add" onClick={() => loadCB()}>刷新数据</button>
+                </div>
+              </div>
+              <div className="data-freshness">
+                <span className="freshness-tag">更新时间: {cbFetchTime}</span>
+                <span className="freshness-tag">原始数据: {cbTotalBefore} 只</span>
+                <span className="freshness-tag">筛选后: {cbTotal} 只</span>
+                <span className="freshness-tag">显示: {cbBonds.length} 只</span>
+              </div>
+            </div>
+
+            {/* 策略说明 */}
+            <div className="arb-notes">
+              <h3>双低轮动策略说明</h3>
+              <div className="arb-notes-grid">
+                <div className="arb-note-item">
+                  <span className="arb-note-label">双低值</span>
+                  <span className="arb-note-value">价格 + 溢价率</span>
+                  <span className="arb-note-desc">兼顾债性保护（低价格）和股性弹性（低溢价率）</span>
+                </div>
+                <div className="arb-note-item">
+                  <span className="arb-note-label">筛选条件</span>
+                  <span className="arb-note-value">双低 ≤ {cbMaxDoubleLow}</span>
+                  <span className="arb-note-desc">排除ST、强赎、剩余年限&lt;1年、成交额&lt;100万</span>
+                </div>
+                <div className="arb-note-item">
+                  <span className="arb-note-label">轮动周期</span>
+                  <span className="arb-note-value">1~2周</span>
+                  <span className="arb-note-desc">定期按最新双低排名调仓，卖出排名下滑标的</span>
+                </div>
+                <div className="arb-note-item">
+                  <span className="arb-note-label">卖出条件</span>
+                  <span className="arb-note-value">双低 &gt; 130</span>
+                  <span className="arb-note-desc">双低值超过阈值、触发强赎、正股重大风险</span>
+                </div>
+              </div>
+            </div>
+
+            {/* 双低排名表格 */}
+            {cbLoading ? (
+              <div className="loading">
+                <div className="spinner"></div>
+                加载中...
+              </div>
+            ) : (
+              <div className="table-container">
+                <div className="arb-section-title">双低排名（按双低值升序）</div>
+                <table className="arb-table">
+                  <thead>
+                    <tr>
+                      <th>排名</th>
+                      <th>代码</th>
+                      <th>转债名称</th>
+                      <th>现价</th>
+                      <th>转股溢价率(%)</th>
+                      <th>双低值</th>
+                      <th>正股名称</th>
+                      <th>正股价</th>
+                      <th>评级</th>
+                      <th>剩余年限</th>
+                      <th>成交额(万)</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {cbBonds.map((b, i) => (
+                      <tr key={b.bond_id}>
+                        <td>{i + 1}</td>
+                        <td>{b.bond_id}</td>
+                        <td>{b.bond_nm}</td>
+                        <td>{b.price.toFixed(2)}</td>
+                        <td className={b.premium_rt <= 0 ? 'down' : ''}>{b.premium_rt.toFixed(2)}</td>
+                        <td style={{ fontWeight: 700, color: b.double_low <= 120 ? '#52c41a' : b.double_low <= 130 ? '#1890ff' : '#faad14' }}>
+                          {b.double_low.toFixed(2)}
+                        </td>
+                        <td>{b.stock_nm}</td>
+                        <td>{b.stock_price.toFixed(2)}</td>
+                        <td>{b.rating_cd}</td>
+                        <td>{b.year_left.toFixed(1)}</td>
+                        <td>{b.turnover.toFixed(0)}</td>
+                      </tr>
+                    ))}
+                    {cbBonds.length === 0 && (
+                      <tr>
+                        <td colSpan={11} style={{ textAlign: 'center', padding: '40px', color: '#999' }}>
+                          暂无符合条件的可转债
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            )}
+
+            {/* 注意事项 */}
+            <div className="arb-notes">
+              <h3>可转债双低策略注意事项</h3>
+              <div className="arb-notes-content">
+                <div className="arb-risk-section">
+                  <h4>策略优势</h4>
+                  <ul>
+                    <li><strong>低价格</strong>：价格低意味着下跌空间有限，债底保护强</li>
+                    <li><strong>低溢价率</strong>：溢价率低意味着跟涨能力强，股性好</li>
+                    <li><strong>两者结合</strong>：同时满足"债性保护"和"股性弹性"，攻守兼备</li>
+                    <li>规则简单、可量化、可执行，历史回测长期年化收益约8%~15%</li>
+                  </ul>
+                </div>
+                <div className="arb-risk-section">
+                  <h4>轮动操作</h4>
+                  <ul>
+                    <li>每1~2周按最新双低排名调仓一次</li>
+                    <li>卖出排名跌出前N的转债，买入新进入前N的转债</li>
+                    <li>转债触发强赎或到期时及时卖出</li>
+                    <li>建议等权持有10~20只分散风险</li>
+                  </ul>
+                </div>
+                <div className="arb-risk-section">
+                  <h4>风险提示</h4>
+                  <ul>
+                    <li><strong>信用风险</strong>：低评级转债可能存在违约风险，建议选择AA-以上评级</li>
+                    <li><strong>流动性风险</strong>：成交额过小的转债难以按预期价格买卖</li>
+                    <li><strong>市场风险</strong>：极端熊市中双低策略仍有回撤，但通常小于正股</li>
+                    <li><strong>强赎风险</strong>：关注强赎公告，避免被低价赎回</li>
+                  </ul>
+                </div>
+              </div>
+            </div>
+          </div>
         ) : mainView === 'arbitrage' ? (
           /* 基金套利页面 */
           <div className="arbitrage-page">
@@ -437,7 +967,7 @@ function App() {
               <div className="stock-title-row">
                 <div>
                   <h2>场内外基金套利</h2>
-                  <span className="stock-code">LOF 折溢价监控 · 成交额≥300万 · 开放申购</span>
+                  <span className="stock-code">LOF 折溢价监控 · 溢价率≥3% · 成交额＞1000万</span>
                 </div>
                 <div style={{ display: 'flex', gap: '8px' }}>
                   <button className="btn-add" onClick={loadArbitrage}>刷新数据</button>
@@ -504,57 +1034,156 @@ function App() {
                 加载中...
               </div>
             ) : (
-              <div className="table-container">
-                <table className="arb-table">
-                  <thead>
-                    <tr>
-                      <th>代码</th>
-                      <th>名称</th>
-                      <th>成交额(万)</th>
-                      <th>溢价率</th>
-                      <th>方向</th>
-                      <th>预估收益</th>
-                      <th>场内价</th>
-                      <th>场外净值</th>
-                      <th>申购限额</th>
-                      <th>申购状态</th>
-                      <th>赎回状态</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {arbFunds.map((f) => (
-                      <tr key={f.fund_id}>
-                        <td>{f.fund_id}</td>
-                        <td>{f.fund_nm}</td>
-                        <td>{f.turnover.toFixed(0)}</td>
-                        <td className={f.nav_discount_rt > 0 ? 'up' : 'down'}>
-                          {f.nav_discount_rt > 0 ? '+' : ''}{f.nav_discount_rt.toFixed(2)}%
-                        </td>
-                        <td>
-                          <span className={`arb-direction ${f.direction === '溢价' ? 'premium' : 'discount'}`}>
-                            {f.direction}
-                          </span>
-                        </td>
-                        <td className={f.estimated_profit > 0 ? 'up' : 'down'}>
-                          {f.estimated_profit > 0 ? '+' : ''}{f.estimated_profit.toFixed(3)}%
-                        </td>
-                        <td>{f.price.toFixed(3)}</td>
-                        <td>{f.fund_nav.toFixed(4)}</td>
-                        <td style={{ fontSize: '11px', maxWidth: '120px' }}>{f.apply_limit || '-'}</td>
-                        <td>{f.apply_status || '-'}</td>
-                        <td>{f.redeem_status || '-'}</td>
-                      </tr>
-                    ))}
-                    {arbFunds.length === 0 && (
+              <>
+                {/* 溢价LOF */}
+                <div className="table-container">
+                  <div className="arb-section-title">溢价LOF（场外申购 → 转托管 → 场内卖出）</div>
+                  <table className="arb-table">
+                    <thead>
                       <tr>
-                        <td colSpan={11} style={{ textAlign: 'center', padding: '40px', color: '#999' }}>
-                          暂无符合条件的套利机会
-                        </td>
+                        <th>序号</th>
+                        <th>代码</th>
+                        <th>名称</th>
+                        <th>溢价</th>
+                        <th>交易额(万)</th>
+                        <th>限购(元)</th>
                       </tr>
-                    )}
-                  </tbody>
-                </table>
-              </div>
+                    </thead>
+                    <tbody>
+                      {arbFunds.filter(f => f.direction === '溢价').map((f, i) => (
+                        <tr key={f.fund_id}>
+                          <td>{i + 1}</td>
+                          <td>{f.fund_id}</td>
+                          <td>{f.fund_nm}</td>
+                          <td className="up">+{f.nav_discount_rt.toFixed(2)}%</td>
+                          <td>{f.turnover.toFixed(0)}</td>
+                          <td>{f.apply_limit || '-'}</td>
+                        </tr>
+                      ))}
+                      {arbFunds.filter(f => f.direction === '溢价').length === 0 && (
+                        <tr>
+                          <td colSpan={6} style={{ textAlign: 'center', padding: '40px', color: '#999' }}>
+                            暂无溢价LOF基金
+                          </td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+
+                {/* 折价LOF */}
+                <div className="table-container">
+                  <div className="arb-section-title">折价LOF（场内买入 → 转托管 → 场外赎回）</div>
+                  <table className="arb-table">
+                    <thead>
+                      <tr>
+                        <th>序号</th>
+                        <th>代码</th>
+                        <th>名称</th>
+                        <th>折价</th>
+                        <th>交易额(万)</th>
+                        <th>限购(元)</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {arbFunds.filter(f => f.direction === '折价').map((f, i) => (
+                        <tr key={f.fund_id}>
+                          <td>{i + 1}</td>
+                          <td>{f.fund_id}</td>
+                          <td>{f.fund_nm}</td>
+                          <td className="down">{f.nav_discount_rt.toFixed(2)}%</td>
+                          <td>{f.turnover.toFixed(0)}</td>
+                          <td>{f.apply_limit || '-'}</td>
+                        </tr>
+                      ))}
+                      {arbFunds.filter(f => f.direction === '折价').length === 0 && (
+                        <tr>
+                          <td colSpan={6} style={{ textAlign: 'center', padding: '40px', color: '#999' }}>
+                            暂无折价LOF基金
+                          </td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+
+                {/* 筛选逻辑说明 */}
+                <div className="arb-notes">
+                  <h3>当前筛选逻辑</h3>
+                  <div className="arb-notes-grid">
+                    <div className="arb-note-item">
+                      <span className="arb-note-label">溢价率阈值</span>
+                      <span className="arb-note-value">≥ 3%</span>
+                      <span className="arb-note-desc">低于此阈值的套利空间不足以覆盖交易成本和时间风险</span>
+                    </div>
+                    <div className="arb-note-item">
+                      <span className="arb-note-label">最低成交额</span>
+                      <span className="arb-note-value">&gt; 1000万</span>
+                      <span className="arb-note-desc">确保流动性，避免卖不出去或冲击成本过大</span>
+                    </div>
+                    <div className="arb-note-item">
+                      <span className="arb-note-label">基金类型</span>
+                      <span className="arb-note-value">LOF基金</span>
+                      <span className="arb-note-desc">仅显示可场内外转托管的LOF基金</span>
+                    </div>
+                    <div className="arb-note-item">
+                      <span className="arb-note-label">数据来源</span>
+                      <span className="arb-note-value">集思录</span>
+                      <span className="arb-note-desc">登录后可获取完整数据，未登录数据可能不全</span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* 注意事项 */}
+                <div className="arb-notes">
+                  <h3>基金折溢价套利注意事项</h3>
+                  <div className="arb-notes-content">
+                    <div className="arb-risk-section">
+                      <h4>时间风险（核心风险）</h4>
+                      <ul>
+                        <li><strong>溢价套利</strong>：场外申购 → T+1确认份额 → T+2转托管到账 → 场内卖出，全程约3-4个工作日</li>
+                        <li><strong>折价套利</strong>：场内买入 → T+1转托管到场外 → T+2赎回，全程约2-3个工作日</li>
+                        <li>等待期间基金净值可能大幅波动，溢价/折价可能消失甚至反转</li>
+                      </ul>
+                    </div>
+                    <div className="arb-risk-section">
+                      <h4>流动性风险</h4>
+                      <ul>
+                        <li>场内成交量过低会导致无法按预期价格卖出，实际成交价可能大幅低于预期</li>
+                        <li>大额套利需考虑冲击成本，单笔交易不宜超过日均成交额的5%-10%</li>
+                      </ul>
+                    </div>
+                    <div className="arb-risk-section">
+                      <h4>交易成本</h4>
+                      <ul>
+                        <li>申购费：一般0.12%-0.15%（部分渠道有折扣）</li>
+                        <li>赎回费：持有时间越短费率越高，7天内赎回可能高达1.5%</li>
+                        <li>交易佣金：约0.03%-0.05%</li>
+                        <li>套利净收益 = 溢价率 - 申购费 - 卖出佣金 - 冲击成本</li>
+                      </ul>
+                    </div>
+                    <div className="arb-risk-section">
+                      <h4>其他风险</h4>
+                      <ul>
+                        <li><strong>限购风险</strong>：基金可能暂停申购或设置单日限额，影响套利规模</li>
+                        <li><strong>溢价收窄</strong>：套利资金集中涌入会迅速压缩溢价空间</li>
+                        <li><strong>停牌/涨跌停</strong>：成分股异常会影响基金净值和套利效果</li>
+                        <li><strong>规模风险</strong>：小规模基金流动性差，虽易产生折溢价但难以变现</li>
+                      </ul>
+                    </div>
+                    <div className="arb-risk-section">
+                      <h4>实操建议</h4>
+                      <ul>
+                        <li>优先选择日均成交额大于3000万的品种</li>
+                        <li>使用券商App一键转托管功能可节省时间</li>
+                        <li>关注基金是否处于暂停申购状态</li>
+                        <li>溢价率建议≥5%再操作，留足安全边际</li>
+                        <li>避免在市场剧烈波动期套利</li>
+                      </ul>
+                    </div>
+                  </div>
+                </div>
+              </>
             )}
           </div>
         ) : selectedStock ? (

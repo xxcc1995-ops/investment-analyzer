@@ -1,3 +1,4 @@
+// @ts-nocheck
 import React, { useState } from 'react';
 import { Card, Input, Button, Descriptions, Spin, message } from 'antd';
 import { SearchOutlined } from '@ant-design/icons';

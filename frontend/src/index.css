@@ -675,6 +675,13 @@ tr:hover td {
   color: #52c41a;
 }
 
+.arb-section-title {
+  font-size: 15px;
+  font-weight: 600;
+  margin-bottom: 12px;
+  color: var(--text-primary);
+}
+
 /* 登录框 */
 .arb-login-box {
   background: #fff;
@@ -715,4 +722,287 @@ tr:hover td {
   margin-top: 8px;
   color: var(--danger);
   font-size: 12px;
+}
+
+/* 筛选逻辑和注意事项 */
+.arb-notes {
+  background: #fff;
+  padding: 20px;
+  border-radius: 8px;
+  margin-bottom: 16px;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.05);
+}
+
+.arb-notes h3 {
+  font-size: 16px;
+  font-weight: 600;
+  margin-bottom: 16px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid #f0f0f0;
+  color: var(--text-primary);
+}
+
+.arb-notes-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 16px;
+}
+
+.arb-note-item {
+  padding: 16px;
+  background: #f0f5ff;
+  border-radius: 8px;
+  border: 1px solid #d6e4ff;
+}
+
+.arb-note-label {
+  display: block;
+  font-size: 12px;
+  color: var(--text-light);
+  margin-bottom: 8px;
+}
+
+.arb-note-value {
+  display: block;
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--primary);
+  margin-bottom: 8px;
+}
+
+.arb-note-desc {
+  display: block;
+  font-size: 12px;
+  color: var(--text-secondary);
+  line-height: 1.5;
+}
+
+.arb-notes-content {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.arb-risk-section h4 {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: 12px;
+  padding-left: 12px;
+  border-left: 3px solid var(--primary);
+}
+
+.arb-risk-section ul {
+  list-style: none;
+  padding-left: 0;
+}
+
+.arb-risk-section li {
+  font-size: 13px;
+  color: var(--text-secondary);
+  padding: 6px 0 6px 16px;
+  position: relative;
+  line-height: 1.6;
+}
+
+.arb-risk-section li::before {
+  content: '•';
+  position: absolute;
+  left: 0;
+  color: var(--text-light);
+}
+
+.arb-risk-section li strong {
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+/* 期权收益计算器 */
+.option-page {
+  padding: 0;
+}
+
+.option-tabs {
+  display: flex;
+  background: #fff;
+  border-radius: 8px 8px 0 0;
+  border: 1px solid var(--border);
+  border-bottom: none;
+  overflow: hidden;
+}
+
+.option-tab {
+  flex: 1;
+  padding: 14px 24px;
+  text-align: center;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  background: #f8f9fa;
+  transition: all 0.2s;
+  border-bottom: 2px solid transparent;
+}
+
+.option-tab:hover {
+  color: var(--primary);
+}
+
+.option-tab.active {
+  color: #fff;
+  background: linear-gradient(135deg, #6a89cc 0%, #1e3799 100%);
+  border-bottom-color: #1e3799;
+}
+
+.option-form-card {
+  background: #fff;
+  border-radius: 0 0 8px 8px;
+  padding: 24px;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.05);
+  margin-bottom: 16px;
+  border: 1px solid var(--border);
+  border-top: none;
+}
+
+.option-form-group {
+  margin-bottom: 20px;
+}
+
+.option-form-group label {
+  display: block;
+  margin-bottom: 8px;
+  color: var(--text-primary);
+  font-weight: 500;
+  font-size: 14px;
+}
+
+.option-form-group input {
+  width: 100%;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-size: 15px;
+  background: #f8f9fa;
+  transition: all 0.2s;
+}
+
+.option-form-group input:focus {
+  outline: none;
+  border-color: #6a89cc;
+  box-shadow: 0 0 0 3px rgba(106, 137, 204, 0.15);
+  background: #fff;
+}
+
+.option-btn {
+  display: block;
+  width: 100%;
+  padding: 14px;
+  background: linear-gradient(135deg, #6a89cc 0%, #1e3799 100%);
+  color: #fff;
+  border: none;
+  border-radius: 8px;
+  font-size: 16px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+  margin-top: 8px;
+}
+
+.option-btn:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(106, 137, 204, 0.35);
+}
+
+.option-result {
+  margin-top: 24px;
+  padding: 20px;
+  border-radius: 8px;
+  background: #f8f9fa;
+  border: 1px solid #e8e8e8;
+  animation: fadeIn 0.3s ease;
+}
+
+.option-result-header {
+  text-align: center;
+  color: var(--text-secondary);
+  font-size: 14px;
+  margin-bottom: 4px;
+}
+
+.option-result-value {
+  font-size: 36px;
+  font-weight: 700;
+  text-align: center;
+  margin: 8px 0;
+}
+
+.option-result-details {
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px dashed #d1d8e0;
+}
+
+.option-detail-row {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 8px;
+  font-size: 14px;
+  color: var(--text-secondary);
+}
+
+.option-detail-row span:last-child {
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.option-notes {
+  background: #fff;
+  padding: 20px;
+  border-radius: 8px;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.05);
+  border: 1px solid var(--border);
+}
+
+.option-notes h3 {
+  font-size: 16px;
+  font-weight: 600;
+  margin-bottom: 16px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid #f0f0f0;
+  color: var(--text-primary);
+}
+
+.option-notes-content {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.option-note-section h4 {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: 4px;
+}
+
+.option-note-section p {
+  font-size: 13px;
+  color: var(--text-secondary);
+  line-height: 1.6;
+}
+
+.option-formula {
+  margin-top: 6px;
+  padding: 10px 14px;
+  background: #f0f5ff;
+  border-radius: 6px;
+  font-family: 'Consolas', 'Monaco', monospace;
+  font-size: 13px !important;
+  color: #1e3799 !important;
+  border: 1px solid #d6e4ff;
+}
+
+/* 可转债双低策略 */
+.cb-page {
+  padding: 0;
 }

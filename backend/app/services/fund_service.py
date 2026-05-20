@@ -202,7 +202,7 @@ class FundService:
             fund_nm = cell.get('fund_nm', '')
             price_str = cell.get('price', '0')
             nav_str = cell.get('fund_nav', '0')
-            discount_str = cell.get('nav_discount_rt', '-')
+            discount_str = cell.get('discount_rt', '-') or cell.get('nav_discount_rt', '-')
 
             try:
                 price = float(price_str)
@@ -250,7 +250,7 @@ class FundService:
             # 申购限额
             apply_limit = cell.get('apply_limit', '')
             if not apply_limit:
-                min_amt = cell.get('min_amt', '')
+                min_amt = cell.get('min_amt', '') or ''
                 if '限额' in min_amt:
                     # 从min_amt中提取限额信息
                     for line in min_amt.split('\n'):

@@ -1,6 +1,8 @@
-fastapi==0.109.0
-uvicorn==0.27.0
-pydantic==2.5.3
+fastapi>=0.109.0
+uvicorn>=0.27.0
+pydantic>=2.5.3
 akshare>=1.18.0
 pandas>=2.0.0
 cryptography>=41.0.0
+scrapling[fetchers]>=0.2.0
+openbb>=4.7.0
