@@ -20,15 +20,21 @@ const StockAnalysis: React.FC = () => {
 
     setLoading(true);
     try {
-      const [basicRes, finRes, dcfRes] = await Promise.all([
+      const [basicRes, finRes] = await Promise.all([
         stockApi.getBasicInfo(stockCode),
         stockApi.getFinancials(stockCode),
-        valuationApi.calculateDCF(stockCode),
       ]);
 
       setBasicInfo(basicRes.data);
       setFinancials(finRes.data);
-      setDcf(dcfRes.data);
+
+      // DCF暂不可用，静默处理
+      try {
+        const dcfRes = await valuationApi.calculateDCF(stockCode);
+        setDcf(dcfRes.data);
+      } catch {
+        setDcf(null);
+      }
     } catch (error) {
       message.error('查询失败，请检查股票代码');
     } finally {

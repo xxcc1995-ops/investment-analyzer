@@ -4,6 +4,13 @@ import ReactECharts from 'echarts-for-react'
 import HKIpoPage from './pages/HKIpoPage'
 import IndexValuation from './pages/IndexValuation'
 import USMarket from './pages/USMarket'
+import DividendScreener from './pages/DividendScreener'
+import CigarButtScreener from './pages/CigarButtScreener'
+import ValueInvesting from './pages/ValueInvesting'
+import REITScreener from './pages/REITScreener'
+import CryptoScreener from './pages/CryptoScreener'
+import MacroData from './pages/MacroData'
+import FuturesData from './pages/FuturesData'
 
 const API_BASE = '/api'
 
@@ -142,7 +149,7 @@ function App() {
   const [cbLoggedIn, setCbLoggedIn] = useState(false)
 
   // 基金套利状态
-  const [mainView, setMainView] = useState<'stock' | 'arbitrage' | 'option' | 'cb' | 'hki' | 'indexVal' | 'usMarket'>('stock')
+  const [mainView, setMainView] = useState<'stock' | 'arbitrage' | 'option' | 'cb' | 'hki' | 'indexVal' | 'usMarket' | 'dividend' | 'cigarButt' | 'valueInvesting' | 'reit' | 'crypto' | 'macro' | 'futures'>('stock')
   const [arbFunds, setArbFunds] = useState<FundArbitrage[]>([])
   const [arbLoading, setArbLoading] = useState(false)
   const [arbFetchTime, setArbFetchTime] = useState('')
@@ -231,7 +238,7 @@ function App() {
     setArbLoading(true)
     try {
       const res = await axios.get(`${API_BASE}/funds/arbitrage`, {
-        params: { min_threshold: 3, min_turnover: 1000, open_subscribe_only: false }
+        params: { min_threshold: 2, min_turnover: 1000, open_subscribe_only: false }
       })
       setArbFunds(res.data.funds || [])
       setArbFetchTime(res.data.fetch_time || '')
@@ -361,17 +368,17 @@ function App() {
 
   // 计算估值分位数（简化版）
   const getValuationLevel = (value: number | null, type: 'pe' | 'pb') => {
-    if (!value) return { level: '-', color: '#999' }
+    if (!value) return { level: '-', color: 'var(--text-muted)' }
     if (type === 'pe') {
-      if (value < 15) return { level: '低估', color: '#52c41a' }
+      if (value < 15) return { level: '低估', color: '#3fb950' }
       if (value < 25) return { level: '合理', color: '#1890ff' }
       if (value < 40) return { level: '偏高', color: '#faad14' }
       return { level: '高估', color: '#ff4d4f' }
     } else {
-      if (value < 1) return { level: '低估', color: '#52c41a' }
-      if (value < 3) return { level: '合理', color: '#1890ff' }
-      if (value < 5) return { level: '偏高', color: '#faad14' }
-      return { level: '高估', color: '#ff4d4f' }
+      if (value < 1) return { level: '低估', color: '#3fb950' }
+      if (value < 3) return { level: '合理', color: '#58a6ff' }
+      if (value < 5) return { level: '偏高', color: '#d29922' }
+      return { level: '高估', color: '#f85149' }
     }
   }
 
@@ -389,8 +396,8 @@ function App() {
         type: 'line',
         data: roeData,
         smooth: true,
-        itemStyle: { color: '#1890ff' },
-        areaStyle: { color: 'rgba(24,144,255,0.1)' },
+        itemStyle: { color: '#58a6ff' },
+        areaStyle: { color: 'rgba(88,166,255,0.1)' },
         label: { show: true, formatter: '{c}%' }
       }]
     }
@@ -410,13 +417,13 @@ function App() {
           name: '营收增长率',
           type: 'bar',
           data: financials.map(f => f.revenue_growth).reverse(),
-          itemStyle: { color: '#1890ff' }
+          itemStyle: { color: '#58a6ff' }
         },
         {
           name: '净利润增长率',
           type: 'bar',
           data: financials.map(f => f.profit_growth).reverse(),
-          itemStyle: { color: '#52c41a' }
+          itemStyle: { color: '#3fb950' }
         }
       ]
     }
@@ -436,19 +443,19 @@ function App() {
           name: '毛利率',
           type: 'line',
           data: financials.map(f => f.gross_margin).reverse(),
-          itemStyle: { color: '#ff4d4f' }
+          itemStyle: { color: '#f85149' }
         },
         {
           name: '净利率',
           type: 'line',
           data: financials.map(f => f.net_margin).reverse(),
-          itemStyle: { color: '#1890ff' }
+          itemStyle: { color: '#58a6ff' }
         },
         {
           name: 'ROE',
           type: 'line',
           data: financials.map(f => f.roe).reverse(),
-          itemStyle: { color: '#52c41a' }
+          itemStyle: { color: '#3fb950' }
         }
       ]
     }
@@ -469,9 +476,9 @@ function App() {
         itemStyle: {
           color: (params: any) => {
             const value = params.value
-            if (value < 40) return '#52c41a'
-            if (value < 60) return '#faad14'
-            return '#ff4d4f'
+            if (value < 40) return '#3fb950'
+            if (value < 60) return '#d29922'
+            return '#f85149'
           }
         }
       }]
@@ -516,43 +523,39 @@ function App() {
 
         {/* 国债收益率 & 股债比 */}
         <div style={{
-          padding: '12px 16px',
-          borderBottom: '1px solid var(--border)',
-          background: 'var(--bg)',
+          padding: '14px 18px',
+          borderBottom: '1px solid var(--border-primary)',
+          background: 'var(--bg-tertiary)',
         }}>
-          <div style={{ fontSize: '12px', color: '#999', marginBottom: '8px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginBottom: '8px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <span>十年期国债收益率 & 股债比</span>
             <span
               onClick={loadBondYields}
-              style={{ cursor: 'pointer', color: '#1890ff' }}
+              style={{ cursor: 'pointer', color: 'var(--accent-blue)' }}
             >
               {bondLoading ? '...' : '刷新'}
             </span>
           </div>
           <div style={{ display: 'flex', gap: '12px' }}>
             {/* 中国 */}
-            <div style={{ flex: 1, background: 'var(--card)', borderRadius: '8px', padding: '10px' }}>
-              <div style={{ fontSize: '11px', color: '#999', marginBottom: '4px' }}>
-                中国 · 沪深300
-              </div>
-              <div style={{ fontSize: '20px', fontWeight: 700, color: '#d4380d' }}>
+            <div className="bond-yield-card">
+              <div className="bond-yield-label">中国 · 沪深300</div>
+              <div className="bond-yield-value" style={{ color: '#f85149' }}>
                 {bondYields?.cn?.yield?.toFixed(2) ?? '--'}%
               </div>
-              <div style={{
-                fontSize: '11px',
-                marginTop: '2px',
-                color: (bondYields?.cn?.change ?? 0) >= 0 ? '#cf1322' : '#3f8600',
+              <div className="bond-yield-change" style={{
+                color: (bondYields?.cn?.change ?? 0) >= 0 ? '#f85149' : '#3fb950',
               }}>
                 {bondYields?.cn?.change != null
                   ? `${bondYields.cn.change >= 0 ? '+' : ''}${bondYields.cn.change.toFixed(3)}`
                   : '--'}
               </div>
-              <div style={{ fontSize: '11px', color: '#666', marginTop: '6px', borderTop: '1px dashed var(--border)', paddingTop: '6px' }}>
+              <div className="bond-yield-details">
                 <div>PE: {bondYields?.cn?.pe ?? '--'}</div>
                 <div style={{ marginTop: '2px' }}>
                   股债比: <span style={{
                     fontWeight: 600,
-                    color: (bondYields?.cn?.stock_bond_ratio ?? 0) > 1 ? '#3f8600' : '#cf1322',
+                    color: (bondYields?.cn?.stock_bond_ratio ?? 0) > 1 ? '#3fb950' : '#f85149',
                   }}>
                     {bondYields?.cn?.stock_bond_ratio?.toFixed(2) ?? '--'}
                   </span>
@@ -560,28 +563,24 @@ function App() {
               </div>
             </div>
             {/* 美国 */}
-            <div style={{ flex: 1, background: 'var(--card)', borderRadius: '8px', padding: '10px' }}>
-              <div style={{ fontSize: '11px', color: '#999', marginBottom: '4px' }}>
-                美国 · 标普500
-              </div>
-              <div style={{ fontSize: '20px', fontWeight: 700, color: '#096dd9' }}>
+            <div className="bond-yield-card">
+              <div className="bond-yield-label">美国 · 标普500</div>
+              <div className="bond-yield-value" style={{ color: '#58a6ff' }}>
                 {bondYields?.us?.yield?.toFixed(2) ?? '--'}%
               </div>
-              <div style={{
-                fontSize: '11px',
-                marginTop: '2px',
-                color: (bondYields?.us?.change ?? 0) >= 0 ? '#cf1322' : '#3f8600',
+              <div className="bond-yield-change" style={{
+                color: (bondYields?.us?.change ?? 0) >= 0 ? '#f85149' : '#3fb950',
               }}>
                 {bondYields?.us?.change != null
                   ? `${bondYields.us.change >= 0 ? '+' : ''}${bondYields.us.change.toFixed(3)}`
                   : '--'}
               </div>
-              <div style={{ fontSize: '11px', color: '#666', marginTop: '6px', borderTop: '1px dashed var(--border)', paddingTop: '6px' }}>
+              <div className="bond-yield-details">
                 <div>PE: {bondYields?.us?.pe ?? '--'}</div>
                 <div style={{ marginTop: '2px' }}>
                   股债比: <span style={{
                     fontWeight: 600,
-                    color: (bondYields?.us?.stock_bond_ratio ?? 0) > 1 ? '#3f8600' : '#cf1322',
+                    color: (bondYields?.us?.stock_bond_ratio ?? 0) > 1 ? '#3fb950' : '#f85149',
                   }}>
                     {bondYields?.us?.stock_bond_ratio?.toFixed(2) ?? '--'}
                   </span>
@@ -609,6 +608,20 @@ function App() {
             onClick={() => setMainView('indexVal')}>指数估值</div>
           <div className={`list-tab ${mainView === 'usMarket' ? 'active' : ''}`}
             onClick={() => setMainView('usMarket')}>美股/币</div>
+          <div className={`list-tab ${mainView === 'dividend' ? 'active' : ''}`}
+            onClick={() => setMainView('dividend')}>攒股收息</div>
+          <div className={`list-tab ${mainView === 'cigarButt' ? 'active' : ''}`}
+            onClick={() => setMainView('cigarButt')}>捡烟蒂</div>
+          <div className={`list-tab ${mainView === 'valueInvesting' ? 'active' : ''}`}
+            onClick={() => setMainView('valueInvesting')}>价投筛选</div>
+          <div className={`list-tab ${mainView === 'reit' ? 'active' : ''}`}
+            onClick={() => setMainView('reit')}>REIT筛选</div>
+          <div className={`list-tab ${mainView === 'crypto' ? 'active' : ''}`}
+            onClick={() => setMainView('crypto')}>币圈信息</div>
+          <div className={`list-tab ${mainView === 'macro' ? 'active' : ''}`}
+            onClick={() => setMainView('macro')}>宏观数据</div>
+          <div className={`list-tab ${mainView === 'futures' ? 'active' : ''}`}
+            onClick={() => setMainView('futures')}>期货行业</div>
         </div>
 
         {mainView === 'stock' && (
@@ -637,37 +650,86 @@ function App() {
         )}
 
         {mainView === 'arbitrage' && (
-          <div className="stock-list" style={{ padding: '16px', color: '#999', fontSize: '13px', textAlign: 'center' }}>
+          <div className="stock-list sidebar-info">
             <p>套利数据在右侧显示</p>
-            <p style={{ marginTop: '8px', fontSize: '12px' }}>集思录数据源</p>
+            <p>集思录数据源</p>
           </div>
         )}
 
         {mainView === 'option' && (
-          <div className="stock-list" style={{ padding: '16px', color: '#999', fontSize: '13px', textAlign: 'center' }}>
+          <div className="stock-list sidebar-info">
             <p>期权计算器</p>
-            <p style={{ marginTop: '8px', fontSize: '12px' }}>Sell Put / Sell Call</p>
+            <p>Sell Put / Sell Call</p>
           </div>
         )}
 
         {mainView === 'cb' && (
-          <div className="stock-list" style={{ padding: '16px', color: '#999', fontSize: '13px', textAlign: 'center' }}>
+          <div className="stock-list sidebar-info">
             <p>可转债双低策略</p>
-            <p style={{ marginTop: '8px', fontSize: '12px' }}>双低值 = 价格 + 溢价率</p>
+            <p>双低值 = 价格 + 溢价率</p>
           </div>
         )}
 
         {mainView === 'hki' && (
-          <div className="stock-list" style={{ padding: '16px', color: '#999', fontSize: '13px', textAlign: 'center' }}>
+          <div className="stock-list sidebar-info">
             <p>港股打新工具箱</p>
-            <p style={{ marginTop: '8px', fontSize: '12px' }}>新股日历 · 收益分析 · 模拟器</p>
+            <p>新股日历 · 收益分析 · 模拟器</p>
           </div>
         )}
 
         {mainView === 'indexVal' && (
-          <div className="stock-list" style={{ padding: '16px', color: '#999', fontSize: '13px', textAlign: 'center' }}>
+          <div className="stock-list sidebar-info">
             <p>指数估值</p>
-            <p style={{ marginTop: '8px', fontSize: '12px' }}>PE · PB · ROE · 股息率</p>
+            <p>PE · PB · ROE · 股息率</p>
+          </div>
+        )}
+
+        {mainView === 'dividend' && (
+          <div className="stock-list sidebar-info">
+            <p>王文 & 散户乙</p>
+            <p>投资筛选 · 攒股收息</p>
+          </div>
+        )}
+
+        {mainView === 'cigarButt' && (
+          <div className="stock-list sidebar-info">
+            <p>港股烟蒂股</p>
+            <p>格雷厄姆 · 巴菲特 · 施洛斯</p>
+          </div>
+        )}
+
+        {mainView === 'valueInvesting' && (
+          <div className="stock-list sidebar-info">
+            <p>价值投资筛选</p>
+            <p>巴菲特 · 芒格 · 李录 · 段永平</p>
+          </div>
+        )}
+
+        {mainView === 'reit' && (
+          <div className="stock-list sidebar-info">
+            <p>REIT高分红筛选</p>
+            <p>分红率≥5% · 规避陷阱</p>
+          </div>
+        )}
+
+        {mainView === 'crypto' && (
+          <div className="stock-list sidebar-info">
+            <p>币圈信息源</p>
+            <p>高质量渠道 · 过滤噪音</p>
+          </div>
+        )}
+
+        {mainView === 'macro' && (
+          <div className="stock-list sidebar-info">
+            <p>宏观经济数据</p>
+            <p>GDP · CPI · PMI · M2 · LPR</p>
+          </div>
+        )}
+
+        {mainView === 'futures' && (
+          <div className="stock-list sidebar-info">
+            <p>期货行业数据</p>
+            <p>商品快照 · 行业排名 · 资金流向</p>
           </div>
         )}
       </div>
@@ -685,6 +747,20 @@ function App() {
           <IndexValuation />
         ) : mainView === 'usMarket' ? (
           <USMarket />
+        ) : mainView === 'dividend' ? (
+          <DividendScreener />
+        ) : mainView === 'cigarButt' ? (
+          <CigarButtScreener />
+        ) : mainView === 'valueInvesting' ? (
+          <ValueInvesting />
+        ) : mainView === 'reit' ? (
+          <REITScreener />
+        ) : mainView === 'crypto' ? (
+          <CryptoScreener />
+        ) : mainView === 'macro' ? (
+          <MacroData />
+        ) : mainView === 'futures' ? (
+          <FuturesData />
         ) : mainView === 'option' ? (
           /* 期权收益计算器 */
           <div className="option-page">
@@ -803,7 +879,7 @@ function App() {
                   <p className="option-formula">年化收益率 = (行权价 - 现价 + 权利金) / (现价 - 权利金) × (365 / 到期天数)</p>
                 </div>
                 <div className="option-note-section">
-                  <p style={{ color: '#999', fontSize: '13px', marginTop: '8px' }}>实际交易中请考虑交易成本、滑点等因素。</p>
+                  <p style={{ color: 'var(--text-muted)', fontSize: '13px', marginTop: '8px' }}>实际交易中请考虑交易成本、滑点等因素。</p>
                 </div>
               </div>
             </div>
@@ -916,7 +992,7 @@ function App() {
                     ))}
                     {cbBonds.length === 0 && (
                       <tr>
-                        <td colSpan={11} style={{ textAlign: 'center', padding: '40px', color: '#999' }}>
+                        <td colSpan={11} style={{ textAlign: 'center', padding: '40px', color: 'var(--text-muted)' }}>
                           暂无符合条件的可转债
                         </td>
                       </tr>
@@ -967,12 +1043,12 @@ function App() {
               <div className="stock-title-row">
                 <div>
                   <h2>场内外基金套利</h2>
-                  <span className="stock-code">LOF 折溢价监控 · 溢价率≥3% · 成交额＞1000万</span>
+                  <span className="stock-code">LOF 折溢价监控 · 溢价率≥2% · 成交额＞1000万</span>
                 </div>
                 <div style={{ display: 'flex', gap: '8px' }}>
                   <button className="btn-add" onClick={loadArbitrage}>刷新数据</button>
                   {!arbLoggedIn && (
-                    <button className="btn-add" style={{ background: '#722ed1' }}
+                    <button className="btn-add" style={{ background: 'var(--accent-purple)' }}
                       onClick={() => setShowLogin(!showLogin)}>
                       登录集思录
                     </button>
@@ -984,8 +1060,8 @@ function App() {
                 <span className="freshness-tag">更新时间: {arbFetchTime}</span>
                 <span className="freshness-tag">原始数据: {arbTotalBefore} 只</span>
                 <span className="freshness-tag">筛选后: {arbFunds.length} 只</span>
-                {arbLoggedIn && <span className="freshness-tag" style={{ color: '#52c41a' }}>已登录</span>}
-                {!arbLoggedIn && <span className="freshness-tag" style={{ color: '#faad14' }}>未登录(数据可能不全)</span>}
+                {arbLoggedIn && <span className="freshness-tag success">已登录</span>}
+                {!arbLoggedIn && <span className="freshness-tag warning">未登录(数据可能不全)</span>}
               </div>
             </div>
 
@@ -1044,9 +1120,14 @@ function App() {
                         <th>序号</th>
                         <th>代码</th>
                         <th>名称</th>
-                        <th>溢价</th>
+                        <th>场内价格</th>
+                        <th>场外净值</th>
+                        <th>溢价率</th>
+                        <th>申购费率</th>
+                        <th>预估收益</th>
                         <th>交易额(万)</th>
-                        <th>限购(元)</th>
+                        <th>净值日期</th>
+                        <th>限购</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -1055,14 +1136,21 @@ function App() {
                           <td>{i + 1}</td>
                           <td>{f.fund_id}</td>
                           <td>{f.fund_nm}</td>
+                          <td>{f.price.toFixed(3)}</td>
+                          <td>{f.fund_nav.toFixed(4)}</td>
                           <td className="up">+{f.nav_discount_rt.toFixed(2)}%</td>
+                          <td>{f.apply_fee || '-'}</td>
+                          <td style={{ color: f.estimated_profit > 0 ? '#52c41a' : '#ff4d4f', fontWeight: 600 }}>
+                            {f.estimated_profit > 0 ? '+' : ''}{f.estimated_profit.toFixed(2)}%
+                          </td>
                           <td>{f.turnover.toFixed(0)}</td>
+                          <td style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{f.nav_dt}</td>
                           <td>{f.apply_limit || '-'}</td>
                         </tr>
                       ))}
                       {arbFunds.filter(f => f.direction === '溢价').length === 0 && (
                         <tr>
-                          <td colSpan={6} style={{ textAlign: 'center', padding: '40px', color: '#999' }}>
+                          <td colSpan={11} style={{ textAlign: 'center', padding: '40px', color: 'var(--text-muted)' }}>
                             暂无溢价LOF基金
                           </td>
                         </tr>
@@ -1080,9 +1168,14 @@ function App() {
                         <th>序号</th>
                         <th>代码</th>
                         <th>名称</th>
-                        <th>折价</th>
+                        <th>场内价格</th>
+                        <th>场外净值</th>
+                        <th>折价率</th>
+                        <th>赎回费率</th>
+                        <th>预估收益</th>
                         <th>交易额(万)</th>
-                        <th>限购(元)</th>
+                        <th>净值日期</th>
+                        <th>限购</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -1091,14 +1184,21 @@ function App() {
                           <td>{i + 1}</td>
                           <td>{f.fund_id}</td>
                           <td>{f.fund_nm}</td>
+                          <td>{f.price.toFixed(3)}</td>
+                          <td>{f.fund_nav.toFixed(4)}</td>
                           <td className="down">{f.nav_discount_rt.toFixed(2)}%</td>
+                          <td>{f.redeem_fee || '-'}</td>
+                          <td style={{ color: f.estimated_profit > 0 ? '#52c41a' : '#ff4d4f', fontWeight: 600 }}>
+                            {f.estimated_profit > 0 ? '+' : ''}{f.estimated_profit.toFixed(2)}%
+                          </td>
                           <td>{f.turnover.toFixed(0)}</td>
+                          <td style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{f.nav_dt}</td>
                           <td>{f.apply_limit || '-'}</td>
                         </tr>
                       ))}
                       {arbFunds.filter(f => f.direction === '折价').length === 0 && (
                         <tr>
-                          <td colSpan={6} style={{ textAlign: 'center', padding: '40px', color: '#999' }}>
+                          <td colSpan={11} style={{ textAlign: 'center', padding: '40px', color: 'var(--text-muted)' }}>
                             暂无折价LOF基金
                           </td>
                         </tr>
@@ -1107,13 +1207,99 @@ function App() {
                   </table>
                 </div>
 
+                {/* 计算方式说明 */}
+                <div className="arb-notes">
+                  <h3>计算方式说明（人工核对用）</h3>
+                  <div className="arb-notes-content">
+                    <div className="arb-risk-section">
+                      <h4>1. 溢价率计算公式</h4>
+                      <div style={{ background: 'var(--bg-secondary)', padding: '12px', borderRadius: '6px', margin: '8px 0', fontFamily: 'monospace' }}>
+                        <div><strong>溢价率(%)</strong> = (场内价格 - 场外净值) / 场外净值 × 100%</div>
+                        <div style={{ marginTop: '8px', color: 'var(--text-muted)' }}>示例：场内价格 = 1.50元，场外净值 = 1.45元</div>
+                        <div style={{ color: 'var(--text-muted)' }}>溢价率 = (1.50 - 1.45) / 1.45 × 100% = 3.45%</div>
+                      </div>
+                      <ul>
+                        <li><strong>场内价格</strong>：LOF基金在证券交易所的实时交易价格</li>
+                        <li><strong>场外净值</strong>：基金公司公布的T日净值（T+1公布），非实时估算</li>
+                        <li><strong>正数为溢价</strong>（场内价格 {'>'} 场外净值），负数为折价</li>
+                      </ul>
+                    </div>
+                    <div className="arb-risk-section">
+                      <h4>2. 预估收益率计算</h4>
+                      <div style={{ background: 'var(--bg-secondary)', padding: '12px', borderRadius: '6px', margin: '8px 0', fontFamily: 'monospace' }}>
+                        <div><strong>溢价套利收益率(%)</strong> = 溢价率 - 申购费率</div>
+                        <div><strong>折价套利收益率(%)</strong> = 折价率 - 赎回费率</div>
+                        <div style={{ marginTop: '8px', color: 'var(--text-muted)' }}>注：还需扣除交易佣金（约0.03%-0.05%）和冲击成本</div>
+                      </div>
+                    </div>
+                    <div className="arb-risk-section">
+                      <h4>3. 与 palmmicro 数据差异说明</h4>
+                      <div style={{ background: 'var(--bg-secondary)', padding: '12px', borderRadius: '6px', margin: '8px 0' }}>
+                        <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                          <thead>
+                            <tr style={{ borderBottom: '1px solid var(--border)' }}>
+                              <th style={{ textAlign: 'left', padding: '8px', color: 'var(--text-muted)' }}>对比项</th>
+                              <th style={{ textAlign: 'left', padding: '8px', color: 'var(--accent-blue)' }}>本系统</th>
+                              <th style={{ textAlign: 'left', padding: '8px', color: 'var(--accent-green)' }}>palmmicro</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            <tr style={{ borderBottom: '1px solid var(--border)' }}>
+                              <td style={{ padding: '8px' }}>数据来源</td>
+                              <td style={{ padding: '8px' }}>集思录</td>
+                              <td style={{ padding: '8px' }}>自建EST估算系统</td>
+                            </tr>
+                            <tr style={{ borderBottom: '1px solid var(--border)' }}>
+                              <td style={{ padding: '8px' }}>净值类型</td>
+                              <td style={{ padding: '8px' }}>场外净值（T+1公布）</td>
+                              <td style={{ padding: '8px' }}>实时EST估算净值</td>
+                            </tr>
+                            <tr style={{ borderBottom: '1px solid var(--border)' }}>
+                              <td style={{ padding: '8px' }}>溢价率计算</td>
+                              <td style={{ padding: '8px' }}>(价格 - 场外净值) / 场外净值</td>
+                              <td style={{ padding: '8px' }}>(价格 - EST) / EST</td>
+                            </tr>
+                            <tr style={{ borderBottom: '1px solid var(--border)' }}>
+                              <td style={{ padding: '8px' }}>数据时效</td>
+                              <td style={{ padding: '8px' }}>T日净值，T+1公布</td>
+                              <td style={{ padding: '8px' }}>实时估算（盘中更新）</td>
+                            </tr>
+                            <tr>
+                              <td style={{ padding: '8px' }}>筛选条件</td>
+                              <td style={{ padding: '8px' }}>溢价≥2%，成交额{'>'}1000万</td>
+                              <td style={{ padding: '8px' }}>显示全部LOF（53只）</td>
+                            </tr>
+                          </tbody>
+                        </table>
+                      </div>
+                      <p style={{ color: 'var(--text-muted)', fontSize: '13px', marginTop: '8px' }}>
+                        <strong>注意</strong>：由于净值来源不同，两个系统的溢价率会有差异。
+                        palmmicro的EST是实时估算，而本系统使用的是T日实际净值（T+1公布）。
+                        建议以基金公司官方公布的净值为准进行核对。
+                      </p>
+                    </div>
+                    <div className="arb-risk-section">
+                      <h4>4. 数据字段说明</h4>
+                      <ul>
+                        <li><strong>代码</strong>：基金代码，如 161128</li>
+                        <li><strong>名称</strong>：基金简称</li>
+                        <li><strong>溢价/折价</strong>：基于场外净值计算的折溢价率</li>
+                        <li><strong>交易额(万)</strong>：当日场内成交额（万元）</li>
+                        <li><strong>限购(元)</strong>：单日申购限额，空表示无限额</li>
+                        <li><strong>净值日期</strong>：场外净值的对应日期</li>
+                        <li><strong>预估收益</strong>：扣除申购/赎回费后的预估收益率</li>
+                      </ul>
+                    </div>
+                  </div>
+                </div>
+
                 {/* 筛选逻辑说明 */}
                 <div className="arb-notes">
                   <h3>当前筛选逻辑</h3>
                   <div className="arb-notes-grid">
                     <div className="arb-note-item">
                       <span className="arb-note-label">溢价率阈值</span>
-                      <span className="arb-note-value">≥ 3%</span>
+                      <span className="arb-note-value">≥ 2%</span>
                       <span className="arb-note-desc">低于此阈值的套利空间不足以覆盖交易成本和时间风险</span>
                     </div>
                     <div className="arb-note-item">

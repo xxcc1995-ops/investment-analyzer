@@ -4,6 +4,7 @@ from fastapi import APIRouter
 from typing import Dict, List, Optional
 import akshare as ak
 import requests
+from bs4 import BeautifulSoup
 import re
 import logging
 from datetime import datetime, timedelta
@@ -36,6 +37,16 @@ def _calc_percentile(current: float, historical: List[float]) -> Optional[float]
         return None
     count = sum(1 for v in historical if v <= current)
     return round(count / len(historical) * 100, 1)
+
+
+def _validate_range(value: Optional[float], min_val: float, max_val: float) -> Optional[float]:
+    """校验数值是否在合理范围内，不在范围则返回None"""
+    if value is None:
+        return None
+    if min_val <= value <= max_val:
+        return value
+    logger.warning(f"数值 {value} 超出合理范围 [{min_val}, {max_val}]，已丢弃")
+    return None
 
 
 def _get_csindex_data(code: str) -> Dict:
@@ -83,27 +94,28 @@ def _get_lg_pb_data(name: str) -> Dict:
     return {"pb": None, "pb_percentile": None, "pb_history": []}
 
 
+def _fetch_multpl_text(url: str) -> str:
+    """从 multpl.com 获取页面文本"""
+    resp = requests.get(url, headers=HEADERS, timeout=15)
+    resp.raise_for_status()
+    soup = BeautifulSoup(resp.text, 'html.parser')
+    return soup.get_text()
+
+
 def _get_sp500_pe_with_percentile() -> Dict:
     """获取标普500 PE及历史百分位"""
     try:
-        from scrapling.fetchers import Fetcher
-        page = Fetcher.get("https://www.multpl.com/s-p-500-pe-ratio")
-        text = page.get_all_text() if hasattr(page, 'get_all_text') else str(page)
-
-        # 获取当前PE
+        text = _fetch_multpl_text("https://www.multpl.com/s-p-500-pe-ratio")
         current_match = re.search(r'Current.*?(\d+\.\d+)', text, re.DOTALL)
         current_pe = float(current_match.group(1)) if current_match else None
+        current_pe = _validate_range(current_pe, 1, 200)
 
-        # 获取历史PE数据
-        page_hist = Fetcher.get("https://www.multpl.com/s-p-500-pe-ratio/table/by-month")
-        text_hist = page_hist.get_all_text() if hasattr(page_hist, 'get_all_text') else str(page_hist)
-
+        text_hist = _fetch_multpl_text("https://www.multpl.com/s-p-500-pe-ratio/table/by-month")
         matches = re.findall(r'(\w+ \d+, \d+)\s+(\d+\.\d+)', text_hist)
         if matches:
-            pe_values = [float(pe) for _, pe in matches]
+            pe_values = [float(pe) for _, pe in matches if 1 <= float(pe) <= 200]
             percentile = _calc_percentile(current_pe, pe_values) if current_pe else None
             return {"pe": current_pe, "percentile": percentile}
-
         return {"pe": current_pe, "percentile": None}
     except Exception as e:
         logger.warning(f"获取标普500 PE失败: {e}")
@@ -113,30 +125,41 @@ def _get_sp500_pe_with_percentile() -> Dict:
 def _get_sp500_pb_with_percentile() -> Dict:
     """获取标普500 PB及历史百分位"""
     try:
-        from scrapling.fetchers import Fetcher
-        page = Fetcher.get("https://www.multpl.com/s-p-500-price-to-book")
-        text = page.get_all_text() if hasattr(page, 'get_all_text') else str(page)
-
-        # 获取当前PB
-        current_match = re.search(r'S&P 500 Price to Book Value\s*:\s*(\d+\.\d+)', text, re.DOTALL)
-        if not current_match:
-            current_match = re.search(r'Current.*?(\d+\.\d+)', text, re.DOTALL)
+        text = _fetch_multpl_text("https://www.multpl.com/s-p-500-price-to-book")
+        current_match = re.search(r'Current.*?(\d+\.\d+)', text, re.DOTALL)
         current_pb = float(current_match.group(1)) if current_match else None
+        current_pb = _validate_range(current_pb, 0.1, 50)
 
-        # 获取历史PB数据
-        page_hist = Fetcher.get("https://www.multpl.com/s-p-500-price-to-book/table/by-year")
-        text_hist = page_hist.get_all_text() if hasattr(page_hist, 'get_all_text') else str(page_hist)
-
+        text_hist = _fetch_multpl_text("https://www.multpl.com/s-p-500-price-to-book/table/by-year")
         matches = re.findall(r'(\w+ \d+, \d+)\s+(\d+\.\d+)', text_hist)
         if matches:
-            pb_values = [float(pb) for _, pb in matches]
+            pb_values = [float(pb) for _, pb in matches if 0.1 <= float(pb) <= 50]
             percentile = _calc_percentile(current_pb, pb_values) if current_pb else None
             return {"pb": current_pb, "percentile": percentile}
-
         return {"pb": current_pb, "percentile": None}
     except Exception as e:
         logger.warning(f"获取标普500 PB失败: {e}")
     return {"pb": None, "percentile": None}
+
+
+def _get_sp500_dividend_with_percentile() -> Dict:
+    """获取标普500 股息率及历史百分位"""
+    try:
+        text = _fetch_multpl_text("https://www.multpl.com/s-p-500-dividend-yield")
+        current_match = re.search(r'Current.*?(\d+\.\d+)', text, re.DOTALL)
+        current_yield = float(current_match.group(1)) if current_match else None
+        current_yield = _validate_range(current_yield, 0.1, 20)
+
+        text_hist = _fetch_multpl_text("https://www.multpl.com/s-p-500-dividend-yield/table/by-month")
+        matches = re.findall(r'(\w+ \d+, \d+)\s+(\d+\.\d+)', text_hist)
+        if matches:
+            yield_values = [float(y) for _, y in matches if 0.1 <= float(y) <= 20]
+            percentile = _calc_percentile(current_yield, yield_values) if current_yield else None
+            return {"dividend_yield": current_yield, "percentile": percentile}
+        return {"dividend_yield": current_yield, "percentile": None}
+    except Exception as e:
+        logger.warning(f"获取标普500 股息率失败: {e}")
+    return {"dividend_yield": None, "percentile": None}
 
 
 def _get_hsi_dividend() -> Optional[float]:
@@ -177,6 +200,7 @@ async def get_index_valuation():
     # 预先获取S&P500数据（只请求一次）
     sp500_pe_data = _get_sp500_pe_with_percentile()
     sp500_pb_data = _get_sp500_pb_with_percentile()
+    sp500_div_data = _get_sp500_dividend_with_percentile()
 
     for code, config in INDEX_CONFIG.items():
         item = {
@@ -213,15 +237,8 @@ async def get_index_valuation():
                 item["pb"] = pb_data["pb"]
                 item["pb_percentile"] = pb_data["pb_percentile"]
             else:
-                # 乐咕乐股不支持的指数，使用近似PB值
-                approx_pb = {
-                    "000510": {"pb": 1.45, "pb_percentile": 35.0},  # 中证A500 ≈ 沪深300
-                    "000922": {"pb": 0.75, "pb_percentile": 25.0},  # 中证红利低PB
-                    "000932": {"pb": 3.50, "pb_percentile": 40.0},  # 消费红利中等PB
-                }
-                if code in approx_pb:
-                    item["pb"] = approx_pb[code]["pb"]
-                    item["pb_percentile"] = approx_pb[code]["pb_percentile"]
+                # 乐咕乐股不支持的指数，PB数据暂缺
+                pass
 
             # 计算ROE = PB/PE × 100
             if item["pb"] and item["pe"] and item["pe"] > 0:
@@ -231,41 +248,24 @@ async def get_index_valuation():
         elif code == "SPX":
             item["pe"] = sp500_pe_data["pe"]
             item["pe_percentile"] = sp500_pe_data["percentile"]
-            item["dividend_yield"] = 1.3
+            item["dividend_yield"] = sp500_div_data["dividend_yield"]
+            item["dividend_percentile"] = sp500_div_data["percentile"]
             item["pb"] = sp500_pb_data["pb"]
             item["pb_percentile"] = sp500_pb_data["percentile"]
             if item["pb"] and item["pe"] and item["pe"] > 0:
                 item["roe"] = round(item["pb"] / item["pe"] * 100, 2)
 
-        # 纳斯达克100
+        # 纳斯达克100 — 暂无可靠数据源，所有字段留空
         elif code == "NDX":
-            item["pe"] = 35.0
-            item["pe_percentile"] = 75.0
-            item["pb"] = 8.5
-            item["pb_percentile"] = 70.0
-            item["dividend_yield"] = 0.6
-            if item["pb"] and item["pe"] and item["pe"] > 0:
-                item["roe"] = round(item["pb"] / item["pe"] * 100, 2)
+            pass
 
-        # 恒生指数
+        # 恒生指数 — PE/PB暂无可靠数据源，仅保留股息率
         elif code == "HSI":
-            item["pe"] = 10.5
-            item["pe_percentile"] = 45.0
             item["dividend_yield"] = _get_hsi_dividend()
-            item["pb"] = 1.1
-            item["pb_percentile"] = 40.0
-            if item["pb"] and item["pe"] and item["pe"] > 0:
-                item["roe"] = round(item["pb"] / item["pe"] * 100, 2)
 
-        # 标普红利
+        # 标普红利 — 暂无可靠数据源，所有字段留空
         elif code == "SPXDIV":
-            item["pe"] = 18.0
-            item["pe_percentile"] = 50.0
-            item["dividend_yield"] = 2.5
-            item["pb"] = 3.2
-            item["pb_percentile"] = 55.0
-            if item["pb"] and item["pe"] and item["pe"] > 0:
-                item["roe"] = round(item["pb"] / item["pe"] * 100, 2)
+            pass
 
         # 获取基金信息
         fund_info = _get_fund_info(config["fund_code"])

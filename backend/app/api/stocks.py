@@ -28,21 +28,3 @@ async def get_stock_financials(stock_code: str):
     if "error" in data:
         raise HTTPException(status_code=400, detail=data["error"])
     return data
-
-
-@router.get("/{stock_code}/profit")
-async def get_profit_statement(stock_code: str):
-    """获取利润表"""
-    data = data_service.get_profit_statement(stock_code)
-    if "error" in data:
-        raise HTTPException(status_code=400, detail=data["error"])
-    return data
-
-
-@router.get("/{stock_code}/cashflow")
-async def get_cash_flow(stock_code: str):
-    """获取现金流量表"""
-    data = data_service.get_cash_flow(stock_code)
-    if "error" in data:
-        raise HTTPException(status_code=400, detail=data["error"])
-    return data

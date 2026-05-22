@@ -1,0 +1,16 @@
+{
+  "permissions": {
+    "allow": [
+      "Skill(update-config)",
+      "Skill(update-config:*)",
+      "Bash(python -c \"from app.services.data_service import DataService; ds = DataService\\(\\); result = ds.get_stock_basic\\('600519'\\); print\\(result\\)\")",
+      "Bash(python -c \"from app.services.data_service import DataService; ds = DataService\\(\\); result = ds.get_financial_indicators\\('600519'\\); print\\(result\\)\")",
+      "Bash(.venv/Scripts/python.exe -c \"import fastapi; import uvicorn; print\\('依赖已安装'\\)\")",
+      "Bash(.venv/Scripts/pip.exe install *)",
+      "Bash(../.venv/Scripts/python.exe -m uvicorn app.main:app --reload --port 8001)",
+      "Bash(curl -s http://localhost:8001/api/stocks/search?keyword=茅台)",
+      "Bash(.venv/Scripts/python.exe -c \"import requests; r = requests.get\\('http://localhost:8001/api/stocks/search', params={'keyword': '600519'}\\); print\\(r.status_code, r.json\\(\\)\\)\")",
+      "Bash(.venv/Scripts/python.exe -c \"import requests; r = requests.get\\('http://localhost:8001/api/stocks/600519/basic'\\); print\\(r.status_code, r.json\\(\\)\\)\")"
+    ]
+  }
+}

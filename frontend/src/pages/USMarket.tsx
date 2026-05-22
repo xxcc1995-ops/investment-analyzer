@@ -36,14 +36,12 @@ export default function USMarket() {
     setLoading(true)
     setError('')
     try {
-      // 获取报价
       const quoteEndpoint = activeTab === 'equity'
         ? `${API_BASE}/openbb/equity/quote/${sym}`
         : `${API_BASE}/openbb/crypto/quote/${sym}`
       const quoteRes = await axios.get(quoteEndpoint)
       setQuote(quoteRes.data)
 
-      // 获取历史价格
       const priceEndpoint = activeTab === 'equity'
         ? `${API_BASE}/openbb/equity/price/${sym}`
         : `${API_BASE}/openbb/crypto/price/${sym}`
@@ -65,7 +63,6 @@ export default function USMarket() {
     }
   }
 
-  // 热门标的
   const hotSymbols = activeTab === 'equity'
     ? ['AAPL', 'MSFT', 'GOOGL', 'AMZN', 'NVDA', 'TSLA', 'META', 'BRK-B']
     : ['BTC', 'ETH', 'SOL', 'BNB', 'XRP', 'ADA', 'DOGE', 'DOT']
@@ -78,7 +75,7 @@ export default function USMarket() {
             <h2>美股/加密货币</h2>
             <span className="stock-code">
               基于 OpenBB 数据平台
-              {loading && <span style={{ color: '#1890ff', marginLeft: '8px' }}>加载中...</span>}
+              {loading && <span style={{ color: 'var(--accent-blue)', marginLeft: '8px' }}>加载中...</span>}
             </span>
           </div>
         </div>
@@ -87,19 +84,13 @@ export default function USMarket() {
       {/* Tab切换 */}
       <div style={{
         display: 'flex', gap: '8px', padding: '12px 20px',
-        borderBottom: '1px solid var(--border)', background: 'var(--bg)',
+        borderBottom: '1px solid var(--border-primary)', background: 'var(--bg-tertiary)',
       }}>
         {(['equity', 'crypto'] as const).map(tab => (
           <button
             key={tab}
             onClick={() => { setActiveTab(tab); setQuote(null); setPrices([]); setSymbol(''); setError(''); }}
-            style={{
-              padding: '8px 20px', borderRadius: '6px',
-              border: '1px solid ' + (activeTab === tab ? '#1e3799' : 'var(--border)'),
-              background: activeTab === tab ? '#1e3799' : '#fff',
-              color: activeTab === tab ? '#fff' : '#333',
-              cursor: 'pointer', fontSize: '13px', fontWeight: activeTab === tab ? 600 : 400,
-            }}
+            className={`tab-btn ${activeTab === tab ? 'active' : ''}`}
           >
             {tab === 'equity' ? '美股' : '加密货币'}
           </button>
@@ -116,15 +107,14 @@ export default function USMarket() {
             placeholder={activeTab === 'equity' ? '输入美股代码 (如 AAPL)' : '输入加密货币代码 (如 BTC)'}
             style={{
               flex: 1, padding: '10px 14px', borderRadius: '6px',
-              border: '1px solid var(--border)', fontSize: '14px',
+              border: '1px solid var(--border-primary)', fontSize: '14px',
+              background: 'var(--bg-input)', color: 'var(--text-primary)',
             }}
           />
           <button
             type="submit"
-            style={{
-              padding: '10px 20px', background: '#1890ff', color: '#fff',
-              border: 'none', borderRadius: '6px', cursor: 'pointer', fontSize: '14px',
-            }}
+            className="btn-add"
+            style={{ padding: '10px 20px', fontSize: '14px' }}
           >
             查询
           </button>
@@ -132,15 +122,15 @@ export default function USMarket() {
 
         {/* 热门标的 */}
         <div style={{ marginTop: '12px', display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-          <span style={{ color: '#999', fontSize: '12px', lineHeight: '28px' }}>热门：</span>
+          <span style={{ color: 'var(--text-muted)', fontSize: '12px', lineHeight: '28px' }}>热门：</span>
           {hotSymbols.map(sym => (
             <button
               key={sym}
               onClick={() => { setSymbol(sym); fetchQuote(sym); }}
               style={{
                 padding: '4px 12px', borderRadius: '4px',
-                border: '1px solid var(--border)', background: '#fff',
-                cursor: 'pointer', fontSize: '12px', color: '#1890ff',
+                border: '1px solid var(--border-primary)', background: 'var(--bg-secondary)',
+                cursor: 'pointer', fontSize: '12px', color: 'var(--accent-blue)',
               }}
             >
               {sym}
@@ -152,10 +142,7 @@ export default function USMarket() {
       {/* 错误提示 */}
       {error && (
         <div style={{ padding: '0 20px' }}>
-          <div style={{
-            background: '#fff2f0', border: '1px solid #ffccc7',
-            borderRadius: '6px', padding: '12px 16px', color: '#cf1322', fontSize: '13px',
-          }}>
+          <div className="alert-error">
             {error}
           </div>
         </div>
@@ -165,7 +152,8 @@ export default function USMarket() {
       {quote && (
         <div style={{ padding: '0 20px 16px' }}>
           <div style={{
-            background: 'var(--bg)', borderRadius: '8px', padding: '20px',
+            background: 'var(--bg-tertiary)', borderRadius: '8px', padding: '20px',
+            border: '1px solid var(--border-subtle)',
           }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
               <div>
@@ -175,13 +163,13 @@ export default function USMarket() {
                 </div>
                 <div style={{
                   fontSize: '16px', marginTop: '4px',
-                  color: quote.change >= 0 ? '#cf1322' : '#3f8600',
+                  color: quote.change >= 0 ? 'var(--accent-red)' : 'var(--accent-green)',
                 }}>
                   {quote.change >= 0 ? '+' : ''}{quote.change.toFixed(2)}
                   ({quote.change_pct >= 0 ? '+' : ''}{quote.change_pct.toFixed(2)}%)
                 </div>
               </div>
-              <div style={{ textAlign: 'right', fontSize: '13px', color: '#666' }}>
+              <div style={{ textAlign: 'right', fontSize: '13px', color: 'var(--text-secondary)' }}>
                 {quote.volume > 0 && <div>成交量: {(quote.volume / 1e6).toFixed(1)}M</div>}
                 {quote.market_cap && <div>市值: ${(quote.market_cap / 1e9).toFixed(1)}B</div>}
                 {quote.pe_ratio && <div>PE: {quote.pe_ratio.toFixed(2)}</div>}
@@ -196,35 +184,34 @@ export default function USMarket() {
       {/* 历史价格表格 */}
       {prices.length > 0 && (
         <div style={{ padding: '0 20px 20px', overflowX: 'auto' }}>
-          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
+          <table>
             <thead>
-              <tr style={{ borderBottom: '2px solid var(--border)' }}>
-                <th style={{ textAlign: 'left', padding: '10px 8px', color: '#666' }}>日期</th>
-                <th style={{ textAlign: 'right', padding: '10px 8px', color: '#666' }}>开盘</th>
-                <th style={{ textAlign: 'right', padding: '10px 8px', color: '#666' }}>最高</th>
-                <th style={{ textAlign: 'right', padding: '10px 8px', color: '#666' }}>最低</th>
-                <th style={{ textAlign: 'right', padding: '10px 8px', color: '#666' }}>收盘</th>
-                <th style={{ textAlign: 'right', padding: '10px 8px', color: '#666' }}>涨跌幅</th>
-                <th style={{ textAlign: 'right', padding: '10px 8px', color: '#666' }}>成交量</th>
+              <tr>
+                <th style={{ textAlign: 'left' }}>日期</th>
+                <th>开盘</th>
+                <th>最高</th>
+                <th>最低</th>
+                <th>收盘</th>
+                <th>涨跌幅</th>
+                <th>成交量</th>
               </tr>
             </thead>
             <tbody>
               {prices.slice(-30).reverse().map((item, idx) => {
                 const changePct = item.open > 0 ? ((item.close - item.open) / item.open * 100) : 0
                 return (
-                  <tr key={idx} style={{ borderBottom: '1px solid var(--border)' }}>
-                    <td style={{ padding: '10px 8px' }}>{item.date}</td>
-                    <td style={{ textAlign: 'right', padding: '10px 8px' }}>${item.open.toFixed(2)}</td>
-                    <td style={{ textAlign: 'right', padding: '10px 8px' }}>${item.high.toFixed(2)}</td>
-                    <td style={{ textAlign: 'right', padding: '10px 8px' }}>${item.low.toFixed(2)}</td>
-                    <td style={{ textAlign: 'right', padding: '10px 8px', fontWeight: 600 }}>${item.close.toFixed(2)}</td>
+                  <tr key={idx}>
+                    <td>{item.date}</td>
+                    <td>${item.open.toFixed(2)}</td>
+                    <td>${item.high.toFixed(2)}</td>
+                    <td>${item.low.toFixed(2)}</td>
+                    <td style={{ fontWeight: 600 }}>${item.close.toFixed(2)}</td>
                     <td style={{
-                      textAlign: 'right', padding: '10px 8px',
-                      color: changePct >= 0 ? '#cf1322' : '#3f8600',
+                      color: changePct >= 0 ? 'var(--accent-red)' : 'var(--accent-green)',
                     }}>
                       {changePct >= 0 ? '+' : ''}{changePct.toFixed(2)}%
                     </td>
-                    <td style={{ textAlign: 'right', padding: '10px 8px' }}>
+                    <td>
                       {(item.volume / 1e6).toFixed(1)}M
                     </td>
                   </tr>
@@ -237,14 +224,11 @@ export default function USMarket() {
 
       {/* 说明 */}
       <div style={{ padding: '0 20px 20px' }}>
-        <div style={{
-          background: 'var(--bg)', borderRadius: '8px', padding: '16px',
-          fontSize: '12px', color: '#666', lineHeight: '1.8',
-        }}>
-          <div style={{ fontWeight: 600, marginBottom: '8px', color: '#333' }}>数据说明</div>
+        <div className="info-box">
+          <div className="info-box-title">数据说明</div>
           <div>数据来源：OpenBB Platform (Yahoo Finance)</div>
           <div>支持美股、加密货币的实时行情和历史数据</div>
-          <div style={{ marginTop: '8px', color: '#999' }}>
+          <div style={{ marginTop: '8px', color: 'var(--text-muted)' }}>
             提示：输入代码后点击查询或按回车
           </div>
         </div>

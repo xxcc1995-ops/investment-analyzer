@@ -1,0 +1,284 @@
+"""
+REIT数据服务 - 获取中国公募REITs数据
+数据源：东方财富API
+"""
+import requests
+from datetime import datetime
+from typing import List, Dict, Optional
+
+
+class REITService:
+    """REIT数据服务"""
+
+    # 中国公募REITs列表（硬编码，定期更新）
+    REIT_LIST = [
+        {"code": "508056", "name": "中金普洛斯REIT", "type": "仓储物流"},
+        {"code": "508000", "name": "华安张江光大REIT", "type": "产业园区"},
+        {"code": "508027", "name": "东吴苏园产业REIT", "type": "产业园区"},
+        {"code": "508006", "name": "博时蛇口产园REIT", "type": "产业园区"},
+        {"code": "508001", "name": "浙商沪杭甬REIT", "type": "高速公路"},
+        {"code": "508008", "name": "国金铁建REIT", "type": "高速公路"},
+        {"code": "508009", "name": "中金安徽交控REIT", "type": "高速公路"},
+        {"code": "508018", "name": "华夏中国交建REIT", "type": "高速公路"},
+        {"code": "508068", "name": "华泰江苏交控REIT", "type": "高速公路"},
+        {"code": "508058", "name": "建信中关村REIT", "type": "产业园区"},
+        {"code": "180301", "name": "红土盐田港REIT", "type": "仓储物流"},
+        {"code": "180201", "name": "鹏华深圳能源REIT", "type": "能源基础设施"},
+        {"code": "508096", "name": "中航首钢绿能REIT", "type": "生态环保"},
+        {"code": "508007", "name": "国泰君安临港创新产业园REIT", "type": "产业园区"},
+        {"code": "508088", "name": "嘉实京东仓储REIT", "type": "仓储物流"},
+        {"code": "508098", "name": "嘉实物美消费REIT", "type": "商业/消费"},
+        {"code": "508003", "name": "华夏合肥高新产园REIT", "type": "产业园区"},
+        {"code": "508066", "name": "中金厦门安居REIT", "type": "保障性租赁住房"},
+        {"code": "508077", "name": "华夏北京保障房REIT", "type": "保障性租赁住房"},
+        {"code": "180501", "name": "红土创新深圳安居REIT", "type": "保障性租赁住房"},
+        {"code": "508028", "name": "华夏华润有巢REIT", "type": "保障性租赁住房"},
+        {"code": "508011", "name": "中信建投国家电投新能源REIT", "type": "能源基础设施"},
+        {"code": "508099", "name": "中航京能光伏REIT", "type": "能源基础设施"},
+        {"code": "508097", "name": "国泰君安东久新经济REIT", "type": "产业园区"},
+        {"code": "508091", "name": "华安百联消费REIT", "type": "商业/消费"},
+        {"code": "180801", "name": "中金印力消费REIT", "type": "商业/消费"},
+        {"code": "508002", "name": "富国首创水务REIT", "type": "生态环保"},
+        {"code": "508005", "name": "中金山东高速REIT", "type": "高速公路"},
+        {"code": "508069", "name": "华夏越秀高速REIT", "type": "高速公路"},
+        {"code": "508012", "name": "平安广州广河REIT", "type": "高速公路"},
+    ]
+
+    def __init__(self):
+        self.base_url = "https://push2.eastmoney.com/api/qt/stock/get"
+
+    def get_reit_data(self, code: str) -> Optional[Dict]:
+        """
+        获取单个REIT的实时行情数据
+        """
+        # 东方财富REIT代码格式：1.508056 (上交所) 或 0.180301 (深交所)
+        prefix = "1" if code.startswith("5") else "0"
+        secid = f"{prefix}.{code}"
+
+        params = {
+            "secid": secid,
+            "fields": "f43,f44,f45,f46,f47,f48,f50,f51,f52,f55,f57,f58,f116,f117,f162,f167,f170,f171",
+            "ut": "fa5fd1943c7b386f172d6893dbfba10b",
+        }
+
+        try:
+            resp = requests.get(self.base_url, params=params, timeout=10)
+            data = resp.json().get("data", {})
+
+            if not data:
+                return None
+
+            # 解析数据
+            price = data.get("f43", 0) / 1000 if data.get("f43") else 0
+            change_pct = data.get("f170", 0) / 100 if data.get("f170") else 0
+            volume = data.get("f47", 0)
+            amount = data.get("f48", 0)
+
+            return {
+                "code": code,
+                "price": price,
+                "change_pct": change_pct,
+                "volume": volume,
+                "amount": amount,
+                "high": data.get("f44", 0) / 1000 if data.get("f44") else 0,
+                "low": data.get("f45", 0) / 1000 if data.get("f45") else 0,
+                "open": data.get("f46", 0) / 1000 if data.get("f46") else 0,
+                "pre_close": data.get("f60", 0) / 1000 if data.get("f60") else 0,
+            }
+        except Exception as e:
+            print(f"获取REIT {code} 数据失败: {e}")
+            return None
+
+    def get_all_reits(self, filters: Dict = None) -> List[Dict]:
+        """
+        获取所有REIT数据并应用筛选
+
+        参数:
+        - filters: 筛选条件
+            - min_dividend_yield: 最低分红率 (默认5)
+            - max_p_nav: P/NAV上限 (默认1.2)
+            - min_occupancy: 最低出租率 (默认85)
+            - max_debt_ratio: 最高负债率 (默认50)
+            - min_turnover: 最低日均成交额(万) (默认100)
+            - asset_type: 资产类型 (默认all)
+        """
+        if filters is None:
+            filters = {}
+
+        min_dividend_yield = filters.get("min_dividend_yield", 5)
+        max_p_nav = filters.get("max_p_nav", 1.2)
+        min_occupancy = filters.get("min_occupancy", 85)
+        max_debt_ratio = filters.get("max_debt_ratio", 50)
+        min_turnover = filters.get("min_turnover", 100)
+        asset_type = filters.get("asset_type", "all")
+
+        results = []
+
+        for reit_info in self.REIT_LIST:
+            code = reit_info["code"]
+            name = reit_info["name"]
+            rtype = reit_info["type"]
+
+            # 资产类型筛选
+            if asset_type != "all" and rtype != asset_type:
+                continue
+
+            # 获取实时数据
+            realtime = self.get_reit_data(code)
+            if not realtime:
+                continue
+
+            # 模拟基本面数据（实际应从定期报告获取）
+            # 这里使用估算值，实际需要对接基金公司数据
+            fundamentals = self._estimate_fundamentals(code, rtype)
+
+            # 计算日均成交额（万元）
+            daily_turnover = realtime.get("amount", 0) / 10000
+
+            # 应用筛选条件
+            dividend_yield = fundamentals.get("dividend_yield", 0)
+            p_nav = fundamentals.get("p_nav", 999)
+            occupancy = fundamentals.get("occupancy_rate", 0)
+            debt_ratio = fundamentals.get("debt_ratio", 100)
+
+            if dividend_yield < min_dividend_yield:
+                continue
+            if p_nav > max_p_nav:
+                continue
+            if occupancy < min_occupancy:
+                continue
+            if debt_ratio > max_debt_ratio:
+                continue
+            if daily_turnover < min_turnover:
+                continue
+
+            # 计算评分
+            score = self._calculate_score({
+                "dividend_yield": dividend_yield,
+                "p_nav": p_nav,
+                "occupancy_rate": occupancy,
+                "debt_ratio": debt_ratio,
+                "daily_turnover": daily_turnover,
+            })
+
+            results.append({
+                "code": code,
+                "name": name,
+                "asset_type": rtype,
+                "price": realtime["price"],
+                "change_pct": realtime["change_pct"],
+                "daily_turnover": round(daily_turnover, 2),
+                "dividend_yield": dividend_yield,
+                "p_nav": p_nav,
+                "occupancy_rate": occupancy,
+                "debt_ratio": debt_ratio,
+                "score": score,
+                "risk_level": self._get_risk_level(rtype),
+                "risk_notes": self._get_risk_notes(rtype),
+            })
+
+        # 按评分排序
+        results.sort(key=lambda x: x["score"], reverse=True)
+
+        return results
+
+    def _estimate_fundamentals(self, code: str, asset_type: str) -> Dict:
+        """
+        估算REIT基本面数据
+        实际应从基金公司定期报告获取
+        """
+        # 根据资产类型估算典型值
+        type_estimates = {
+            "仓储物流": {"dividend_yield": 5.5, "p_nav": 0.95, "occupancy_rate": 92, "debt_ratio": 35},
+            "产业园区": {"dividend_yield": 5.2, "p_nav": 1.05, "occupancy_rate": 88, "debt_ratio": 40},
+            "高速公路": {"dividend_yield": 7.5, "p_nav": 0.85, "occupancy_rate": 95, "debt_ratio": 45},
+            "能源基础设施": {"dividend_yield": 6.8, "p_nav": 0.90, "occupancy_rate": 98, "debt_ratio": 50},
+            "生态环保": {"dividend_yield": 6.0, "p_nav": 0.92, "occupancy_rate": 95, "debt_ratio": 42},
+            "保障性租赁住房": {"dividend_yield": 4.5, "p_nav": 1.10, "occupancy_rate": 96, "debt_ratio": 38},
+            "商业/消费": {"dividend_yield": 4.8, "p_nav": 1.15, "occupancy_rate": 85, "debt_ratio": 48},
+        }
+
+        return type_estimates.get(asset_type, {"dividend_yield": 5.0, "p_nav": 1.0, "occupancy_rate": 90, "debt_ratio": 45})
+
+    def _calculate_score(self, data: Dict) -> int:
+        """
+        计算REIT综合评分 (满分100)
+        """
+        score = 0
+
+        # 现金分派率 (35分)
+        dividend_yield = data.get("dividend_yield", 0)
+        if dividend_yield >= 8:
+            score += 35
+        elif dividend_yield >= 6:
+            score += 28
+        elif dividend_yield >= 5:
+            score += 21
+
+        # P/NAV (25分)
+        p_nav = data.get("p_nav", 999)
+        if p_nav <= 0.8:
+            score += 25
+        elif p_nav <= 1.0:
+            score += 20
+        elif p_nav <= 1.2:
+            score += 12
+
+        # 出租率 (20分)
+        occupancy = data.get("occupancy_rate", 0)
+        if occupancy >= 95:
+            score += 20
+        elif occupancy >= 90:
+            score += 16
+        elif occupancy >= 85:
+            score += 10
+
+        # 资产负债率 (10分)
+        debt_ratio = data.get("debt_ratio", 100)
+        if debt_ratio <= 30:
+            score += 10
+        elif debt_ratio <= 40:
+            score += 8
+        elif debt_ratio <= 50:
+            score += 5
+
+        # 流动性 (10分)
+        daily_turnover = data.get("daily_turnover", 0)
+        if daily_turnover >= 500:
+            score += 10
+        elif daily_turnover >= 200:
+            score += 8
+        elif daily_turnover >= 100:
+            score += 5
+
+        return score
+
+    def _get_risk_level(self, asset_type: str) -> str:
+        """获取资产类型风险等级"""
+        risk_map = {
+            "仓储物流": "低",
+            "产业园区": "中",
+            "高速公路": "中低",
+            "能源基础设施": "中",
+            "生态环保": "中低",
+            "保障性租赁住房": "低",
+            "商业/消费": "中高",
+        }
+        return risk_map.get(asset_type, "中")
+
+    def _get_risk_notes(self, asset_type: str) -> List[str]:
+        """获取资产类型风险提示"""
+        notes_map = {
+            "仓储物流": ["受电商物流需求影响", "关注租户集中度"],
+            "产业园区": ["受经济周期影响较大", "关注出租率变化趋势"],
+            "高速公路": ["有经营期限，到期后资产无偿移交", "车流量受经济和政策影响"],
+            "能源基础设施": ["受能源政策影响大", "电价波动影响收益"],
+            "生态环保": ["受环保政策影响", "运营成本可能上升"],
+            "保障性租赁住房": ["政策支持力度大", "租金增长空间有限"],
+            "商业/消费": ["受消费景气度影响", "新品种样本少，风险较高"],
+        }
+        return notes_map.get(asset_type, [])
+
+
+# 单例
+reit_service = REITService()
