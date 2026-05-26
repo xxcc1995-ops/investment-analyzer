@@ -1,6 +1,6 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from app.api import stocks, funds, cb, scraper, bonds, index_valuation, openbb, dividend, cigar_butt, cross_analysis, value_investing, reit, crypto, macro, futures
+from app.api import stocks, funds, cb, scraper, bonds, index_valuation, openbb, dividend, cigar_butt, cross_analysis, value_investing, reit, crypto, macro, futures, jc_screener, polymarket, export_champions, options, grid, xueqiu
 
 app = FastAPI(title="新源的Invest工具", version="1.0.0")
 
@@ -27,6 +27,12 @@ app.include_router(reit.router, prefix="/api/reit", tags=["reit"])
 app.include_router(crypto.router, prefix="/api/crypto", tags=["crypto"])
 app.include_router(macro.router, prefix="/api/macro", tags=["macro"])
 app.include_router(futures.router, prefix="/api/futures", tags=["futures"])
+app.include_router(jc_screener.router, prefix="/api/jc", tags=["金渐成体系"])
+app.include_router(polymarket.router, prefix="/api/polymarket", tags=["Polymarket"])
+app.include_router(export_champions.router, prefix="/api/export-champions", tags=["出口冠军"])
+app.include_router(options.router, prefix="/api/options", tags=["期权轮动"])
+app.include_router(grid.router, prefix="/api/grid", tags=["网格交易"])
+app.include_router(xueqiu.router, prefix="/api/xueqiu", tags=["雪球大V"])
 
 
 @app.get("/")

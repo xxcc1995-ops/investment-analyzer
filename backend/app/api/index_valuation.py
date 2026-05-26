@@ -193,7 +193,7 @@ def _get_fund_info(fund_code: str) -> Dict:
 
 
 @router.get("/data")
-async def get_index_valuation():
+def get_index_valuation():
     """获取指数估值数据"""
     results = []
 

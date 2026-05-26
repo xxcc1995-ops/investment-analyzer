@@ -357,7 +357,7 @@ def calculate_schloss_score(stock: dict) -> tuple:
 
 
 @router.get("/screener")
-async def cigar_butt_screener(
+def cigar_butt_screener(
     master: str = "combined",
     min_score: int = 50,
     min_market_cap: float = 5,
@@ -454,7 +454,7 @@ async def cigar_butt_screener(
 
 
 @router.get("/philosophy")
-async def get_philosophy():
+def get_philosophy():
     """获取烟蒂投资哲学说明"""
     return {
         'graham': {

@@ -64,7 +64,7 @@ def _parse_chart_data(data: Dict) -> List[Dict]:
 
 
 @router.get("/equity/price/{symbol}")
-async def get_equity_price(symbol: str, range: str = "1mo"):
+def get_equity_price(symbol: str, range: str = "1mo"):
     """获取美股行情数据
 
     - symbol: 股票代码 (如 AAPL, MSFT, GOOGL)
@@ -89,7 +89,7 @@ async def get_equity_price(symbol: str, range: str = "1mo"):
 
 
 @router.get("/equity/quote/{symbol}")
-async def get_equity_quote(symbol: str):
+def get_equity_quote(symbol: str):
     """获取美股实时报价"""
     data = _fetch_yahoo_chart(symbol.upper(), range="5d", interval="1d")
     if not data:
@@ -119,7 +119,7 @@ async def get_equity_quote(symbol: str):
 
 
 @router.get("/crypto/price/{symbol}")
-async def get_crypto_price(symbol: str, range: str = "1mo"):
+def get_crypto_price(symbol: str, range: str = "1mo"):
     """获取加密货币行情
 
     - symbol: 加密货币代码 (如 BTC, ETH, SOL)
@@ -146,7 +146,7 @@ async def get_crypto_price(symbol: str, range: str = "1mo"):
 
 
 @router.get("/crypto/quote/{symbol}")
-async def get_crypto_quote(symbol: str):
+def get_crypto_quote(symbol: str):
     """获取加密货币实时报价"""
     ticker_symbol = f"{symbol.upper()}-USD"
     data = _fetch_yahoo_chart(ticker_symbol, range="5d", interval="1d")

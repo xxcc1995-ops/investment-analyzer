@@ -1,16 +1,23 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, lazy, Suspense } from 'react'
 import axios from 'axios'
 import ReactECharts from 'echarts-for-react'
-import HKIpoPage from './pages/HKIpoPage'
-import IndexValuation from './pages/IndexValuation'
-import USMarket from './pages/USMarket'
-import DividendScreener from './pages/DividendScreener'
-import CigarButtScreener from './pages/CigarButtScreener'
-import ValueInvesting from './pages/ValueInvesting'
-import REITScreener from './pages/REITScreener'
-import CryptoScreener from './pages/CryptoScreener'
-import MacroData from './pages/MacroData'
-import FuturesData from './pages/FuturesData'
+
+const HKIpoPage = lazy(() => import('./pages/HKIpoPage'))
+const IndexValuation = lazy(() => import('./pages/IndexValuation'))
+const USMarket = lazy(() => import('./pages/USMarket'))
+const DividendScreener = lazy(() => import('./pages/DividendScreener'))
+const CigarButtScreener = lazy(() => import('./pages/CigarButtScreener'))
+const ValueInvesting = lazy(() => import('./pages/ValueInvesting'))
+const REITScreener = lazy(() => import('./pages/REITScreener'))
+const CryptoScreener = lazy(() => import('./pages/CryptoScreener'))
+const MacroData = lazy(() => import('./pages/MacroData'))
+const FuturesData = lazy(() => import('./pages/FuturesData'))
+const JCScreener = lazy(() => import('./pages/JCScreener'))
+const PolymarketPage = lazy(() => import('./pages/PolymarketPage'))
+const ExportChampions = lazy(() => import('./pages/ExportChampions'))
+const OptionsRotation = lazy(() => import('./pages/OptionsRotation'))
+const GridTrading = lazy(() => import('./pages/GridTrading'))
+const XueqiuGurus = lazy(() => import('./pages/XueqiuGurus'))
 
 const API_BASE = '/api'
 
@@ -72,6 +79,10 @@ interface FundArbitrage {
   price_dt: string
   issuer_nm: string
   estimated_profit: number
+  est_nav?: number | null
+  est_discount_rt?: number | null
+  underlying_name?: string | null
+  underlying_change?: number | null
 }
 
 interface ConvertibleBond {
@@ -149,7 +160,7 @@ function App() {
   const [cbLoggedIn, setCbLoggedIn] = useState(false)
 
   // 基金套利状态
-  const [mainView, setMainView] = useState<'stock' | 'arbitrage' | 'option' | 'cb' | 'hki' | 'indexVal' | 'usMarket' | 'dividend' | 'cigarButt' | 'valueInvesting' | 'reit' | 'crypto' | 'macro' | 'futures'>('stock')
+  const [mainView, setMainView] = useState<'stock' | 'arbitrage' | 'option' | 'cb' | 'hki' | 'indexVal' | 'usMarket' | 'dividend' | 'cigarButt' | 'valueInvesting' | 'reit' | 'crypto' | 'macro' | 'futures' | 'jcScreener' | 'polymarket' | 'exportChampions' | 'optionsRotation' | 'gridTrading' | 'xueqiuGurus'>('stock')
   const [arbFunds, setArbFunds] = useState<FundArbitrage[]>([])
   const [arbLoading, setArbLoading] = useState(false)
   const [arbFetchTime, setArbFetchTime] = useState('')
@@ -622,6 +633,18 @@ function App() {
             onClick={() => setMainView('macro')}>宏观数据</div>
           <div className={`list-tab ${mainView === 'futures' ? 'active' : ''}`}
             onClick={() => setMainView('futures')}>期货行业</div>
+          <div className={`list-tab ${mainView === 'jcScreener' ? 'active' : ''}`}
+            onClick={() => setMainView('jcScreener')}>机哥体系</div>
+          <div className={`list-tab ${mainView === 'polymarket' ? 'active' : ''}`}
+            onClick={() => setMainView('polymarket')}>Polymarket</div>
+          <div className={`list-tab ${mainView === 'exportChampions' ? 'active' : ''}`}
+            onClick={() => setMainView('exportChampions')}>出口冠军</div>
+          <div className={`list-tab ${mainView === 'optionsRotation' ? 'active' : ''}`}
+            onClick={() => setMainView('optionsRotation')}>期权轮动</div>
+          <div className={`list-tab ${mainView === 'gridTrading' ? 'active' : ''}`}
+            onClick={() => setMainView('gridTrading')}>网格交易</div>
+          <div className={`list-tab ${mainView === 'xueqiuGurus' ? 'active' : ''}`}
+            onClick={() => setMainView('xueqiuGurus')}>雪球大V</div>
         </div>
 
         {mainView === 'stock' && (
@@ -732,10 +755,52 @@ function App() {
             <p>商品快照 · 行业排名 · 资金流向</p>
           </div>
         )}
+
+        {mainView === 'jcScreener' && (
+          <div className="stock-list sidebar-info">
+            <p>金渐成投资体系</p>
+            <p>第一兼唯一 · 永不满仓 · 金字塔加仓</p>
+          </div>
+        )}
+
+        {mainView === 'polymarket' && (
+          <div className="stock-list sidebar-info">
+            <p>Polymarket分析</p>
+            <p>套利检测 · 价值发现 · 趋势追踪</p>
+          </div>
+        )}
+
+        {mainView === 'exportChampions' && (
+          <div className="stock-list sidebar-info">
+            <p>出口冠军筛选</p>
+            <p>全球竞争力 · 分红稳健 · 行业龙头</p>
+          </div>
+        )}
+
+        {mainView === 'optionsRotation' && (
+          <div className="stock-list sidebar-info">
+            <p>期权轮动策略</p>
+            <p>卖期权评分 · BSM定价 · 轮动推荐</p>
+          </div>
+        )}
+
+        {mainView === 'gridTrading' && (
+          <div className="stock-list sidebar-info">
+            <p>网格交易策略</p>
+            <p>自动网格 · 历史回测 · 仓位管理</p>
+          </div>
+        )}
+        {mainView === 'xueqiuGurus' && (
+          <div className="stock-list sidebar-info">
+            <p>雪球大V</p>
+            <p>鹿鼎公 · 管我财 · 小卡叔</p>
+          </div>
+        )}
       </div>
 
       {/* 右侧内容 */}
       <div className="main-content">
+        <Suspense fallback={<div className="loading"><div className="spinner"></div>加载中...</div>}>
         {loading ? (
           <div className="loading">
             <div className="spinner"></div>
@@ -761,6 +826,18 @@ function App() {
           <MacroData />
         ) : mainView === 'futures' ? (
           <FuturesData />
+        ) : mainView === 'jcScreener' ? (
+          <JCScreener />
+        ) : mainView === 'polymarket' ? (
+          <PolymarketPage />
+        ) : mainView === 'exportChampions' ? (
+          <ExportChampions />
+        ) : mainView === 'optionsRotation' ? (
+          <OptionsRotation />
+        ) : mainView === 'gridTrading' ? (
+          <GridTrading />
+        ) : mainView === 'xueqiuGurus' ? (
+          <XueqiuGurus />
         ) : mainView === 'option' ? (
           /* 期权收益计算器 */
           <div className="option-page">
@@ -1122,6 +1199,9 @@ function App() {
                         <th>名称</th>
                         <th>场内价格</th>
                         <th>场外净值</th>
+                        <th>底层资产</th>
+                        <th>EST净值</th>
+                        <th>EST溢价率</th>
                         <th>溢价率</th>
                         <th>申购费率</th>
                         <th>预估收益</th>
@@ -1138,6 +1218,19 @@ function App() {
                           <td>{f.fund_nm}</td>
                           <td>{f.price.toFixed(3)}</td>
                           <td>{f.fund_nav.toFixed(4)}</td>
+                          <td style={{ fontSize: 12 }}>
+                            {f.underlying_name ? (
+                              <span style={{ color: f.underlying_change && f.underlying_change >= 0 ? '#52c41a' : '#ff4d4f' }}>
+                                {f.underlying_name} {f.underlying_change != null ? `${f.underlying_change > 0 ? '+' : ''}${f.underlying_change.toFixed(2)}%` : ''}
+                              </span>
+                            ) : '-'}
+                          </td>
+                          <td style={{ fontWeight: 600, color: f.est_nav ? '#d4a76a' : 'var(--text-muted)' }}>
+                            {f.est_nav ? f.est_nav.toFixed(4) : '-'}
+                          </td>
+                          <td style={{ fontWeight: 600, color: f.est_discount_rt != null ? (f.est_discount_rt > 0 ? '#ff4d4f' : '#52c41a') : 'var(--text-muted)' }}>
+                            {f.est_discount_rt != null ? `${f.est_discount_rt > 0 ? '+' : ''}${f.est_discount_rt.toFixed(2)}%` : '-'}
+                          </td>
                           <td className="up">+{f.nav_discount_rt.toFixed(2)}%</td>
                           <td>{f.apply_fee || '-'}</td>
                           <td style={{ color: f.estimated_profit > 0 ? '#52c41a' : '#ff4d4f', fontWeight: 600 }}>
@@ -1150,7 +1243,7 @@ function App() {
                       ))}
                       {arbFunds.filter(f => f.direction === '溢价').length === 0 && (
                         <tr>
-                          <td colSpan={11} style={{ textAlign: 'center', padding: '40px', color: 'var(--text-muted)' }}>
+                          <td colSpan={15} style={{ textAlign: 'center', padding: '40px', color: 'var(--text-muted)' }}>
                             暂无溢价LOF基金
                           </td>
                         </tr>
@@ -1170,6 +1263,9 @@ function App() {
                         <th>名称</th>
                         <th>场内价格</th>
                         <th>场外净值</th>
+                        <th>底层资产</th>
+                        <th>EST净值</th>
+                        <th>EST折价率</th>
                         <th>折价率</th>
                         <th>赎回费率</th>
                         <th>预估收益</th>
@@ -1186,6 +1282,19 @@ function App() {
                           <td>{f.fund_nm}</td>
                           <td>{f.price.toFixed(3)}</td>
                           <td>{f.fund_nav.toFixed(4)}</td>
+                          <td style={{ fontSize: 12 }}>
+                            {f.underlying_name ? (
+                              <span style={{ color: f.underlying_change && f.underlying_change >= 0 ? '#52c41a' : '#ff4d4f' }}>
+                                {f.underlying_name} {f.underlying_change != null ? `${f.underlying_change > 0 ? '+' : ''}${f.underlying_change.toFixed(2)}%` : ''}
+                              </span>
+                            ) : '-'}
+                          </td>
+                          <td style={{ fontWeight: 600, color: f.est_nav ? '#d4a76a' : 'var(--text-muted)' }}>
+                            {f.est_nav ? f.est_nav.toFixed(4) : '-'}
+                          </td>
+                          <td style={{ fontWeight: 600, color: f.est_discount_rt != null ? (f.est_discount_rt < 0 ? '#52c41a' : '#ff4d4f') : 'var(--text-muted)' }}>
+                            {f.est_discount_rt != null ? `${f.est_discount_rt.toFixed(2)}%` : '-'}
+                          </td>
                           <td className="down">{f.nav_discount_rt.toFixed(2)}%</td>
                           <td>{f.redeem_fee || '-'}</td>
                           <td style={{ color: f.estimated_profit > 0 ? '#52c41a' : '#ff4d4f', fontWeight: 600 }}>
@@ -1198,7 +1307,7 @@ function App() {
                       ))}
                       {arbFunds.filter(f => f.direction === '折价').length === 0 && (
                         <tr>
-                          <td colSpan={11} style={{ textAlign: 'center', padding: '40px', color: 'var(--text-muted)' }}>
+                          <td colSpan={15} style={{ textAlign: 'center', padding: '40px', color: 'var(--text-muted)' }}>
                             暂无折价LOF基金
                           </td>
                         </tr>
@@ -1684,6 +1793,7 @@ function App() {
             </div>
           </div>
         )}
+        </Suspense>
       </div>
     </div>
   )

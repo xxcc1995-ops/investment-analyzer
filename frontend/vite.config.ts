@@ -11,5 +11,15 @@ export default defineConfig({
         changeOrigin: true,
       }
     }
+  },
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          'echarts': ['echarts', 'echarts-for-react'],
+          'react-vendor': ['react', 'react-dom'],
+        }
+      }
+    }
   }
 })

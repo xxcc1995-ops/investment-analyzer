@@ -13,7 +13,7 @@ class LoginRequest(BaseModel):
 
 
 @router.post("/login")
-async def login(req: LoginRequest):
+def login(req: LoginRequest):
     """登录集思录"""
     result = FundService.login(req.user_name, req.password)
     if not result['success']:
@@ -22,13 +22,13 @@ async def login(req: LoginRequest):
 
 
 @router.get("/login_status")
-async def login_status():
+def login_status():
     """获取登录状态"""
     return FundService.get_login_status()
 
 
 @router.get("/arbitrage")
-async def get_arbitrage(
+def get_arbitrage(
     min_threshold: float = Query(0.0, ge=0, description="最低折溢价率阈值(%)"),
     direction: str = Query("all", description="筛选方向: all/溢价/折价"),
     min_turnover: float = Query(300.0, ge=0, description="最低成交额(万元)"),
@@ -52,7 +52,7 @@ async def get_arbitrage(
 
 
 @router.get("/refresh")
-async def refresh_data():
+def refresh_data():
     """强制刷新数据"""
     result = FundService.refresh_data()
     if "error" in result:

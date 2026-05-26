@@ -11,7 +11,7 @@ class DCFRequest(BaseModel):
 
 
 @router.post("/dcf")
-async def calculate_dcf(request: DCFRequest):
+def calculate_dcf(request: DCFRequest):
     """DCF估值 — 暂不可用"""
     raise HTTPException(
         status_code=501,

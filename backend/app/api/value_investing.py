@@ -18,7 +18,7 @@ class DCFRequest(BaseModel):
 
 
 @router.get("/philosophy")
-async def get_philosophy():
+def get_philosophy():
     """获取四位大师的完整投资哲学体系"""
     return {
         'buffett': {
@@ -305,7 +305,7 @@ async def get_philosophy():
 
 
 @router.get("/screener")
-async def value_investing_screener(
+def value_investing_screener(
     market: str = Query("all", description="市场: all/a/hk/us"),
     master: str = Query("combined", description="大师: combined/buffett/munger/li_lu/duan_yongping"),
     min_score: int = Query(50, description="最低评分"),
@@ -330,7 +330,7 @@ async def value_investing_screener(
 
 
 @router.post("/dcf")
-async def dcf_calculator(req: DCFRequest):
+def dcf_calculator(req: DCFRequest):
     """DCF自由现金流折现计算器"""
     if req.current_fcf <= 0 or req.shares <= 0:
         raise HTTPException(400, "FCF和股本必须大于0")

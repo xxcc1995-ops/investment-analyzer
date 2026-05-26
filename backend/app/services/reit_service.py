@@ -1,8 +1,9 @@
 """
 REIT数据服务 - 获取中国公募REITs数据
-数据源：东方财富API
+数据源：新浪财经API
 """
 import requests
+import re
 from datetime import datetime
 from typing import List, Dict, Optional
 
@@ -44,63 +45,20 @@ class REITService:
         {"code": "508012", "name": "平安广州广河REIT", "type": "高速公路"},
     ]
 
-    def __init__(self):
-        self.base_url = "https://push2.eastmoney.com/api/qt/stock/get"
-
-    def get_reit_data(self, code: str) -> Optional[Dict]:
-        """
-        获取单个REIT的实时行情数据
-        """
-        # 东方财富REIT代码格式：1.508056 (上交所) 或 0.180301 (深交所)
-        prefix = "1" if code.startswith("5") else "0"
-        secid = f"{prefix}.{code}"
-
-        params = {
-            "secid": secid,
-            "fields": "f43,f44,f45,f46,f47,f48,f50,f51,f52,f55,f57,f58,f116,f117,f162,f167,f170,f171",
-            "ut": "fa5fd1943c7b386f172d6893dbfba10b",
-        }
-
-        try:
-            resp = requests.get(self.base_url, params=params, timeout=10)
-            data = resp.json().get("data", {})
-
-            if not data:
-                return None
-
-            # 解析数据
-            price = data.get("f43", 0) / 1000 if data.get("f43") else 0
-            change_pct = data.get("f170", 0) / 100 if data.get("f170") else 0
-            volume = data.get("f47", 0)
-            amount = data.get("f48", 0)
-
-            return {
-                "code": code,
-                "price": price,
-                "change_pct": change_pct,
-                "volume": volume,
-                "amount": amount,
-                "high": data.get("f44", 0) / 1000 if data.get("f44") else 0,
-                "low": data.get("f45", 0) / 1000 if data.get("f45") else 0,
-                "open": data.get("f46", 0) / 1000 if data.get("f46") else 0,
-                "pre_close": data.get("f60", 0) / 1000 if data.get("f60") else 0,
-            }
-        except Exception as e:
-            print(f"获取REIT {code} 数据失败: {e}")
-            return None
+    # 估算的基本面数据（实际应从定期报告获取）
+    FUNDAMENTALS = {
+        "仓储物流": {"dividend_yield": 5.5, "p_nav": 0.95, "occupancy_rate": 92, "debt_ratio": 35},
+        "产业园区": {"dividend_yield": 5.2, "p_nav": 1.05, "occupancy_rate": 88, "debt_ratio": 40},
+        "高速公路": {"dividend_yield": 7.5, "p_nav": 0.85, "occupancy_rate": 95, "debt_ratio": 45},
+        "能源基础设施": {"dividend_yield": 6.8, "p_nav": 0.90, "occupancy_rate": 98, "debt_ratio": 50},
+        "生态环保": {"dividend_yield": 6.0, "p_nav": 0.92, "occupancy_rate": 95, "debt_ratio": 42},
+        "保障性租赁住房": {"dividend_yield": 4.5, "p_nav": 1.10, "occupancy_rate": 96, "debt_ratio": 38},
+        "商业/消费": {"dividend_yield": 4.8, "p_nav": 1.15, "occupancy_rate": 85, "debt_ratio": 48},
+    }
 
     def get_all_reits(self, filters: Dict = None) -> List[Dict]:
         """
         获取所有REIT数据并应用筛选
-
-        参数:
-        - filters: 筛选条件
-            - min_dividend_yield: 最低分红率 (默认5)
-            - max_p_nav: P/NAV上限 (默认1.2)
-            - min_occupancy: 最低出租率 (默认85)
-            - max_debt_ratio: 最高负债率 (默认50)
-            - min_turnover: 最低日均成交额(万) (默认100)
-            - asset_type: 资产类型 (默认all)
         """
         if filters is None:
             filters = {}
@@ -112,8 +70,10 @@ class REITService:
         min_turnover = filters.get("min_turnover", 100)
         asset_type = filters.get("asset_type", "all")
 
-        results = []
+        # 批量获取实时数据
+        realtime_data = self._fetch_batch_realtime()
 
+        results = []
         for reit_info in self.REIT_LIST:
             code = reit_info["code"]
             name = reit_info["name"]
@@ -124,22 +84,23 @@ class REITService:
                 continue
 
             # 获取实时数据
-            realtime = self.get_reit_data(code)
+            realtime = realtime_data.get(code)
             if not realtime:
                 continue
 
-            # 模拟基本面数据（实际应从定期报告获取）
-            # 这里使用估算值，实际需要对接基金公司数据
-            fundamentals = self._estimate_fundamentals(code, rtype)
+            # 获取基本面数据
+            fundamentals = self.FUNDAMENTALS.get(rtype, {
+                "dividend_yield": 5.0, "p_nav": 1.0, "occupancy_rate": 90, "debt_ratio": 45
+            })
 
-            # 计算日均成交额（万元）
+            # 日均成交额（万元）
             daily_turnover = realtime.get("amount", 0) / 10000
 
             # 应用筛选条件
-            dividend_yield = fundamentals.get("dividend_yield", 0)
-            p_nav = fundamentals.get("p_nav", 999)
-            occupancy = fundamentals.get("occupancy_rate", 0)
-            debt_ratio = fundamentals.get("debt_ratio", 100)
+            dividend_yield = fundamentals["dividend_yield"]
+            p_nav = fundamentals["p_nav"]
+            occupancy = fundamentals["occupancy_rate"]
+            debt_ratio = fundamentals["debt_ratio"]
 
             if dividend_yield < min_dividend_yield:
                 continue
@@ -179,31 +140,79 @@ class REITService:
 
         # 按评分排序
         results.sort(key=lambda x: x["score"], reverse=True)
-
         return results
 
-    def _estimate_fundamentals(self, code: str, asset_type: str) -> Dict:
-        """
-        估算REIT基本面数据
-        实际应从基金公司定期报告获取
-        """
-        # 根据资产类型估算典型值
-        type_estimates = {
-            "仓储物流": {"dividend_yield": 5.5, "p_nav": 0.95, "occupancy_rate": 92, "debt_ratio": 35},
-            "产业园区": {"dividend_yield": 5.2, "p_nav": 1.05, "occupancy_rate": 88, "debt_ratio": 40},
-            "高速公路": {"dividend_yield": 7.5, "p_nav": 0.85, "occupancy_rate": 95, "debt_ratio": 45},
-            "能源基础设施": {"dividend_yield": 6.8, "p_nav": 0.90, "occupancy_rate": 98, "debt_ratio": 50},
-            "生态环保": {"dividend_yield": 6.0, "p_nav": 0.92, "occupancy_rate": 95, "debt_ratio": 42},
-            "保障性租赁住房": {"dividend_yield": 4.5, "p_nav": 1.10, "occupancy_rate": 96, "debt_ratio": 38},
-            "商业/消费": {"dividend_yield": 4.8, "p_nav": 1.15, "occupancy_rate": 85, "debt_ratio": 48},
-        }
+    def _fetch_batch_realtime(self) -> Dict[str, Dict]:
+        """批量获取REIT实时数据（新浪财经API）"""
+        # 构建代码列表
+        codes = []
+        for reit in self.REIT_LIST:
+            code = reit["code"]
+            prefix = "sh" if code.startswith("5") else "sz"
+            codes.append(f"{prefix}{code}")
 
-        return type_estimates.get(asset_type, {"dividend_yield": 5.0, "p_nav": 1.0, "occupancy_rate": 90, "debt_ratio": 45})
+        # 批量请求
+        url = f"https://hq.sinajs.cn/list={','.join(codes)}"
+        headers = {'Referer': 'https://finance.sina.com.cn'}
+
+        try:
+            resp = requests.get(url, headers=headers, timeout=10)
+            resp.encoding = 'gbk'
+            text = resp.text
+        except Exception as e:
+            print(f"获取REIT批量数据失败: {e}")
+            return {}
+
+        result = {}
+        for line in text.strip().split('\n'):
+            if '=' not in line:
+                continue
+
+            # 提取代码
+            var_part, _, val_part = line.partition('=')
+            match = re.search(r'hq_str_(sh|sz)(\d+)', var_part)
+            if not match:
+                continue
+
+            prefix = match.group(1)
+            code = match.group(2)
+            val_part = val_part.strip(';').strip('"')
+
+            if not val_part:
+                continue
+
+            fields = val_part.split(',')
+            if len(fields) < 10:
+                continue
+
+            try:
+                # 格式: 名称,今开,昨收,当前,最高,最低,买一,卖一,成交量,成交额,...
+                name = fields[0]
+                price = float(fields[3]) if fields[3] else 0
+                pre_close = float(fields[2]) if fields[2] else 0
+                volume = int(fields[8]) if fields[8] else 0
+                amount = float(fields[9]) if fields[9] else 0
+
+                if price <= 0:
+                    continue
+
+                change_pct = round((price - pre_close) / pre_close * 100, 2) if pre_close > 0 else 0
+
+                result[code] = {
+                    "name": name,
+                    "price": price,
+                    "pre_close": pre_close,
+                    "change_pct": change_pct,
+                    "volume": volume,
+                    "amount": amount,
+                }
+            except (ValueError, IndexError):
+                continue
+
+        return result
 
     def _calculate_score(self, data: Dict) -> int:
-        """
-        计算REIT综合评分 (满分100)
-        """
+        """计算REIT综合评分 (满分100)"""
         score = 0
 
         # 现金分派率 (35分)

@@ -7,7 +7,7 @@ data_service = DataService()
 
 
 @router.get("/screener")
-async def dividend_screener(master: str = "combined"):
+def dividend_screener(master: str = "combined"):
     """
     基于王文和散户乙投资思想的股票筛选
 

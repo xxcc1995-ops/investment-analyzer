@@ -24,7 +24,7 @@ class ScrapeResponse(BaseModel):
 
 
 @router.post("/fetch", response_model=ScrapeResponse)
-async def fetch_page(req: ScrapeRequest):
+def fetch_page(req: ScrapeRequest):
     """爬取网页内容
 
     mode:
@@ -63,7 +63,7 @@ async def fetch_page(req: ScrapeRequest):
 
 
 @router.get("/test")
-async def test_scrapling():
+def test_scrapling():
     """测试 Scrapling 是否正常工作"""
     try:
         from scrapling.fetchers import Fetcher

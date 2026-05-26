@@ -6,7 +6,7 @@ router = APIRouter()
 
 
 @router.get("/screener")
-async def reit_screener(
+def reit_screener(
     min_dividend_yield: float = Query(5, description="最低分红率(%)"),
     max_p_nav: float = Query(1.2, description="P/NAV上限"),
     min_occupancy: float = Query(85, description="最低出租率(%)"),
@@ -45,7 +45,7 @@ async def reit_screener(
 
 
 @router.get("/types")
-async def get_asset_types():
+def get_asset_types():
     """获取所有资产类型"""
     types = list(set(r["type"] for r in reit_service.REIT_LIST))
     types.sort()
@@ -53,7 +53,7 @@ async def get_asset_types():
 
 
 @router.get("/risk-guide")
-async def get_risk_guide():
+def get_risk_guide():
     """获取REIT投资风险指南"""
     return {
         "risks": [

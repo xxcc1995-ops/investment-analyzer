@@ -58,7 +58,7 @@ def _get_us_pe() -> Optional[float]:
 
 
 @router.get("/yields")
-async def get_bond_yields():
+def get_bond_yields():
     """获取中美十年期国债收益率及股债比"""
     result = {"cn": None, "us": None, "error": None}
 

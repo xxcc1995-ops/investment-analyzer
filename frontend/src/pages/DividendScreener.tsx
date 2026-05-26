@@ -68,6 +68,7 @@ export default function DividendScreener() {
   const [loading, setLoading] = useState(false)
   const [updateTime, setUpdateTime] = useState('')
   const [selectedMaster, setSelectedMaster] = useState<'wangwen' | 'sanhuyi' | 'combined'>('combined')
+  const [expandedStock, setExpandedStock] = useState<string | null>(null)
 
   // 计算器状态
   const [inputs, setInputs] = useState<CalculatorInputs>({
@@ -139,6 +140,48 @@ export default function DividendScreener() {
     }
 
     setResults(results)
+  }
+
+  // 计算分红回本年数
+  const calcPayback = (stock: DividendStock) => {
+    const yield_pct = stock.dividend_yield ?? 0
+    if (yield_pct <= 0) return null
+    const price = stock.price
+    const dps = price * yield_pct / 100  // 每股股息
+
+    // 静态回本年数（不增长不复投）
+    const static_years = 100 / yield_pct
+
+    // 不同增长率+是否复投的场景
+    const scenarios = [0, 3, 5, 10].map(growth => {
+      // 不复投
+      let cumDiv = 0
+      let years_no_reinvest = 0
+      let curDps = dps
+      for (let y = 1; y <= 50; y++) {
+        cumDiv += curDps
+        if (cumDiv >= price && years_no_reinvest === 0) years_no_reinvest = y
+        curDps *= (1 + growth / 100)
+      }
+
+      // 复投
+      let shares = 1
+      let cumDivR = 0
+      let years_reinvest = 0
+      curDps = dps
+      for (let y = 1; y <= 50; y++) {
+        const income = shares * curDps
+        cumDivR += income
+        const newShares = income / price
+        shares += newShares
+        if (cumDivR >= price && years_reinvest === 0) years_reinvest = y
+        curDps *= (1 + growth / 100)
+      }
+
+      return { growth, years_no_reinvest, years_reinvest }
+    })
+
+    return { price, dps, yield_pct, static_years, scenarios }
   }
 
   const getScoreColor = (score: number) => {
@@ -369,64 +412,125 @@ export default function DividendScreener() {
                   </tr>
                 </thead>
                 <tbody>
-                  {stocks.map((stock, i) => (
-                    <tr key={stock.code}>
-                      <td>{i + 1}</td>
-                      <td>{stock.code}</td>
-                      <td style={{ fontWeight: 600 }}>{stock.name}</td>
-                      <td style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{stock.report_period || '--'}</td>
-                      <td>{stock.price.toFixed(2)}</td>
-                      <td style={{
-                        color: (stock.dividend_yield ?? 0) >= 5 ? '#52c41a' : (stock.dividend_yield ?? 0) >= 4 ? '#1890ff' : '#faad14',
-                        fontWeight: 600,
-                      }}>
-                        {stock.dividend_yield?.toFixed(2) ?? '--'}
-                      </td>
-                      <td style={{
-                        color: (stock.pe ?? 999) <= 10 ? '#52c41a' : (stock.pe ?? 999) <= 15 ? '#1890ff' : '#ff4d4f',
-                      }}>
-                        {stock.pe?.toFixed(2) ?? '--'}
-                      </td>
-                      <td>{stock.pb?.toFixed(2) ?? '--'}</td>
-                      <td style={{
-                        color: (stock.roe ?? 0) >= 20 ? '#52c41a' : (stock.roe ?? 0) >= 15 ? '#1890ff' : '#faad14',
-                        fontWeight: 600,
-                      }}>
-                        {stock.roe?.toFixed(2) ?? '--'}
-                      </td>
-                      <td>{stock.gross_margin?.toFixed(2) ?? '--'}</td>
-                      <td style={{
-                        color: (stock.debt_ratio ?? 100) <= 40 ? '#52c41a' : (stock.debt_ratio ?? 100) <= 60 ? '#faad14' : '#ff4d4f',
-                      }}>
-                        {stock.debt_ratio?.toFixed(2) ?? '--'}
-                      </td>
-                      <td style={{ fontWeight: 600 }}>{stock.consecutive_years}</td>
-                      <td>
-                        <span style={{
-                          color: getScoreColor(stock.score),
-                          fontWeight: 700,
-                          fontSize: '15px',
-                        }}>
-                          {stock.score}
-                        </span>
-                      </td>
-                      <td>
-                        <span style={{
-                          display: 'inline-block',
-                          padding: '2px 8px',
-                          borderRadius: '4px',
-                          fontSize: '12px',
-                          fontWeight: 600,
-                          background: stock.match_level === 'excellent' ? 'rgba(82,196,26,0.15)' :
-                            stock.match_level === 'good' ? 'rgba(24,144,255,0.15)' : 'rgba(250,173,20,0.15)',
-                          color: stock.match_level === 'excellent' ? '#52c41a' :
-                            stock.match_level === 'good' ? '#1890ff' : '#faad14',
-                        }}>
-                          {getMatchLevelText(stock.match_level)}
-                        </span>
-                      </td>
-                    </tr>
-                  ))}
+                  {stocks.map((stock, i) => {
+                    const isExpanded = expandedStock === stock.code
+                    const payback = calcPayback(stock)
+                    return (
+                      <>
+                        <tr key={stock.code} onClick={() => setExpandedStock(isExpanded ? null : stock.code)} style={{ cursor: 'pointer' }}>
+                          <td>{i + 1}</td>
+                          <td>{stock.code}</td>
+                          <td style={{ fontWeight: 600 }}>{stock.name}</td>
+                          <td style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{stock.report_period || '--'}</td>
+                          <td>{stock.price.toFixed(2)}</td>
+                          <td style={{
+                            color: (stock.dividend_yield ?? 0) >= 5 ? '#52c41a' : (stock.dividend_yield ?? 0) >= 4 ? '#1890ff' : '#faad14',
+                            fontWeight: 600,
+                          }}>
+                            {stock.dividend_yield?.toFixed(2) ?? '--'}
+                          </td>
+                          <td style={{
+                            color: (stock.pe ?? 999) <= 10 ? '#52c41a' : (stock.pe ?? 999) <= 15 ? '#1890ff' : '#ff4d4f',
+                          }}>
+                            {stock.pe?.toFixed(2) ?? '--'}
+                          </td>
+                          <td>{stock.pb?.toFixed(2) ?? '--'}</td>
+                          <td style={{
+                            color: (stock.roe ?? 0) >= 20 ? '#52c41a' : (stock.roe ?? 0) >= 15 ? '#1890ff' : '#faad14',
+                            fontWeight: 600,
+                          }}>
+                            {stock.roe?.toFixed(2) ?? '--'}
+                          </td>
+                          <td>{stock.gross_margin?.toFixed(2) ?? '--'}</td>
+                          <td style={{
+                            color: (stock.debt_ratio ?? 100) <= 40 ? '#52c41a' : (stock.debt_ratio ?? 100) <= 60 ? '#faad14' : '#ff4d4f',
+                          }}>
+                            {stock.debt_ratio?.toFixed(2) ?? '--'}
+                          </td>
+                          <td style={{ fontWeight: 600 }}>{stock.consecutive_years}</td>
+                          <td>
+                            <span style={{
+                              color: getScoreColor(stock.score),
+                              fontWeight: 700,
+                              fontSize: '15px',
+                            }}>
+                              {stock.score}
+                            </span>
+                          </td>
+                          <td>
+                            <span style={{
+                              display: 'inline-block',
+                              padding: '2px 8px',
+                              borderRadius: '4px',
+                              fontSize: '12px',
+                              fontWeight: 600,
+                              background: stock.match_level === 'excellent' ? 'rgba(82,196,26,0.15)' :
+                                stock.match_level === 'good' ? 'rgba(24,144,255,0.15)' : 'rgba(250,173,20,0.15)',
+                              color: stock.match_level === 'excellent' ? '#52c41a' :
+                                stock.match_level === 'good' ? '#1890ff' : '#faad14',
+                            }}>
+                              {getMatchLevelText(stock.match_level)}
+                            </span>
+                          </td>
+                        </tr>
+                        {isExpanded && payback && (
+                          <tr key={`${stock.code}-payback`}>
+                            <td colSpan={14} style={{ padding: '16px 20px', background: 'var(--bg-secondary)' }}>
+                              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 16 }}>
+                                {/* 核心指标 */}
+                                <div style={{ background: 'var(--bg-tertiary)', padding: 16, borderRadius: 8, borderLeft: '3px solid #58a6ff' }}>
+                                  <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 4 }}>静态回本年数（不增长不复投）</div>
+                                  <div style={{ fontSize: 28, fontWeight: 700, color: payback.static_years <= 15 ? '#52c41a' : payback.static_years <= 25 ? '#58a6ff' : '#d29922' }}>
+                                    {payback.static_years.toFixed(1)} 年
+                                  </div>
+                                  <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 4 }}>
+                                    每股股息 ¥{payback.dps.toFixed(3)} / 股价 ¥{payback.price.toFixed(2)}
+                                  </div>
+                                </div>
+
+                                {/* 回本年数表 */}
+                                <div style={{ gridColumn: 'span 2', background: 'var(--bg-tertiary)', padding: 16, borderRadius: 8 }}>
+                                  <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)', marginBottom: 12 }}>
+                                    分红回本年数（不同增长率 + 是否复投）
+                                  </div>
+                                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+                                    <thead>
+                                      <tr style={{ borderBottom: '1px solid var(--border-primary)' }}>
+                                        <th style={{ textAlign: 'left', padding: '6px 8px', color: 'var(--text-muted)' }}>股息增长率</th>
+                                        {payback.scenarios.map(s => (
+                                          <th key={s.growth} style={{ textAlign: 'center', padding: '6px 8px', color: 'var(--text-muted)' }}>
+                                            {s.growth === 0 ? '不增长' : `+${s.growth}%/年`}
+                                          </th>
+                                        ))}
+                                      </tr>
+                                    </thead>
+                                    <tbody>
+                                      <tr style={{ borderBottom: '1px solid var(--border-primary)' }}>
+                                        <td style={{ padding: '6px 8px', fontWeight: 600 }}>不复投</td>
+                                        {payback.scenarios.map(s => (
+                                          <td key={s.growth} style={{ textAlign: 'center', padding: '6px 8px', fontWeight: 700, fontSize: 16, color: s.years_no_reinvest <= 15 ? '#52c41a' : s.years_no_reinvest <= 25 ? '#58a6ff' : '#d29922' }}>
+                                            {s.years_no_reinvest}年
+                                          </td>
+                                        ))}
+                                      </tr>
+                                      <tr>
+                                        <td style={{ padding: '6px 8px', fontWeight: 600 }}>复投</td>
+                                        {payback.scenarios.map(s => (
+                                          <td key={s.growth} style={{ textAlign: 'center', padding: '6px 8px', fontWeight: 700, fontSize: 16, color: s.years_reinvest <= 15 ? '#52c41a' : s.years_reinvest <= 25 ? '#58a6ff' : '#d29922' }}>
+                                            {s.years_reinvest}年
+                                          </td>
+                                        ))}
+                                      </tr>
+                                    </tbody>
+                                  </table>
+                                </div>
+                              </div>
+                            </td>
+                          </tr>
+                        )}
+                      </>
+                    )
+                  })}
                   {stocks.length === 0 && (
                     <tr>
                       <td colSpan={14} style={{ textAlign: 'center', padding: '40px', color: 'var(--text-muted)' }}>

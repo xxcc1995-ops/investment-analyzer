@@ -7,7 +7,7 @@ router = APIRouter()
 
 
 @router.get("/double-low")
-async def get_double_low(
+def get_double_low(
     max_double_low: float = Query(130.0, ge=0, description="双低值上限"),
     min_rating: str = Query('A', description="最低信用评级: A/A+/AA-/AA/AA+/AAA"),
     min_year_left: float = Query(1.0, ge=0, description="最低剩余年限(年)"),
@@ -34,7 +34,7 @@ async def get_double_low(
 
 
 @router.get("/refresh")
-async def refresh_data():
+def refresh_data():
     """强制刷新可转债数据"""
     result = CBService.refresh_data()
     if "error" in result:

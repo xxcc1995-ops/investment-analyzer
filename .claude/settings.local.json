@@ -10,7 +10,12 @@
       "Bash(../.venv/Scripts/python.exe -m uvicorn app.main:app --reload --port 8001)",
       "Bash(curl -s http://localhost:8001/api/stocks/search?keyword=茅台)",
       "Bash(.venv/Scripts/python.exe -c \"import requests; r = requests.get\\('http://localhost:8001/api/stocks/search', params={'keyword': '600519'}\\); print\\(r.status_code, r.json\\(\\)\\)\")",
-      "Bash(.venv/Scripts/python.exe -c \"import requests; r = requests.get\\('http://localhost:8001/api/stocks/600519/basic'\\); print\\(r.status_code, r.json\\(\\)\\)\")"
+      "Bash(.venv/Scripts/python.exe -c \"import requests; r = requests.get\\('http://localhost:8001/api/stocks/600519/basic'\\); print\\(r.status_code, r.json\\(\\)\\)\")",
+      "Bash(rm -rf /e/QuantDinger/frontend/*)",
+      "Bash(cp -r /e/QuantDinger-Vue/dist/* /e/QuantDinger/frontend/)",
+      "Bash(taskkill //F //IM python.exe)",
+      "Read(//e/QuantDinger/**)",
+      "Bash(backend_api_python/.venv/Scripts/python.exe start_local.py)"
     ]
   }
 }

@@ -140,7 +140,7 @@ def generate_timeline(reports: list) -> list:
 
 
 @router.get("/analyze/{stock_code}")
-async def cross_analysis(stock_code: str):
+def cross_analysis(stock_code: str):
     """
     横纵分析法 - 公司快速扫盲
 

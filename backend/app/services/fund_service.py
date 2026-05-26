@@ -53,6 +53,308 @@ def _estimate_profit(price: float, nav: float, apply_fee: str, redeem_fee: str, 
         return round(gross - fee, 3)
 
 
+# ============================================================
+# EST估算净值 - 底层资产映射
+# ============================================================
+
+_UNDERLYING_MAP = {
+    # 纳指100类
+    '161130': {'code': 'gb_qqq', 'type': 'us_etf', 'name': '纳指100'},
+    '513100': {'code': 'gb_qqq', 'type': 'us_etf', 'name': '纳指100'},
+    '513110': {'code': 'gb_qqq', 'type': 'us_etf', 'name': '纳指100'},
+    '513300': {'code': 'gb_qqq', 'type': 'us_etf', 'name': '纳指100'},
+    '513390': {'code': 'gb_qqq', 'type': 'us_etf', 'name': '纳指100'},
+    '513870': {'code': 'gb_qqq', 'type': 'us_etf', 'name': '纳指100'},
+    '159501': {'code': 'gb_qqq', 'type': 'us_etf', 'name': '纳指100'},
+    '159513': {'code': 'gb_qqq', 'type': 'us_etf', 'name': '纳指100'},
+    '159632': {'code': 'gb_qqq', 'type': 'us_etf', 'name': '纳指100'},
+    '159659': {'code': 'gb_qqq', 'type': 'us_etf', 'name': '纳指100'},
+    '159660': {'code': 'gb_qqq', 'type': 'us_etf', 'name': '纳指100'},
+    '159696': {'code': 'gb_qqq', 'type': 'us_etf', 'name': '纳指100'},
+    '159941': {'code': 'gb_qqq', 'type': 'us_etf', 'name': '纳指100'},
+    # 标普500类
+    '513500': {'code': 'gb_spy', 'type': 'us_etf', 'name': '标普500'},
+    '513650': {'code': 'gb_spy', 'type': 'us_etf', 'name': '标普500'},
+    '161125': {'code': 'gb_spy', 'type': 'us_etf', 'name': '标普500'},
+    '159612': {'code': 'gb_spy', 'type': 'us_etf', 'name': '标普500'},
+    '159655': {'code': 'gb_spy', 'type': 'us_etf', 'name': '标普500'},
+    # 标普信息科技
+    '161128': {'code': 'gb_xlk', 'type': 'us_etf', 'name': '标普信息科技'},
+    # 标普医疗保健
+    '161126': {'code': 'gb_xlv', 'type': 'us_etf', 'name': '标普医疗'},
+    # 生物科技类
+    '513290': {'code': 'gb_ibb', 'type': 'us_etf', 'name': '纳指生物科技'},
+    '161127': {'code': 'gb_ibb', 'type': 'us_etf', 'name': '纳指生物科技'},
+    '159502': {'code': 'gb_ibb', 'type': 'us_etf', 'name': '纳指生物科技'},
+    # 美国消费
+    '162415': {'code': 'gb_xly', 'type': 'us_etf', 'name': '美国消费'},
+    # 美国REIT
+    '160140': {'code': 'gb_vnq', 'type': 'us_etf', 'name': '美国REIT'},
+    # 道琼斯
+    '513400': {'code': 'gb_dia', 'type': 'us_etf', 'name': '道琼斯'},
+    # 原油类
+    '162411': {'code': 'hf_CL', 'type': 'futures', 'name': '原油'},
+    '162719': {'code': 'hf_CL', 'type': 'futures', 'name': '原油'},
+    '160416': {'code': 'hf_CL', 'type': 'futures', 'name': '原油'},
+    '513350': {'code': 'hf_CL', 'type': 'futures', 'name': '标普油气'},
+    '159518': {'code': 'hf_CL', 'type': 'futures', 'name': '标普油气'},
+    # 黄金类
+    '518880': {'code': 'hf_GC', 'type': 'futures', 'name': '黄金'},
+    '518800': {'code': 'hf_GC', 'type': 'futures', 'name': '黄金'},
+    '159934': {'code': 'hf_GC', 'type': 'futures', 'name': '黄金'},
+    '159937': {'code': 'hf_GC', 'type': 'futures', 'name': '黄金'},
+    # 白银
+    '161226': {'code': 'hf_SI', 'type': 'futures', 'name': '白银'},
+    # 豆粕
+    '159985': {'code': 'hf_SM', 'type': 'futures', 'name': '豆粕'},
+    # A股宽基指数
+    '160706': {'code': 'sh000300', 'type': 'a_index', 'name': '沪深300'},
+    '510300': {'code': 'sh000300', 'type': 'a_index', 'name': '沪深300'},
+    '510310': {'code': 'sh000300', 'type': 'a_index', 'name': '沪深300'},
+    '510330': {'code': 'sh000300', 'type': 'a_index', 'name': '沪深300'},
+    '159919': {'code': 'sh000300', 'type': 'a_index', 'name': '沪深300'},
+    '501043': {'code': 'sh000300', 'type': 'a_index', 'name': '沪深300'},
+    '163407': {'code': 'sh000300', 'type': 'a_index', 'name': '沪深300'},
+    '160119': {'code': 'sh000905', 'type': 'a_index', 'name': '中证500'},
+    '502000': {'code': 'sh000905', 'type': 'a_index', 'name': '中证500'},
+    '161812': {'code': 'sz399006', 'type': 'a_index', 'name': '创业板'},
+    '163109': {'code': 'sz399006', 'type': 'a_index', 'name': '创业板'},
+    '161227': {'code': 'sz399001', 'type': 'a_index', 'name': '深证成指'},
+    # Jisilu A股行业LOF
+    '160615': {'code': 'sh000300', 'type': 'a_index', 'name': '沪深300'},
+    '160616': {'code': 'sh000905', 'type': 'a_index', 'name': '中证500'},
+    '160223': {'code': 'sz399006', 'type': 'a_index', 'name': '创业板'},
+    '160219': {'code': 'sh000037', 'type': 'a_index', 'name': '上证医药'},
+    '160635': {'code': 'sh000037', 'type': 'a_index', 'name': '上证医药'},
+    '160221': {'code': 'sh000033', 'type': 'a_index', 'name': '上证材料'},
+    '160222': {'code': 'sh000036', 'type': 'a_index', 'name': '上证消费'},
+    '160632': {'code': 'sh000036', 'type': 'a_index', 'name': '上证消费'},
+    '160225': {'code': 'sz399808', 'type': 'a_index', 'name': '中证新能'},
+    '160620': {'code': 'sh000032', 'type': 'a_index', 'name': '上证能源'},
+    '160625': {'code': 'sh000038', 'type': 'a_index', 'name': '上证金融'},
+    '160631': {'code': 'sh000038', 'type': 'a_index', 'name': '上证金融'},
+    '160633': {'code': 'sh000038', 'type': 'a_index', 'name': '上证金融'},
+    '160218': {'code': 'sh000006', 'type': 'a_index', 'name': '上证地产'},
+    '160628': {'code': 'sh000006', 'type': 'a_index', 'name': '上证地产'},
+}
+
+_underlying_cache = {}
+_UNDERLYING_CACHE_TTL = 300  # 5分钟
+
+
+def _fetch_single_est_nav(fid: str) -> tuple:
+    """获取单只基金的EST估算净值"""
+    try:
+        import json
+        url = f"https://fundgz.1234567.com.cn/js/{fid}.js"
+        resp = requests.get(url, timeout=5)
+        text = resp.text
+        if 'fundcode' not in text:
+            return fid, None
+        json_str = text[text.index('{'):text.rindex('}') + 1]
+        data = json.loads(json_str)
+        dwjz = float(data.get('dwjz', 0))
+        gsz = float(data.get('gsz', 0))
+        gszzl = float(data.get('gszzl', 0))
+        if dwjz > 0 and gsz > 0:
+            return fid, {
+                'nav': dwjz,
+                'est_nav': gsz,
+                'est_change': gszzl,
+                'name': data.get('name', ''),
+                'gztime': data.get('gztime', ''),
+            }
+    except Exception:
+        pass
+    return fid, None
+
+
+def _fetch_est_nav_batch(fund_ids: list) -> dict:
+    """从天天基金API并行获取EST估算净值，返回 {fund_id: {nav, est_nav, est_change, name}} """
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+    result = {}
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        futures = {pool.submit(_fetch_single_est_nav, fid): fid for fid in fund_ids}
+        for f in as_completed(futures):
+            fid, data = f.result()
+            if data:
+                result[fid] = data
+    return result
+
+
+def _fetch_underlying_prices() -> dict:
+    """批量获取底层资产实时价格，返回 {api_code: {current, prev_close}} """
+    global _underlying_cache
+    if _underlying_cache:
+        data, ts = _underlying_cache
+        if time.time() - ts < _UNDERLYING_CACHE_TTL:
+            return data
+
+    # 去重，分类
+    all_codes = list(set(m['code'] for m in _UNDERLYING_MAP.values()))
+    sina_codes = [c for c in all_codes if c.startswith('gb_') or c.startswith('hf_')]
+    a_index_codes = [c for c in all_codes if c.startswith('sh') or c.startswith('sz')]
+
+    result = {}
+    try:
+        # 新浪API支持批量查询 - 美股ETF和期货
+        if sina_codes:
+            url = f"https://hq.sinajs.cn/list={','.join(sina_codes)}"
+            headers = {'Referer': 'https://finance.sina.com.cn'}
+            resp = requests.get(url, headers=headers, timeout=10)
+            resp.encoding = 'gbk'
+            text = resp.text
+
+            for line in text.strip().split('\n'):
+                if '=' not in line:
+                    continue
+                var_part, _, val_part = line.partition('=')
+                code = var_part.split('_str_')[-1]
+                val_part = val_part.strip(';').strip('"')
+                if not val_part:
+                    continue
+                fields = val_part.split(',')
+
+                if code.startswith('gb_'):
+                    # 美股ETF格式: 名称,当前价,涨跌幅,时间,涨跌额,开盘,最高,最低,昨收,...
+                    if len(fields) >= 9:
+                        try:
+                            current = float(fields[1])
+                            prev_close = float(fields[8])
+                            if current > 0 and prev_close > 0:
+                                result[code] = {
+                                    'current': current,
+                                    'prev_close': prev_close,
+                                    'change_pct': round((current - prev_close) / prev_close * 100, 2),
+                                }
+                        except (ValueError, IndexError):
+                            pass
+                elif code.startswith('hf_'):
+                    # 期货格式: 当前价,,昨结,开盘,最高,最低,时间,昨收,...
+                    if len(fields) >= 7:
+                        try:
+                            current = float(fields[0])
+                            prev_close = float(fields[7]) if len(fields) > 7 and fields[7] else float(fields[2])
+                            if current > 0 and prev_close > 0:
+                                result[code] = {
+                                    'current': current,
+                                    'prev_close': prev_close,
+                                    'change_pct': round((current - prev_close) / prev_close * 100, 2),
+                                }
+                        except (ValueError, IndexError):
+                            pass
+
+        # A股指数数据
+        if a_index_codes:
+            url = f"https://hq.sinajs.cn/list={','.join(a_index_codes)}"
+            headers = {'Referer': 'https://finance.sina.com.cn'}
+            resp = requests.get(url, headers=headers, timeout=10)
+            resp.encoding = 'gbk'
+            text = resp.text
+
+            for line in text.strip().split('\n'):
+                if '=' not in line:
+                    continue
+                var_part, _, val_part = line.partition('=')
+                code = var_part.split('_str_')[-1]
+                val_part = val_part.strip(';').strip('"')
+                if not val_part:
+                    continue
+                fields = val_part.split(',')
+                # A股指数格式: 名称,今开,昨收,当前,最高,最低,...
+                if len(fields) >= 4:
+                    try:
+                        current = float(fields[3])
+                        prev_close = float(fields[2])
+                        if current > 0 and prev_close > 0:
+                            result[code] = {
+                                'current': current,
+                                'prev_close': prev_close,
+                                'change_pct': round((current - prev_close) / prev_close * 100, 2),
+                            }
+                    except (ValueError, IndexError):
+                        pass
+
+        # 获取汇率
+        try:
+            fx_resp = requests.get(
+                "https://hq.sinajs.cn/list=fx_susdcny",
+                headers={'Referer': 'https://finance.sina.com.cn'},
+                timeout=10,
+            )
+            fx_resp.encoding = 'gbk'
+            fx_text = fx_resp.text.strip()
+            if '=' in fx_text:
+                fx_val = fx_text.partition('=')[2].strip(';').strip('"')
+                fx_fields = fx_val.split(',')
+                if len(fx_fields) >= 2:
+                    result['_usdcny'] = float(fx_fields[1])
+        except Exception:
+            result['_usdcny'] = 7.25  # fallback
+
+    except Exception as e:
+        logger.warning(f"获取底层资产价格失败: {e}")
+
+    _underlying_cache = (result, time.time())
+    return result
+
+
+def _estimate_nav(fund: dict, prices: dict) -> dict:
+    """为单只基金添加EST估算净值字段"""
+    fund_id = fund.get('fund_id', '')
+    mapping = _UNDERLYING_MAP.get(fund_id)
+
+    if not mapping:
+        fund['est_nav'] = None
+        fund['est_discount_rt'] = None
+        fund['underlying_name'] = None
+        fund['underlying_change'] = None
+        return fund
+
+    api_code = mapping['code']
+    price_data = prices.get(api_code)
+
+    if not price_data or price_data['prev_close'] <= 0:
+        fund['est_nav'] = None
+        fund['est_discount_rt'] = None
+        fund['underlying_name'] = mapping['name']
+        fund['underlying_change'] = None
+        return fund
+
+    nav = fund.get('fund_nav', 0)
+    if nav <= 0:
+        fund['est_nav'] = None
+        fund['est_discount_rt'] = None
+        fund['underlying_name'] = mapping['name']
+        fund['underlying_change'] = price_data['change_pct']
+        return fund
+
+    change_pct = price_data['change_pct']
+    fund['underlying_name'] = mapping['name']
+    fund['underlying_change'] = change_pct
+
+    # 对于美股类ETF，需要考虑汇率变动
+    if mapping['type'] == 'us_etf':
+        usdcny = prices.get('_usdcny', 7.25)
+        # 简化处理：假设昨收净值对应的汇率也是当前汇率（因为净值公布时汇率已确定）
+        # EST NAV = 昨收净值 * (1 + 底层资产涨跌幅%)
+        est_nav = round(nav * (1 + change_pct / 100), 4)
+    else:
+        # 商品期货类，直接用涨跌幅
+        est_nav = round(nav * (1 + change_pct / 100), 4)
+
+    fund['est_nav'] = est_nav
+
+    # 计算EST溢价率
+    price = fund.get('price', 0)
+    if est_nav > 0:
+        fund['est_discount_rt'] = round((price - est_nav) / est_nav * 100, 2)
+    else:
+        fund['est_discount_rt'] = None
+
+    return fund
+
+
 class FundService:
     """基金套利数据服务"""
 
@@ -96,12 +398,6 @@ class FundService:
             'Origin': 'https://www.jisilu.cn',
         })
 
-        # 先访问登录页获取cookie
-        try:
-            session.get('https://www.jisilu.cn/login/', timeout=15)
-        except Exception as e:
-            return {'success': False, 'error': f'访问登录页失败: {e}'}
-
         # AES加密用户名和密码
         enc_user = FundService._jslencode(user_name, FundService.JISILU_AES_KEY)
         enc_pass = FundService._jslencode(password, FundService.JISILU_AES_KEY)
@@ -116,7 +412,8 @@ class FundService:
         }
 
         try:
-            resp = session.post(login_url, data=login_data, timeout=15)
+            # 直接POST登录，跳过访问登录页（减少一次请求）
+            resp = session.post(login_url, data=login_data, timeout=10)
             result = resp.json()
 
             if result.get('code') == 200:
@@ -332,6 +629,34 @@ class FundService:
             fund = FundService._normalize_fund(cell)
             if fund:
                 funds.append(fund)
+
+        # EST估算净值 - 优先使用天天基金API，回退到底层资产计算
+        fund_ids = [f['fund_id'] for f in funds]
+        try:
+            est_data = _fetch_est_nav_batch(fund_ids)
+            for fund in funds:
+                fid = fund['fund_id']
+                if fid in est_data:
+                    ed = est_data[fid]
+                    fund['est_nav'] = round(ed['est_nav'], 4)
+                    fund['underlying_change'] = ed['est_change']
+                    fund['underlying_name'] = ed.get('name', '')
+                    price = fund.get('price', 0)
+                    if ed['est_nav'] > 0:
+                        fund['est_discount_rt'] = round((price - ed['est_nav']) / ed['est_nav'] * 100, 2)
+                else:
+                    fund['est_nav'] = None
+                    fund['est_discount_rt'] = None
+                    fund['underlying_name'] = None
+                    fund['underlying_change'] = None
+        except Exception as e:
+            logger.warning(f"天天基金EST获取失败，回退到底层资产计算: {e}")
+            try:
+                underlying_prices = _fetch_underlying_prices()
+                for fund in funds:
+                    _estimate_nav(fund, underlying_prices)
+            except Exception as e2:
+                logger.warning(f"EST估算完全失败: {e2}")
 
         # 筛选: 成交额 ≥ 300万
         if min_turnover > 0:

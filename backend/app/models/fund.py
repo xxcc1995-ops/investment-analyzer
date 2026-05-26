@@ -25,6 +25,10 @@ class FundArbitrage(BaseModel):
     price_dt: str          # 价格日期
     issuer_nm: str         # 基金公司
     estimated_profit: float  # 预估收益率(%), 扣除费用后
+    est_nav: Optional[float] = None          # 实时EST估算净值
+    est_discount_rt: Optional[float] = None   # EST溢价率(%)
+    underlying_name: Optional[str] = None     # 底层资产名称
+    underlying_change: Optional[float] = None # 底层资产涨跌幅(%)
 
 
 class ArbitrageResponse(BaseModel):

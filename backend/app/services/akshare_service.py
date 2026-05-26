@@ -250,6 +250,157 @@ class AKShareService:
             logger.warning(f"获取美国失业率数据失败: {e}")
             return None
 
+    # ==================== 消费拐点指标 ====================
+
+    def get_consumer_confidence(self) -> Optional[List[Dict]]:
+        """获取消费者信心指数（总指数/满意指数/预期指数）"""
+        cache_key = "macro_china_consumer_confidence"
+        cached = _get_cached(cache_key)
+        if cached:
+            return cached
+        try:
+            import akshare as ak
+            df = ak.macro_china_xfzxx()
+            if df is None or df.empty:
+                return None
+            result = []
+            for _, row in df.iterrows():
+                result.append({
+                    "date": str(row.iloc[0]),
+                    "confidence": _safe_float(row.iloc[1]),       # 消费者信心指数
+                    "confidence_yoy": _safe_float(row.iloc[2]),   # 同比
+                    "satisfaction": _safe_float(row.iloc[4]),     # 满意指数
+                    "expectation": _safe_float(row.iloc[7]),      # 预期指数
+                })
+            _set_cache(cache_key, result)
+            return result
+        except Exception as e:
+            logger.warning(f"获取消费者信心指数失败: {e}")
+            return None
+
+    def get_ppi_data(self) -> Optional[List[Dict]]:
+        """获取PPI数据（工业品出厂价格指数）"""
+        cache_key = "macro_china_ppi"
+        cached = _get_cached(cache_key)
+        if cached:
+            return cached
+        try:
+            import akshare as ak
+            df = ak.macro_china_ppi()
+            if df is None or df.empty:
+                return None
+            result = []
+            for _, row in df.iterrows():
+                result.append({
+                    "date": str(row.iloc[0]),
+                    "value": _safe_float(row.iloc[1]),       # 当月指数
+                    "yoy": _safe_float(row.iloc[2]),         # 同比
+                    "cumulative": _safe_float(row.iloc[3]),  # 累计
+                })
+            _set_cache(cache_key, result)
+            return result
+        except Exception as e:
+            logger.warning(f"获取PPI数据失败: {e}")
+            return None
+
+    def get_retail_sales(self) -> Optional[List[Dict]]:
+        """获取社会消费品零售总额"""
+        cache_key = "macro_china_retail_sales"
+        cached = _get_cached(cache_key)
+        if cached:
+            return cached
+        try:
+            import akshare as ak
+            df = ak.macro_china_consumer_goods_retail()
+            if df is None or df.empty:
+                return None
+            result = []
+            for _, row in df.iterrows():
+                result.append({
+                    "date": str(row.iloc[0]),
+                    "value": _safe_float(row.iloc[1]),         # 当月值（亿元）
+                    "yoy": _safe_float(row.iloc[2]),           # 同比增长
+                    "cumulative": _safe_float(row.iloc[4]),    # 累计
+                    "cumulative_yoy": _safe_float(row.iloc[5]),  # 累计同比
+                })
+            _set_cache(cache_key, result)
+            return result
+        except Exception as e:
+            logger.warning(f"获取社零数据失败: {e}")
+            return None
+
+    def get_housing_price(self) -> Optional[List[Dict]]:
+        """获取一线城市新建住宅价格指数（北京/上海）"""
+        cache_key = "macro_china_housing_price"
+        cached = _get_cached(cache_key)
+        if cached:
+            return cached
+        try:
+            import akshare as ak
+            df = ak.macro_china_new_house_price()
+            if df is None or df.empty:
+                return None
+            # 按日期聚合一线城市同比均值
+            # 同比指数: 100=持平, 101.5=+1.5%, 96.5=-3.5%
+            date_groups = {}
+            for _, row in df.iterrows():
+                date = str(row.iloc[0])
+                yoy = _safe_float(row.iloc[2])  # 新建商品住宅价格指数-同比
+                if yoy is not None:
+                    if date not in date_groups:
+                        date_groups[date] = []
+                    date_groups[date].append(yoy)
+
+            result = []
+            for date in sorted(date_groups.keys(), reverse=True):
+                vals = date_groups[date]
+                avg_idx = round(sum(vals) / len(vals), 2) if vals else None
+                # 转换为百分比变动: 100.7 -> +0.7%, 96.5 -> -3.5%
+                avg_pct = round(avg_idx - 100, 2) if avg_idx is not None else None
+                result.append({
+                    "date": date,
+                    "avg_index": avg_idx,          # 原始指数值
+                    "avg_yoy": avg_pct,            # 同比变动百分比
+                    "cities": len(vals),           # 城市数量
+                })
+            _set_cache(cache_key, result)
+            return result
+        except Exception as e:
+            logger.warning(f"获取房价数据失败: {e}")
+            return None
+
+    def get_unemployment_rate(self) -> Optional[List[Dict]]:
+        """获取全国城镇调查失业率"""
+        cache_key = "macro_china_unemployment"
+        cached = _get_cached(cache_key)
+        if cached:
+            return cached
+        try:
+            import akshare as ak
+            df = ak.macro_china_urban_unemployment()
+            if df is None or df.empty:
+                return None
+            # 筛选"全国城镇调查失业率"
+            mask = df['item'].str.contains('全国城镇调查失业率')
+            df_filtered = df[mask].copy()
+            result = []
+            for _, row in df_filtered.iterrows():
+                date_str = str(row['date'])
+                # 格式化日期: 201801 -> 2018-01
+                if len(date_str) == 6:
+                    date_str = f"{date_str[:4]}-{date_str[4:]}"
+                result.append({
+                    "date": date_str,
+                    "value": _safe_float(row['value']),
+                })
+            # 按日期降序排列
+            result.sort(key=lambda x: x['date'], reverse=True)
+            _set_cache(cache_key, result)
+            return result
+        except Exception as e:
+            logger.warning(f"获取失业率数据失败: {e}")
+            return None
+
     # ==================== 期货数据 ====================
 
     # 关键商品配置：中文名 → (英文代码, 单位)
