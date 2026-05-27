@@ -5,6 +5,7 @@ import logging
 import time
 import os
 import json
+import re
 from typing import Optional, List, Dict
 from datetime import datetime
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
@@ -693,18 +694,41 @@ class FundService:
             # 计算成交额(万元): 成交量(万份) * 价格
             turnover = round(volume * price, 2)
 
-            # 申购限额
-            apply_limit = cell.get('apply_limit', '')
+            # 申购限额 - 优先从 min_amt 提取，回退到 apply_status
+            apply_limit = ''
+            min_amt = cell.get('min_amt', '') or ''
+            apply_status = cell.get('apply_status', '') or ''
+
+            # 1) 从 min_amt 中提取日累计申购限额
+            if '限额' in min_amt:
+                for line in min_amt.split('\r\n'):
+                    if '限额' in line:
+                        val = line.strip()
+                        if '无限额' not in val:
+                            apply_limit = val
+                        break
+
+            # 2) 从 apply_status 中提取限大额信息 (如 "限1万", "限20万", "限1千")
+            if not apply_limit and apply_status.startswith('限') and apply_status != '开放申购':
+                raw = apply_status  # e.g. "限1万", "限20万", "限1千", "限0"
+                if raw == '限0':
+                    apply_limit = '暂停申购'
+                else:
+                    # 解析 "限X万" / "限X千" 格式为具体金额
+                    m = re.match(r'限(\d+(?:\.\d+)?)(万|千)', raw)
+                    if m:
+                        num = float(m.group(1))
+                        unit = m.group(2)
+                        if unit == '万':
+                            amount = int(num * 10000)
+                        else:
+                            amount = int(num * 1000)
+                        apply_limit = f'日限额{amount:,}元'
+                    else:
+                        apply_limit = raw
+
             if not apply_limit:
-                min_amt = cell.get('min_amt', '') or ''
-                if '限额' in min_amt:
-                    # 从min_amt中提取限额信息
-                    for line in min_amt.split('\n'):
-                        if '限额' in line:
-                            apply_limit = line.strip()
-                            break
-                if not apply_limit:
-                    apply_limit = '无限额'
+                apply_limit = '无限额'
 
             return {
                 'fund_id': fund_id,

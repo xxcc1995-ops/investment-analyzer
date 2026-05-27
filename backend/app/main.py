@@ -35,6 +35,13 @@ app.include_router(grid.router, prefix="/api/grid", tags=["网格交易"])
 app.include_router(xueqiu.router, prefix="/api/xueqiu", tags=["雪球大V"])
 
 
+@app.on_event("startup")
+async def restore_jisilu_login():
+    """启动时自动恢复集思录登录态"""
+    from app.services.fund_service import FundService
+    FundService.restore_login()
+
+
 @app.get("/")
 async def root():
     return {"message": "新源的Invest工具 API"}

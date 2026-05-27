@@ -15,7 +15,12 @@
       "Bash(cp -r /e/QuantDinger-Vue/dist/* /e/QuantDinger/frontend/)",
       "Bash(taskkill //F //IM python.exe)",
       "Read(//e/QuantDinger/**)",
-      "Bash(backend_api_python/.venv/Scripts/python.exe start_local.py)"
+      "Bash(backend_api_python/.venv/Scripts/python.exe start_local.py)",
+      "Bash(/c/Users/11847/AppData/Local/Programs/Python/Python311/python.exe *)",
+      "Bash(curl *)",
+      "Bash(pkill -f \"uvicorn app.main:app\")",
+      "Bash(netstat -ano)",
+      "Bash(kill 4684 10540)"
     ]
   }
 }
