@@ -28,3 +28,9 @@ def get_stock_financials(stock_code: str):
     if "error" in data:
         raise HTTPException(status_code=400, detail=data["error"])
     return data
+
+
+@router.get("/{stock_code}/valuation-history")
+def get_valuation_history(stock_code: str):
+    """获取历史PE/PB估值数据"""
+    return data_service.get_valuation_history(stock_code)

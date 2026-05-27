@@ -1,4 +1,4 @@
-"""数据服务 - 使用新浪财经和东方财富获取A股数据"""
+"""数据服务 - 使用新浪财经和东方财富获取A股数据，腾讯财经获取港股数据"""
 
 import requests
 import json
@@ -10,8 +10,17 @@ class DataService:
     """金融数据服务"""
 
     @staticmethod
+    def _is_hk_code(code: str) -> bool:
+        """判断是否为港股代码（5位数字）"""
+        return len(code) == 5 and code.isdigit()
+
+    @staticmethod
     def get_stock_basic(stock_code: str) -> dict:
         """获取股票基本信息和实时行情"""
+        # 港股
+        if DataService._is_hk_code(stock_code):
+            return DataService._get_hk_stock_basic(stock_code)
+
         try:
             # 判断市场
             if stock_code.startswith('6'):
@@ -69,6 +78,7 @@ class DataService:
                 "volume": volume,
                 "amount": amount,
                 "pe": pe,
+                "pe_type": "TTM",
                 "pb": pb,
                 "market_cap": round(market_cap, 2),
                 "trade_date": trade_date,
@@ -80,15 +90,15 @@ class DataService:
 
     @staticmethod
     def _get_valuation_data(stock_code: str, market: str, price: float) -> tuple:
-        """获取估值数据：总股本、PE、PB"""
+        """获取估值数据：总股本、PE(TTM)、PB"""
         try:
             url = "https://datacenter.eastmoney.com/securities/api/data/v1/get"
             params = {
                 "reportName": "RPT_F10_FINANCE_MAINFINADATA",
-                "columns": "TOTAL_SHARE,EPSJB,BPS",
+                "columns": "REPORT_DATE,TOTAL_SHARE,EPSJB,BPS",
                 "filter": f"(SECURITY_CODE=\"{stock_code}\")",
                 "pageNumber": "1",
-                "pageSize": "1",
+                "pageSize": "6",
                 "sortTypes": "-1",
                 "sortColumns": "REPORT_DATE",
                 "source": "HSF10",
@@ -98,10 +108,13 @@ class DataService:
             data = r.json()
 
             if data.get("result") and data["result"].get("data"):
-                item = data["result"]["data"][0]
-                total_share = item.get("TOTAL_SHARE", 0) / 1e8  # 转换为亿股
-                eps = item.get("EPSJB", 0)
-                bps = item.get("BPS", 0)
+                items = data["result"]["data"]
+                latest = items[0]
+                total_share = latest.get("TOTAL_SHARE", 0) / 1e8  # 转换为亿股
+                bps = latest.get("BPS", 0)
+
+                # 计算TTM EPS
+                eps = DataService._calc_ttm_eps(items)
 
                 pe = round(price / eps, 2) if eps and eps > 0 else None
                 pb = round(price / bps, 2) if bps and bps > 0 else None
@@ -113,8 +126,399 @@ class DataService:
             return 0, None, None
 
     @staticmethod
+    def _calc_ttm_eps(items: list) -> float:
+        """根据报告列表计算滚动12个月EPS(TTM)
+
+        东方财富的EPSJB是年初至今累计值：
+        - 年报(12-31): 全年EPS
+        - 三季报(09-30): 前9个月EPS
+        - 中报(06-30): 前6个月EPS
+        - 一季报(03-31): 前3个月EPS
+
+        TTM计算：
+        - 最新为年报 → 直接使用
+        - 最新为季报 → 当期累计 + 上年全年 - 上年同期累计
+        """
+        if not items:
+            return 0
+
+        latest = items[0]
+        latest_date = latest.get("REPORT_DATE", "")[:10]
+        latest_eps = _safe_float(latest.get("EPSJB")) or 0
+        month_day = latest_date[5:] if len(latest_date) >= 10 else ""
+
+        # 年报：EPS就是全年值，直接用
+        if month_day == "12-31":
+            return latest_eps
+
+        # 季报/中报/三季报：需要上年同期和上年年报数据
+        # 找上年年报和上年同期
+        prev_annual_eps = None
+        prev_same_period_eps = None
+        latest_year = latest_date[:4] if len(latest_date) >= 4 else ""
+
+        for item in items[1:]:
+            d = item.get("REPORT_DATE", "")[:10]
+            if not d:
+                continue
+            eps_val = _safe_float(item.get("EPSJB")) or 0
+            # 上年年报
+            if d[:4] < latest_year and d[5:] == "12-31" and prev_annual_eps is None:
+                prev_annual_eps = eps_val
+            # 上年同期
+            if d[:4] < latest_year and d[5:] == month_day and prev_same_period_eps is None:
+                prev_same_period_eps = eps_val
+
+        if prev_annual_eps is not None:
+            # TTM = 本期累计 + 上年全年 - 上年同期累计
+            ttm = latest_eps + prev_annual_eps - (prev_same_period_eps or 0)
+            return ttm if ttm > 0 else 0
+
+        # 找不到上年年报，降级处理：用最新EPS（可能是年化不准的值）
+        return latest_eps
+
+    @staticmethod
+    def _get_hk_stock_basic(stock_code: str) -> dict:
+        """通过腾讯财经获取港股基本信息和实时行情"""
+        try:
+            url = f'https://qt.gtimg.cn/q=r_hk{stock_code}'
+            headers = {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+                'Referer': 'https://stockapp.finance.qq.com/'
+            }
+            r = requests.get(url, headers=headers, timeout=10)
+            r.encoding = 'gbk'
+
+            text = r.text
+            if '="' not in text:
+                return {"code": stock_code, "error": "未找到港股行情数据"}
+
+            data = text.split('"')[1].split('~')
+            if len(data) < 50:
+                return {"code": stock_code, "error": "港股数据格式异常"}
+
+            name = data[1]
+            price = float(data[3]) if data[3] else 0
+            pre_close = float(data[4]) if data[4] else 0
+            open_price = float(data[5]) if data[5] else 0
+            high = float(data[33]) if data[33] else 0
+            low = float(data[34]) if data[34] else 0
+            volume = int(float(data[6])) if data[6] else 0
+            amount = float(data[37]) if data[37] else 0
+            change_pct = float(data[32]) if data[32] else 0
+            # 注意：腾讯API的PE/PB数据不可靠，统一改用财报计算
+            # pe = float(data[39]) if data[39] else 0
+            # pb = float(data[51]) if len(data) > 51 and data[51] else 0
+            market_cap = float(data[44]) if data[44] else 0
+            dividend_yield = float(data[43]) if data[43] else 0
+            total_shares = float(data[69]) if len(data) > 69 and data[69] else 0  # 总股本（股）
+
+            if price <= 0:
+                return {"code": stock_code, "error": "港股价格数据异常"}
+
+            trade_time = data[30] if len(data) > 30 else ""
+
+            # 通过最新财报计算PE和PB（腾讯API的数据不可靠）
+            pe, pb = DataService._calc_hk_valuation(stock_code, price, total_shares)
+
+            return {
+                "code": stock_code,
+                "name": name,
+                "market": "HK",
+                "price": price,
+                "open": open_price,
+                "high": high,
+                "low": low,
+                "pre_close": pre_close,
+                "change_pct": round(change_pct, 2),
+                "volume": volume,
+                "amount": amount,
+                "pe": pe,
+                "pe_type": "TTM",
+                "pb": pb,
+                "market_cap": round(market_cap, 2),
+                "dividend_yield": round(dividend_yield, 2) if dividend_yield > 0 else None,
+                "trade_date": trade_time[:10] if trade_time else "",
+                "trade_time": trade_time,
+                "fetch_time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            }
+        except Exception as e:
+            return {"code": stock_code, "error": str(e)}
+
+    @staticmethod
+    def _calc_hk_valuation(stock_code: str, price: float, total_shares: float) -> tuple:
+        """通过最新财报计算港股PE(TTM)和PB
+
+        腾讯财经API返回的PE/PB数据不可靠，统一用akshare获取财报数据计算。
+        支持一般公司(004开头)和保险公司(002开头)的会计科目。
+
+        Args:
+            stock_code: 港股代码
+            price: 当前股价（港币）
+            total_shares: 总股本（股）
+
+        Returns:
+            (pe, pb) 元组，计算失败时返回None
+        """
+        try:
+            import akshare as ak
+
+            # 获取利润表（全部报告期）- 计算TTM EPS
+            df_income = ak.stock_financial_hk_report_em(stock=stock_code, symbol='利润表', indicator='报告期')
+            # 获取资产负债表（全部报告期）- 计算BPS
+            df_bs = ak.stock_financial_hk_report_em(stock=stock_code, symbol='资产负债表', indicator='报告期')
+
+            if df_income.empty or df_bs.empty:
+                return None, None
+
+            # 判断是保险公司还是一般公司
+            # 保险公司使用002开头的科目，一般公司使用004开头
+            is_insurance = not df_income[df_income['STD_ITEM_CODE'].str.startswith('004')].empty == False
+            # 尝试获取净利润数据
+            np_codes = ['004025002', '002030999']  # 一般公司/保险公司
+            np_rows = None
+            for code in np_codes:
+                rows = df_income[df_income['STD_ITEM_CODE'] == code]
+                if not rows.empty:
+                    np_rows = rows
+                    break
+
+            if np_rows is None or np_rows.empty:
+                return None, None
+
+            # 构建净利润数据表
+            np_data = {}
+            for _, row in np_rows.iterrows():
+                d = str(row['REPORT_DATE'])[:10]
+                np_val = _safe_float(row['AMOUNT'])
+                if np_val is not None:
+                    np_data[d] = np_val
+
+            sorted_dates = sorted(np_data.keys(), reverse=True)
+            if not sorted_dates:
+                return None, None
+
+            # 计算TTM净利润
+            latest_date = sorted_dates[0]
+            latest_np = np_data[latest_date]
+            month_day = latest_date[5:]
+
+            ttm_np = latest_np
+            if month_day != "12-31":
+                # 季报：需要上年年报和上年同期数据
+                year = latest_date[:4]
+                prev_annual_np = None
+                prev_same_period_np = None
+
+                for d in sorted_dates[1:]:
+                    if d[:4] < year and d[5:] == "12-31":
+                        prev_annual_np = np_data[d]
+                    if d[:4] < year and d[5:] == month_day:
+                        prev_same_period_np = np_data[d]
+                    if prev_annual_np is not None and prev_same_period_np is not None:
+                        break
+
+                if prev_annual_np is not None:
+                    ttm_np = latest_np + prev_annual_np - (prev_same_period_np or 0)
+
+            # 获取总股本
+            shares = total_shares
+            if not shares or shares <= 0:
+                # 从资产负债表获取
+                shares_rows = df_bs[df_bs['STD_ITEM_CODE'] == '004008000']
+                if not shares_rows.empty:
+                    shares = _safe_float(shares_rows.iloc[0]['AMOUNT'])
+
+            if not shares or shares <= 0:
+                return None, None
+
+            # 计算TTM EPS
+            ttm_eps = ttm_np / shares if ttm_np and shares > 0 else None
+
+            # 获取最新归属母公司股东权益（支持保险公司和一般公司）
+            # 一般公司: 004030999, 保险公司: 002011999(归属于母公司) 或 002009999(股东权益合计)
+            equity_codes = ['004030999', '002011999', '002009999']
+            equity = None
+            for code in equity_codes:
+                equity_rows = df_bs[df_bs['STD_ITEM_CODE'] == code]
+                if not equity_rows.empty:
+                    # 使用最新报告期的数据
+                    bs_dates = sorted(df_bs['REPORT_DATE'].unique(), reverse=True)
+                    for bs_date in bs_dates:
+                        eq_rows = df_bs[(df_bs['REPORT_DATE'] == bs_date) & (df_bs['STD_ITEM_CODE'] == code)]
+                        if not eq_rows.empty:
+                            equity = _safe_float(eq_rows.iloc[0]['AMOUNT'])
+                            if equity:
+                                break
+                if equity:
+                    break
+
+            # 计算BPS
+            bps_rmb = equity / shares if equity and shares > 0 else None
+
+            # 获取汇率转换
+            try:
+                exchange_rate = DataService._get_hkd_exchange_rate()
+            except Exception:
+                exchange_rate = 1.08
+
+            # 计算PE和PB
+            pe = None
+            pb = None
+
+            if ttm_eps and ttm_eps > 0:
+                # EPS是人民币，股价是港币，需要转换
+                ttm_eps_hkd = ttm_eps / exchange_rate
+                pe = round(price / ttm_eps_hkd, 2)
+
+            if bps_rmb and bps_rmb > 0:
+                bps_hkd = bps_rmb / exchange_rate
+                pb = round(price / bps_hkd, 2)
+
+            return pe, pb
+        except Exception:
+            return None, None
+
+    @staticmethod
+    def _get_hkd_exchange_rate() -> float:
+        """获取港币兑人民币汇率"""
+        try:
+            url = "https://qt.gtimg.cn/q=HKDCNY"
+            headers = {
+                'User-Agent': 'Mozilla/5.0',
+                'Referer': 'https://stockapp.finance.qq.com/'
+            }
+            r = requests.get(url, headers=headers, timeout=5)
+            r.encoding = 'gbk'
+            # 解析汇率数据
+            data = r.text.split('"')[1].split('~')
+            if len(data) > 3:
+                return float(data[3])
+            return 1.08  # 默认值
+        except Exception:
+            return 1.08
+
+    @staticmethod
+    def _get_hk_financial_indicators(stock_code: str) -> dict:
+        """获取港股财务指标 - ROE/增长率取年报，BPS取最新财报"""
+        try:
+            import akshare as ak
+
+            reports = []
+            latest_date = None
+
+            # 获取利润表（年度）- 计算增长率和利润率
+            df_income = ak.stock_financial_hk_report_em(stock=stock_code, symbol='利润表', indicator='年度')
+            income_periods = sorted(df_income['REPORT_DATE'].unique(), reverse=True)[:3]
+
+            # 获取资产负债表（年度）- 计算负债率和ROE
+            df_bs_annual = ak.stock_financial_hk_report_em(stock=stock_code, symbol='资产负债表', indicator='年度')
+
+            # 获取资产负债表（全部）- 取最新BPS
+            df_bs_all = ak.stock_financial_hk_report_em(stock=stock_code, symbol='资产负债表', indicator='报告期')
+            latest_bps = None
+            latest_bps_date = None
+            if not df_bs_all.empty:
+                latest_bs_periods = sorted(df_bs_all['REPORT_DATE'].unique(), reverse=True)
+                if latest_bs_periods:
+                    latest_bs = df_bs_all[df_bs_all['REPORT_DATE'] == latest_bs_periods[0]]
+                    equity_rows = latest_bs[latest_bs['STD_ITEM_CODE'] == '004030999']
+                    shares_rows = latest_bs[latest_bs['STD_ITEM_CODE'] == '004008000']  # 总股本
+                    if len(equity_rows) > 0:
+                        equity = _safe_float(equity_rows['AMOUNT'].values[0])
+                        # 尝试获取总股本计算BPS
+                        if len(shares_rows) > 0:
+                            shares = _safe_float(shares_rows['AMOUNT'].values[0])
+                            if equity and shares and shares > 0:
+                                latest_bps = round(equity / shares, 2)
+                        latest_bps_date = str(latest_bs_periods[0])[:10]
+
+            # 先提取所有期间的关键数据
+            period_data = []
+            for period in income_periods:
+                p_data = df_income[df_income['REPORT_DATE'] == period]
+                report_date = str(period)[:10]
+
+                rev = _safe_float(p_data[p_data['STD_ITEM_CODE'] == '004001001']['AMOUNT'].values[0]) if len(p_data[p_data['STD_ITEM_CODE'] == '004001001']) > 0 else None
+                gross = _safe_float(p_data[p_data['STD_ITEM_CODE'] == '004007999']['AMOUNT'].values[0]) if len(p_data[p_data['STD_ITEM_CODE'] == '004007999']) > 0 else None
+                np_val = _safe_float(p_data[p_data['STD_ITEM_CODE'] == '004025002']['AMOUNT'].values[0]) if len(p_data[p_data['STD_ITEM_CODE'] == '004025002']) > 0 else None
+                eps_val = _safe_float(p_data[p_data['STD_ITEM_CODE'] == '004027002']['AMOUNT'].values[0]) if len(p_data[p_data['STD_ITEM_CODE'] == '004027002']) > 0 else None
+
+                # 资产负债率和ROE
+                debt_ratio = None
+                roe = None
+                bps = None
+                try:
+                    bs_data = df_bs_annual[df_bs_annual['REPORT_DATE'] == period]
+                    total_liab = _safe_float(bs_data[bs_data['STD_ITEM_CODE'] == '004025999']['AMOUNT'].values[0]) if len(bs_data[bs_data['STD_ITEM_CODE'] == '004025999']) > 0 else None
+                    total_equity = _safe_float(bs_data[bs_data['STD_ITEM_CODE'] == '004036999']['AMOUNT'].values[0]) if len(bs_data[bs_data['STD_ITEM_CODE'] == '004036999']) > 0 else None
+                    equity = _safe_float(bs_data[bs_data['STD_ITEM_CODE'] == '004030999']['AMOUNT'].values[0]) if len(bs_data[bs_data['STD_ITEM_CODE'] == '004030999']) > 0 else None
+                    if total_liab and total_equity:
+                        total_assets = total_liab + total_equity
+                        debt_ratio = round(total_liab / total_assets * 100, 2) if total_assets > 0 else None
+                    if np_val and equity and equity > 0:
+                        roe = round(np_val / equity * 100, 2)
+                except Exception:
+                    pass
+
+                period_data.append({
+                    "date": report_date, "rev": rev, "gross": gross,
+                    "np": np_val, "eps": eps_val, "debt_ratio": debt_ratio, "roe": roe,
+                })
+
+            # 构建报告（含增长率：当期 vs 上期）
+            latest_date = period_data[0]["date"] if period_data else None
+            for i, pd in enumerate(period_data):
+                revenue_growth = None
+                profit_growth = None
+                if i + 1 < len(period_data):
+                    prev = period_data[i + 1]
+                    if pd["rev"] and prev["rev"] and prev["rev"] > 0:
+                        revenue_growth = round((pd["rev"] - prev["rev"]) / prev["rev"] * 100, 2)
+                    if pd["np"] and prev["np"] and prev["np"] > 0:
+                        profit_growth = round((pd["np"] - prev["np"]) / prev["np"] * 100, 2)
+
+                gross_margin = round(pd["gross"] / pd["rev"] * 100, 2) if pd["gross"] and pd["rev"] and pd["rev"] > 0 else None
+                net_margin = round(pd["np"] / pd["rev"] * 100, 2) if pd["np"] and pd["rev"] and pd["rev"] > 0 else None
+
+                reports.append({
+                    "date": pd["date"],
+                    "report_name": f"{pd['date'][:4]}年报",
+                    "eps": pd["eps"],
+                    "bps": None,
+                    "roe": pd["roe"],
+                    "revenue": pd["rev"],
+                    "net_profit": pd["np"],
+                    "revenue_growth": revenue_growth,
+                    "profit_growth": profit_growth,
+                    "gross_margin": gross_margin,
+                    "net_margin": net_margin,
+                    "debt_ratio": pd["debt_ratio"],
+                    "report_period": f"{pd['date'][:4]}年报",
+                    "is_annual": True,
+                })
+
+            # 最新财报BPS替换到第一份年报
+            if latest_bps and reports:
+                reports[0]["bps"] = latest_bps
+                reports[0]["bps_date"] = latest_bps_date
+
+            return {
+                "code": stock_code,
+                "reports": reports,
+                "latest_report_date": latest_date,
+                "latest_bps": latest_bps,
+                "latest_bps_date": latest_bps_date,
+                "fetch_time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            }
+        except Exception as e:
+            return {"code": stock_code, "error": str(e), "reports": []}
+
+    @staticmethod
     def get_financial_indicators(stock_code: str) -> dict:
-        """获取财务指标 - 从东方财富API实时获取"""
+        """获取财务指标 - ROE/增长率取年报，BPS取最新财报"""
+        if DataService._is_hk_code(stock_code):
+            return DataService._get_hk_financial_indicators(stock_code)
         try:
             url = "https://datacenter.eastmoney.com/securities/api/data/v1/get"
             params = {
@@ -122,7 +526,7 @@ class DataService:
                 "columns": "REPORT_DATE,REPORT_DATE_NAME,EPSJB,BPS,ROEJQ,TOTALOPERATEREVE,PARENTNETPROFIT,TOTALOPERATEREVETZ,PARENTNETPROFITTZ,XSMLL,XSJLL,ZCFZL",
                 "filter": f"(SECURITY_CODE=\"{stock_code}\")",
                 "pageNumber": "1",
-                "pageSize": "8",
+                "pageSize": "20",
                 "sortTypes": "-1",
                 "sortColumns": "REPORT_DATE",
                 "source": "HSF10",
@@ -135,14 +539,9 @@ class DataService:
             if not data.get("result") or not data["result"].get("data"):
                 return {"code": stock_code, "error": "未找到财务数据", "reports": []}
 
-            reports = []
-            latest_date = None
-
+            all_reports = []
             for item in data["result"]["data"]:
                 report_date = item.get("REPORT_DATE", "")[:10]
-                if latest_date is None:
-                    latest_date = report_date
-
                 report = {
                     "date": report_date,
                     "report_name": item.get("REPORT_DATE_NAME", ""),
@@ -157,12 +556,29 @@ class DataService:
                     "net_margin": _safe_float(item.get("XSJLL")),
                     "debt_ratio": _safe_float(item.get("ZCFZL")),
                 }
-                reports.append(_classify_report(report))
+                all_reports.append(_classify_report(report))
+
+            # 最新财报的BPS（市净率用最新数据）
+            latest_bps = all_reports[0]["bps"] if all_reports else None
+            latest_bps_date = all_reports[0]["date"] if all_reports else None
+
+            # ROE、增长率等取年报数据
+            annual_reports = [r for r in all_reports if r.get("is_annual")]
+            reports = annual_reports[:5] if annual_reports else all_reports[:5]
+
+            # 年报的BPS替换为最新财报BPS（市净率用最新数据）
+            if latest_bps and reports:
+                reports[0]["bps"] = latest_bps
+                reports[0]["bps_date"] = latest_bps_date
+
+            latest_date = reports[0]["date"] if reports else None
 
             return {
                 "code": stock_code,
                 "reports": reports,
                 "latest_report_date": latest_date,
+                "latest_bps": latest_bps,
+                "latest_bps_date": latest_bps_date,
                 "fetch_time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             }
         except Exception as e:
@@ -170,25 +586,59 @@ class DataService:
 
     @staticmethod
     def search_stock(keyword: str) -> list:
-        """搜索股票"""
+        """搜索股票（A股 + 港股）- 使用腾讯财经搜索API"""
         try:
-            # 新浪搜索API
-            url = f"https://suggest3.sinajs.cn/suggest/type=11,12&key={keyword}"
-            r = requests.get(url, timeout=10)
+            url = f'https://smartbox.gtimg.cn/s3/?v=2&q={keyword}&t=all&c=1'
+            headers = {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+                'Referer': 'https://stockapp.finance.qq.com/'
+            }
+            r = requests.get(url, headers=headers, timeout=10)
             r.encoding = 'utf-8'
 
-            # 解析结果
+            text = r.text
+            if 'v_hint="' not in text and "v_hint='" not in text:
+                return []
+
+            raw = text.split('"')[1]
+            items = raw.split('^')
             results = []
-            items = r.text.split('"')[1].split(';')
+
+            def decode_name(s):
+                """解码 \\uXXXX 转义序列为中文"""
+                result = []
+                i = 0
+                while i < len(s):
+                    if s[i] == '\\' and i + 5 < len(s) and s[i+1] == 'u':
+                        hex_str = s[i+2:i+6]
+                        try:
+                            result.append(chr(int(hex_str, 16)))
+                            i += 6
+                            continue
+                        except ValueError:
+                            pass
+                    result.append(s[i])
+                    i += 1
+                return ''.join(result)
+
             for item in items:
-                parts = item.split(',')
-                if len(parts) >= 4:
-                    code = parts[2]
-                    name = parts[1]
-                    if code.startswith('6') or code.startswith('0') or code.startswith('3'):
-                        results.append({"code": code, "name": name})
-                        if len(results) >= 10:
-                            break
+                parts = item.split('~')
+                if len(parts) < 4:
+                    continue
+
+                market = parts[0]
+                code = parts[1].split('.')[0]  # 去除 .ps 等后缀
+                name = decode_name(parts[2])
+
+                # A股（沪深）
+                if market in ('sh', 'sz') and len(code) == 6 and code.isdigit():
+                    results.append({"code": code, "name": name, "market": "A"})
+                # 港股（5位数字，排除8开头的重复代码）
+                elif market == 'hk' and len(code) == 5 and code.isdigit() and not code.startswith('8'):
+                    results.append({"code": code, "name": name, "market": "HK"})
+
+                if len(results) >= 10:
+                    break
 
             return results
         except Exception as e:
@@ -385,6 +835,343 @@ class DataService:
         except Exception as e:
             print(f"获取{stock_code}分红数据失败: {e}")
             return 0, 0, 0
+
+    @staticmethod
+    def get_valuation_history(stock_code: str) -> dict:
+        """获取个股历史PE(TTM)/PB/股息率估值数据和统计指标"""
+        if DataService._is_hk_code(stock_code):
+            return DataService._get_hk_valuation_history(stock_code)
+
+        try:
+            import akshare as ak
+
+            # 获取PE(TTM)历史
+            df_pe = ak.stock_zh_valuation_baidu(symbol=stock_code, indicator='市盈率(TTM)', period='全部')
+            pe_history = [{"date": str(row["date"])[:10], "value": round(float(row["value"]), 2)} for _, row in df_pe.iterrows()]
+
+            # 获取PB历史
+            df_pb = ak.stock_zh_valuation_baidu(symbol=stock_code, indicator='市净率', period='全部')
+            pb_history = [{"date": str(row["date"])[:10], "value": round(float(row["value"]), 2)} for _, row in df_pb.iterrows()]
+
+            # 获取股息率历史（通过价格+分红数据计算）
+            div_history = DataService._calc_a_dividend_yield(stock_code)
+
+            return {
+                "pe_history": pe_history,
+                "pb_history": pb_history,
+                "div_history": div_history,
+                "stats": DataService._calc_valuation_stats(pe_history, pb_history, div_history),
+            }
+        except Exception as e:
+            return {"pe_history": [], "pb_history": [], "div_history": [], "stats": None, "error": str(e)}
+
+    @staticmethod
+    def _calc_valuation_stats(pe_history: list, pb_history: list, div_history: list = None) -> dict:
+        """计算估值统计指标"""
+        import numpy as np
+
+        def calc_stats(history):
+            if not history:
+                return None
+            values = [h["value"] for h in history if h["value"] and h["value"] > 0]
+            if not values:
+                return None
+            current = values[-1]
+            arr = np.array(values)
+            count_below = int(np.sum(arr <= current))
+            return {
+                "current": round(current, 2),
+                "min": round(float(np.min(arr)), 2),
+                "max": round(float(np.max(arr)), 2),
+                "median": round(float(np.median(arr)), 2),
+                "p25": round(float(np.percentile(arr, 25)), 2),
+                "p75": round(float(np.percentile(arr, 75)), 2),
+                "percentile": round(count_below / len(values) * 100, 1),
+                "count": len(values),
+            }
+
+        result = {
+            "pe": calc_stats(pe_history),
+            "pb": calc_stats(pb_history),
+        }
+        if div_history is not None:
+            result["div"] = calc_stats(div_history)
+        return result
+
+    @staticmethod
+    def _calc_a_dividend_yield(stock_code: str) -> list:
+        """计算A股历史股息率 = 过去12个月分红 / 股价"""
+        try:
+            import akshare as ak
+
+            # 获取分红记录
+            df_div = ak.stock_history_dividend_detail(symbol=stock_code, indicator='分红')
+            # 只取已实施的分红
+            df_done = df_div[df_div['进度'] == '实施'].copy()
+            if df_done.empty:
+                return []
+
+            # 解析分红数据：(除权除息日, 每股分红)
+            div_records = []
+            for _, row in df_done.iterrows():
+                ex_date = row.get('除权除息日')
+                bonus = _safe_float(row.get('派息'))
+                if ex_date and bonus and bonus > 0:
+                    try:
+                        ex_date_str = str(ex_date)[:10]
+                        dps = bonus / 10  # 每10股派息 → 每股
+                        div_records.append((ex_date_str, dps))
+                    except Exception:
+                        continue
+
+            if not div_records:
+                return []
+
+            div_records.sort(key=lambda x: x[0])
+
+            # 获取历史价格（新浪财经K线）
+            price_data = DataService._fetch_a_kline(stock_code)
+            if not price_data:
+                return []
+
+            # 对每个交易日，计算过去12个月的股息率
+            from datetime import datetime, timedelta
+            result = []
+            for date_str, price in price_data:
+                try:
+                    d = datetime.strptime(date_str, "%Y-%m-%d")
+                except ValueError:
+                    continue
+                one_year_ago = (d - timedelta(days=365)).strftime("%Y-%m-%d")
+                ttm_div = sum(dps for ex, dps in div_records if one_year_ago < ex <= date_str)
+                if ttm_div > 0 and price > 0:
+                    div_yield = round(ttm_div / price * 100, 2)
+                    if 0 < div_yield < 30:
+                        result.append({"date": date_str, "value": div_yield})
+
+            return result
+        except Exception:
+            return []
+
+    @staticmethod
+    def _fetch_a_kline(stock_code: str) -> list:
+        """从新浪财经获取A股历史日K线数据，返回[(date, close_price), ...]"""
+        try:
+            if stock_code.startswith('6'):
+                symbol = f"sh{stock_code}"
+            else:
+                symbol = f"sz{stock_code}"
+
+            url = 'https://money.finance.sina.com.cn/quotes_service/api/json_v2.php/CN_MarketData.getKLineData'
+            params = {'symbol': symbol, 'scale': '240', 'ma': 'no', 'datalen': '1500'}
+            headers = {'User-Agent': 'Mozilla/5.0', 'Referer': 'https://finance.sina.com.cn'}
+            r = requests.get(url, params=params, headers=headers, timeout=15)
+            data = r.json()
+
+            result = []
+            for item in data:
+                date = item.get('day', '')
+                close = float(item.get('close', 0))
+                if date and close > 0:
+                    result.append((date, close))
+            return result
+        except Exception:
+            return []
+
+    @staticmethod
+    def _calc_hk_dividend_yield(stock_code: str, price_data: list) -> list:
+        """计算港股历史股息率 = 过去12个月分红 / 股价"""
+        try:
+            import akshare as ak
+            import re
+            from datetime import datetime, timedelta
+
+            # 获取港股分红记录（参数名是symbol）
+            df_div = ak.stock_hk_dividend_payout_em(symbol=stock_code)
+            if df_div.empty:
+                return []
+
+            # 按列索引访问（列名有编码问题）：
+            # col[0]=公告日期, col[1]=报告期, col[2]=分红方案, col[3]=进度, col[4]=除净日
+            div_records = []
+            for _, row in df_div.iterrows():
+                ex_date = row.iloc[4]  # 除净日
+                scheme = str(row.iloc[2])  # 分红方案
+                if not ex_date or not scheme:
+                    continue
+                # 解析"每股派港币X.XX元"或"每股派X.XX港元"
+                m = re.search(r'[\d.]+', scheme)
+                if m:
+                    dps = float(m.group())
+                    if dps > 0:
+                        ex_date_str = str(ex_date)[:10]
+                        div_records.append((ex_date_str, dps))
+
+            if not div_records:
+                return []
+
+            div_records.sort(key=lambda x: x[0])
+
+            # 对每个交易日，计算过去12个月的股息率
+            result = []
+            for date_str, price in price_data:
+                try:
+                    d = datetime.strptime(date_str, "%Y-%m-%d")
+                except ValueError:
+                    continue
+                one_year_ago = (d - timedelta(days=365)).strftime("%Y-%m-%d")
+                ttm_div = sum(dps for ex, dps in div_records if one_year_ago < ex <= date_str)
+                if ttm_div > 0 and price > 0:
+                    div_yield = round(ttm_div / price * 100, 2)
+                    if 0 < div_yield < 30:
+                        result.append({"date": date_str, "value": div_yield})
+
+            return result
+        except Exception:
+            return []
+
+    @staticmethod
+    def _get_hk_valuation_history(stock_code: str) -> dict:
+        """获取港股历史PE(TTM)/PB - 通过腾讯K线+akshare财务数据计算"""
+        try:
+            import akshare as ak
+
+            # 1. 获取历史日K线数据（腾讯财经）
+            price_data = DataService._fetch_hk_kline(stock_code)
+            if not price_data:
+                return {"pe_history": [], "pb_history": [], "stats": None, "message": "无法获取港股历史价格数据"}
+
+            # 2. 获取财务数据（EPS和净资产）
+            df_income = ak.stock_financial_hk_report_em(stock=stock_code, symbol='利润表', indicator='报告期')
+            df_bs = ak.stock_financial_hk_report_em(stock=stock_code, symbol='资产负债表', indicator='报告期')
+
+            # 提取EPS数据
+            eps_rows = df_income[df_income['STD_ITEM_CODE'] == '004027002']
+            np_rows = df_income[df_income['STD_ITEM_CODE'] == '004025002']
+            equity_rows = df_bs[df_bs['STD_ITEM_CODE'] == '004030999']
+
+            # 构建财务数据表：{report_date: {eps, np, equity}}
+            fin_data = {}
+            for _, row in eps_rows.iterrows():
+                d = str(row['REPORT_DATE'])[:10]
+                eps_val = _safe_float(row['AMOUNT'])
+                if eps_val and eps_val > 0:
+                    fin_data.setdefault(d, {})['eps'] = eps_val
+
+            for _, row in np_rows.iterrows():
+                d = str(row['REPORT_DATE'])[:10]
+                np_val = _safe_float(row['AMOUNT'])
+                if np_val:
+                    fin_data.setdefault(d, {})['np'] = np_val
+
+            for _, row in equity_rows.iterrows():
+                d = str(row['REPORT_DATE'])[:10]
+                eq_val = _safe_float(row['AMOUNT'])
+                if eq_val:
+                    fin_data.setdefault(d, {})['equity'] = eq_val
+
+            # 计算每个报告期的TTM EPS和BPS
+            sorted_dates = sorted(fin_data.keys(), reverse=True)
+            report_metrics = []  # [(date, ttm_eps, bps)]
+
+            for i, d in enumerate(sorted_dates):
+                fd = fin_data[d]
+                eps = fd.get('eps', 0)
+                np_val = fd.get('np')
+                equity = fd.get('equity')
+
+                if not eps or eps <= 0:
+                    continue
+
+                # 计算TTM EPS
+                month_day = d[5:]
+                ttm_eps = eps
+                if month_day != "12-31":
+                    # 季报：找上年年报和上年同期
+                    year = d[:4]
+                    for d2 in sorted_dates[i+1:]:
+                        fd2 = fin_data[d2]
+                        if d2[:4] < year and d2[5:] == "12-31" and fd2.get('eps'):
+                            prev_annual = fd2['eps']
+                            prev_same = 0
+                            for d3 in sorted_dates:
+                                if d3[:4] < year and d3[5:] == month_day:
+                                    prev_same = fin_data[d3].get('eps', 0)
+                                    break
+                            ttm_eps = eps + prev_annual - prev_same
+                            break
+
+                # 计算BPS = 净资产 / 股份数
+                bps = None
+                if equity and np_val and eps > 0:
+                    shares = np_val / eps  # 股份数 = 净利润 / EPS
+                    if shares > 0:
+                        bps = equity / shares
+
+                report_metrics.append((d, ttm_eps, bps))
+
+            # 3. 对每个交易日匹配最近的财务数据，计算PE/PB
+            report_metrics.sort(key=lambda x: x[0])
+            pe_history = []
+            pb_history = []
+            ri = 0  # report index
+
+            for date, price in price_data:
+                # 找到该日期之前最近的财报
+                while ri + 1 < len(report_metrics) and report_metrics[ri + 1][0] <= date:
+                    ri += 1
+
+                if ri < len(report_metrics) and report_metrics[ri][0] <= date:
+                    _, ttm_eps, bps = report_metrics[ri]
+                    if ttm_eps and ttm_eps > 0:
+                        pe_val = round(price / ttm_eps, 2)
+                        if 0 < pe_val < 500:  # 过滤异常值
+                            pe_history.append({"date": date, "value": pe_val})
+                    if bps and bps > 0:
+                        pb_val = round(price / bps, 2)
+                        if 0 < pb_val < 100:
+                            pb_history.append({"date": date, "value": pb_val})
+
+            # 4. 计算股息率历史
+            div_history = DataService._calc_hk_dividend_yield(stock_code, price_data)
+
+            return {
+                "pe_history": pe_history,
+                "pb_history": pb_history,
+                "div_history": div_history,
+                "stats": DataService._calc_valuation_stats(pe_history, pb_history, div_history),
+            }
+        except Exception as e:
+            return {"pe_history": [], "pb_history": [], "div_history": [], "stats": None, "error": str(e)}
+
+    @staticmethod
+    def _fetch_hk_kline(stock_code: str) -> list:
+        """从腾讯财经获取港股历史日K线数据，返回[(date, close_price), ...]"""
+        try:
+            url = 'https://web.ifzq.gtimg.cn/appstock/app/fqkline/get'
+            params = {'param': f'hk{stock_code},day,2015-01-01,2026-12-31,1500,qfq'}
+            headers = {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+                'Referer': 'https://stockapp.finance.qq.com/'
+            }
+            r = requests.get(url, params=params, headers=headers, timeout=15)
+            data = r.json()
+
+            key = f'hk{stock_code}'
+            if 'data' not in data or key not in data['data']:
+                return []
+
+            klines = data['data'][key].get('day', [])
+            result = []
+            for k in klines:
+                if len(k) >= 3:
+                    date = k[0]
+                    close = float(k[2])
+                    if close > 0:
+                        result.append((date, close))
+            return result
+        except Exception:
+            return []
 
 
 def _safe_float(val) -> Optional[float]:

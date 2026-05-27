@@ -113,11 +113,11 @@ body {
 .search-box input {
   width: 100%;
   padding: 10px 12px;
-  border: none;
-  border-radius: 6px;
+  border: none !important;
+  border-radius: 6px !important;
   font-size: 14px;
-  background: rgba(255,255,255,0.1);
-  color: #fff;
+  background: rgba(255,255,255,0.1) !important;
+  color: #fff !important;
 }
 
 .search-box input::placeholder {
@@ -147,13 +147,46 @@ body {
   padding: 10px 12px;
   cursor: pointer;
   display: flex;
-  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
   color: var(--text-primary);
   transition: background 0.2s;
 }
 
 .search-item:hover {
   background: var(--bg-hover);
+}
+
+.search-code {
+  min-width: 60px;
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+.search-market-tag {
+  font-size: 11px;
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-weight: 500;
+}
+
+.search-market-tag.hk {
+  background: rgba(255, 152, 0, 0.15);
+  color: #ff9800;
+}
+
+.search-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.search-hint {
+  padding: 12px;
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 13px;
 }
 
 /* 列表Tab — 2列网格布局 */
@@ -303,6 +336,12 @@ body {
 
 .btn-add:hover {
   background: #79b8ff;
+}
+
+.btn-add.in-watchlist {
+  background: var(--bg-tertiary);
+  color: var(--text-muted);
+  cursor: default;
 }
 
 /* 数据时效信息 */
@@ -585,6 +624,48 @@ tr:nth-child(even):hover td {
   font-weight: 600;
   margin-bottom: 12px;
   color: var(--text-primary);
+}
+
+.valuation-summary {
+  display: flex;
+  gap: 24px;
+  margin-bottom: 16px;
+  padding: 16px;
+  background: var(--bg-secondary);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-card);
+}
+
+.valuation-stat {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
+
+.stat-label {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.stat-value {
+  font-size: 24px;
+  font-weight: 700;
+}
+
+.stat-range {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.valuation-message {
+  text-align: center;
+  padding: 24px;
+  color: var(--text-muted);
+  font-size: 14px;
+  background: var(--bg-secondary);
+  border-radius: var(--radius-md);
+  margin-bottom: 16px;
 }
 
 /* 空状态 */

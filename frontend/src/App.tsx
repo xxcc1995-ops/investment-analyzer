@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, lazy, Suspense } from 'react'
+import { useState, useEffect, useCallback, useRef, lazy, Suspense } from 'react'
 import axios from 'axios'
 import ReactECharts from 'echarts-for-react'
 
@@ -24,6 +24,7 @@ const API_BASE = '/api'
 interface StockBasic {
   code: string
   name: string
+  market?: string
   price: number
   open: number
   high: number
@@ -54,9 +55,38 @@ interface FinancialReport {
   debt_ratio: number | null
 }
 
+interface ValuationPoint {
+  date: string
+  value: number
+}
+
+interface ValuationStats {
+  current: number
+  min: number
+  max: number
+  median: number
+  p25: number
+  p75: number
+  percentile: number
+  count: number
+}
+
+interface ValuationHistory {
+  pe_history: ValuationPoint[]
+  pb_history: ValuationPoint[]
+  div_history: ValuationPoint[]
+  stats: {
+    pe: ValuationStats | null
+    pb: ValuationStats | null
+    div: ValuationStats | null
+  } | null
+  message?: string
+}
+
 interface SearchItem {
   code: string
   name: string
+  market?: string
 }
 
 interface FundArbitrage {
@@ -125,14 +155,14 @@ function App() {
   const [searchKeyword, setSearchKeyword] = useState('')
   const [searchResults, setSearchResults] = useState<SearchItem[]>([])
   const [showSearch, setShowSearch] = useState(false)
+  const [searchLoading, setSearchLoading] = useState(false)
+  const searchBoxRef = useRef<HTMLDivElement>(null)
   const [selectedStock, setSelectedStock] = useState<StockBasic | null>(null)
   const [financials, setFinancials] = useState<FinancialReport[]>([])
+  const [valuationHistory, setValuationHistory] = useState<ValuationHistory | null>(null)
   const [activeTab, setActiveTab] = useState('overview')
   const [loading, setLoading] = useState(false)
-  const [watchlist, setWatchlist] = useState<StockBasic[]>(HOT_STOCKS.map(s => ({
-    ...s, price: 0, open: 0, high: 0, low: 0, pre_close: 0,
-    change_pct: 0, volume: 0, amount: 0, pe: null, pb: null, market_cap: 0
-  })))
+  const [watchlist, setWatchlist] = useState<StockBasic[]>([])
   const [selectedList, setSelectedList] = useState<'watchlist' | 'hot'>('hot')
   const [fetchTime, setFetchTime] = useState('')
   const [latestReport, setLatestReport] = useState('')
@@ -196,31 +226,49 @@ function App() {
   const handleSearch = useCallback(async (keyword: string) => {
     if (!keyword.trim()) {
       setSearchResults([])
+      setSearchLoading(false)
       return
     }
+    setSearchLoading(true)
     try {
       const res = await axios.get(`${API_BASE}/stocks/search`, { params: { keyword } })
       setSearchResults(res.data.results || [])
     } catch (err) {
-      console.error('搜索失败:', err)
+      setSearchResults([])
+    } finally {
+      setSearchLoading(false)
     }
   }, [])
 
   // 防抖搜索
   useEffect(() => {
-    const timer = setTimeout(() => {
-      if (searchKeyword) {
-        handleSearch(searchKeyword)
-      }
-    }, 300)
+    if (!searchKeyword) {
+      setSearchResults([])
+      setSearchLoading(false)
+      return
+    }
+    setSearchLoading(true)
+    const timer = setTimeout(() => handleSearch(searchKeyword), 300)
     return () => clearTimeout(timer)
   }, [searchKeyword, handleSearch])
+
+  // 点击外部关闭搜索下拉
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (searchBoxRef.current && !searchBoxRef.current.contains(e.target as Node)) {
+        setShowSearch(false)
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [])
 
   // 加载股票数据
   const loadStock = async (code: string) => {
     setLoading(true)
     setShowSearch(false)
     setSearchKeyword('')
+    setValuationHistory(null)
     try {
       const [basicRes, finRes] = await Promise.all([
         axios.get(`${API_BASE}/stocks/${code}/basic`),
@@ -230,6 +278,11 @@ function App() {
       setFinancials(finRes.data.reports || [])
       setFetchTime(basicRes.data.fetch_time || new Date().toLocaleString())
       setLatestReport(finRes.data.latest_report_date || '')
+
+      // 异步加载估值历史（不阻塞主数据展示）
+      axios.get(`${API_BASE}/stocks/${code}/valuation-history`)
+        .then(res => setValuationHistory(res.data))
+        .catch(() => setValuationHistory(null))
     } catch (err) {
       console.error('加载失败:', err)
     } finally {
@@ -238,9 +291,11 @@ function App() {
   }
 
   // 添加到自选
+  const isInWatchlist = selectedStock ? watchlist.some(s => s.code === selectedStock.code) : false
   const addToWatchlist = () => {
-    if (selectedStock && !watchlist.find(s => s.code === selectedStock.code)) {
+    if (selectedStock && !isInWatchlist) {
       setWatchlist(prev => [selectedStock, ...prev])
+      setSelectedList('watchlist')
     }
   }
 
@@ -496,6 +551,73 @@ function App() {
     }
   }
 
+  // 估值历史图表
+  const getValuationChartOption = (type: 'pe' | 'pb' | 'div') => {
+    if (!valuationHistory) return {}
+    const history = type === 'pe' ? valuationHistory.pe_history : type === 'pb' ? valuationHistory.pb_history : valuationHistory.div_history
+    const stats = valuationHistory.stats?.[type]
+    if (!history?.length || !stats) return {}
+
+    const dates = history.map(h => h.date)
+    const values = history.map(h => h.value)
+    const label = type === 'pe' ? 'PE(TTM)' : type === 'pb' ? 'PB' : '股息率(%)'
+    const color = type === 'pe' ? '#58a6ff' : type === 'pb' ? '#d29922' : '#3fb950'
+
+    return {
+      tooltip: {
+        trigger: 'axis',
+        formatter: (params: any) => {
+          const p = params[0]
+          return `${p.axisValue}<br/>${label}: ${p.value}`
+        }
+      },
+      textStyle: { color: '#8b949e' },
+      xAxis: {
+        type: 'category',
+        data: dates,
+        axisLabel: { rotate: 45, color: '#8b949e', fontSize: 10, interval: Math.floor(dates.length / 8) },
+        axisLine: { lineStyle: { color: '#30363d' } }
+      },
+      yAxis: {
+        type: 'value',
+        name: label,
+        axisLabel: { color: '#8b949e', fontSize: 11 },
+        nameTextStyle: { color: '#8b949e', fontSize: 12 },
+        splitLine: { lineStyle: { color: '#21262d' } }
+      },
+      series: [{
+        name: label,
+        type: 'line',
+        data: values,
+        smooth: true,
+        symbol: 'none',
+        lineStyle: { width: 1.5, color },
+        areaStyle: {
+          color: {
+            type: 'linear', x: 0, y: 0, x2: 0, y2: 1,
+            colorStops: [
+              { offset: 0, color: type === 'pe' ? 'rgba(88,166,255,0.15)' : type === 'pb' ? 'rgba(210,153,34,0.15)' : 'rgba(63,185,80,0.15)' },
+              { offset: 1, color: 'rgba(0,0,0,0)' }
+            ]
+          }
+        },
+        markLine: {
+          silent: true,
+          symbol: 'none',
+          lineStyle: { type: 'dashed', width: 1 },
+          data: [
+            { yAxis: stats.current, lineStyle: { color: '#f85149' }, label: { show: true, position: 'insideEndTop', formatter: `当前 ${stats.current}`, color: '#f85149', fontSize: 11 } },
+            { yAxis: stats.median, lineStyle: { color: '#8b949e' }, label: { show: true, position: 'insideEndTop', formatter: `中位 ${stats.median}`, color: '#8b949e', fontSize: 11 } },
+            { yAxis: stats.p25, lineStyle: { color: '#3fb950', type: 'dotted' }, label: { show: true, position: 'insideEndTop', formatter: `25% ${stats.p25}`, color: '#3fb950', fontSize: 10 } },
+            { yAxis: stats.p75, lineStyle: { color: '#d29922', type: 'dotted' }, label: { show: true, position: 'insideEndTop', formatter: `75% ${stats.p75}`, color: '#d29922', fontSize: 10 } },
+          ]
+        }
+      }],
+      grid: { left: 60, right: 30, top: 30, bottom: 60 },
+      backgroundColor: 'transparent'
+    }
+  }
+
   // 计算最新财务指标
   const latestFin = financials.length > 0 ? financials[0] : null
   const peLevel = getValuationLevel(selectedStock?.pe ?? null, 'pe')
@@ -507,26 +629,33 @@ function App() {
       <div className="sidebar">
         <div className="sidebar-header">
           <h1>新源的Invest工具</h1>
-          <div className="search-box">
+          <div className="search-box" ref={searchBoxRef}>
             <input
               type="text"
               placeholder="输入股票代码或名称..."
               value={searchKeyword}
-              onChange={(e) => setSearchKeyword(e.target.value)}
-              onFocus={() => setShowSearch(true)}
+              onChange={(e) => { setSearchKeyword(e.target.value); setShowSearch(true) }}
+              onFocus={() => { if (searchKeyword) setShowSearch(true) }}
             />
-            {showSearch && searchResults.length > 0 && (
+            {showSearch && searchKeyword && (
               <div className="search-results">
-                {searchResults.map(item => (
-                  <div
-                    key={item.code}
-                    className="search-item"
-                    onClick={() => loadStock(item.code)}
-                  >
-                    <span>{item.code}</span>
-                    <span>{item.name}</span>
-                  </div>
-                ))}
+                {searchLoading ? (
+                  <div className="search-hint">搜索中...</div>
+                ) : searchResults.length > 0 ? (
+                  searchResults.map(item => (
+                    <div
+                      key={item.code}
+                      className="search-item"
+                      onMouseDown={(e) => { e.preventDefault(); loadStock(item.code) }}
+                    >
+                      <span className="search-code">{item.code}</span>
+                      {item.market === 'HK' && <span className="search-market-tag hk">港</span>}
+                      <span className="search-name">{item.name}</span>
+                    </div>
+                  ))
+                ) : (
+                  <div className="search-hint">未找到相关股票</div>
+                )}
               </div>
             )}
           </div>
@@ -1489,9 +1618,11 @@ function App() {
                 <div>
                   <h2>{selectedStock.name}</h2>
                   <span className="stock-code">{selectedStock.code}</span>
-                  <span className="market-tag">A股</span>
+                  <span className="market-tag">{selectedStock.market === 'HK' ? '港股' : 'A股'}</span>
                 </div>
-                <button className="btn-add" onClick={addToWatchlist}>+ 加入自选</button>
+                <button className={`btn-add ${isInWatchlist ? 'in-watchlist' : ''}`} onClick={addToWatchlist}>
+                  {isInWatchlist ? '已加入自选' : '+ 加入自选'}
+                </button>
               </div>
 
               {/* 数据时效信息 */}
@@ -1544,7 +1675,7 @@ function App() {
               <h3>核心指标</h3>
               <div className="metrics-grid">
                 <div className="metric-card">
-                  <div className="metric-label">市盈率(PE)</div>
+                  <div className="metric-label">滚动市盈率(TTM)</div>
                   <div className="metric-value">{formatNum(selectedStock.pe)}</div>
                   <div className="metric-tag" style={{ color: peLevel.color }}>{peLevel.level}</div>
                 </div>
@@ -1774,12 +1905,68 @@ function App() {
                 <ReactECharts option={getDebtChartOption()} style={{ height: 300 }} />
               </div>
             </div>
+
+            {/* 历史估值走势 */}
+            {valuationHistory && valuationHistory.stats && (
+              <>
+                <div className="valuation-summary">
+                  <div className="valuation-stat">
+                    <span className="stat-label">PE(TTM)分位</span>
+                    <span className="stat-value" style={{ color: valuationHistory.stats.pe && valuationHistory.stats.pe.percentile < 30 ? '#3fb950' : valuationHistory.stats.pe && valuationHistory.stats.pe.percentile > 70 ? '#f85149' : '#8b949e' }}>
+                      {valuationHistory.stats.pe?.percentile ?? '-'}%
+                    </span>
+                    <span className="stat-range">{valuationHistory.stats.pe?.min} ~ {valuationHistory.stats.pe?.max}</span>
+                  </div>
+                  <div className="valuation-stat">
+                    <span className="stat-label">PB分位</span>
+                    <span className="stat-value" style={{ color: valuationHistory.stats.pb && valuationHistory.stats.pb.percentile < 30 ? '#3fb950' : valuationHistory.stats.pb && valuationHistory.stats.pb.percentile > 70 ? '#f85149' : '#8b949e' }}>
+                      {valuationHistory.stats.pb?.percentile ?? '-'}%
+                    </span>
+                    <span className="stat-range">{valuationHistory.stats.pb?.min} ~ {valuationHistory.stats.pb?.max}</span>
+                  </div>
+                  <div className="valuation-stat">
+                    <span className="stat-label">股息率分位</span>
+                    <span className="stat-value" style={{ color: valuationHistory.stats.div && valuationHistory.stats.div.percentile < 30 ? '#3fb950' : valuationHistory.stats.div && valuationHistory.stats.div.percentile > 70 ? '#f85149' : '#8b949e' }}>
+                      {valuationHistory.stats.div?.percentile ?? '-'}%
+                    </span>
+                    <span className="stat-range">{valuationHistory.stats.div?.min} ~ {valuationHistory.stats.div?.max}</span>
+                  </div>
+                  <div className="valuation-stat">
+                    <span className="stat-label">数据点</span>
+                    <span className="stat-value">{valuationHistory.stats.pe?.count ?? '-'}</span>
+                    <span className="stat-range">个交易日</span>
+                  </div>
+                </div>
+                <div className="charts-row">
+                  <div className="chart-container">
+                    <div className="chart-title">PE(TTM) 历史走势</div>
+                    <ReactECharts option={getValuationChartOption('pe')} style={{ height: 350 }} />
+                  </div>
+                  <div className="chart-container">
+                    <div className="chart-title">PB 历史走势</div>
+                    <ReactECharts option={getValuationChartOption('pb')} style={{ height: 350 }} />
+                  </div>
+                </div>
+                {valuationHistory.div_history && valuationHistory.div_history.length > 0 && (
+                  <div className="charts-row" style={{ marginTop: 16 }}>
+                    <div className="chart-container">
+                      <div className="chart-title">股息率(%) 历史走势</div>
+                      <ReactECharts option={getValuationChartOption('div')} style={{ height: 350 }} />
+                    </div>
+                    <div className="chart-container" />
+                  </div>
+                )}
+              </>
+            )}
+            {valuationHistory && valuationHistory.message && (
+              <div className="valuation-message">{valuationHistory.message}</div>
+            )}
           </>
         ) : (
           <div className="empty-state">
             <div className="icon">📊</div>
             <div className="text">新源的Invest工具</div>
-            <div className="sub-text">输入股票代码开始分析 | 支持A股</div>
+            <div className="sub-text">输入股票代码开始分析 | 支持A股/港股</div>
             <div className="hot-stocks">
               <div className="hot-title">热门股票</div>
               <div className="hot-list">

@@ -3,6 +3,8 @@
 import requests
 import logging
 import time
+import os
+import json
 from typing import Optional, List, Dict
 from datetime import datetime
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
@@ -18,6 +20,9 @@ CACHE_TTL = 300  # 5分钟缓存
 _jisilu_session: Optional[requests.Session] = None
 _jisilu_logged_in = False
 
+# 登录状态持久化文件
+_LOGIN_STATE_FILE = os.path.join(os.path.dirname(__file__), '..', '..', '.jisilu_login.json')
+
 
 def _get_cache(key: str) -> Optional[dict]:
     if key in _cache:
@@ -30,6 +35,35 @@ def _get_cache(key: str) -> Optional[dict]:
 
 def _set_cache(key: str, data: dict):
     _cache[key] = (data, time.time())
+
+
+def _save_login_state(cookies: dict):
+    """保存登录状态到文件"""
+    try:
+        state = {
+            'cookies': cookies,
+            'timestamp': time.time(),
+        }
+        with open(_LOGIN_STATE_FILE, 'w', encoding='utf-8') as f:
+            json.dump(state, f)
+    except Exception as e:
+        logger.warning(f"保存登录状态失败: {e}")
+
+
+def _load_login_state() -> Optional[dict]:
+    """从文件加载登录状态"""
+    try:
+        if not os.path.exists(_LOGIN_STATE_FILE):
+            return None
+        with open(_LOGIN_STATE_FILE, 'r', encoding='utf-8') as f:
+            state = json.load(f)
+        # 检查是否过期（24小时）
+        if time.time() - state.get('timestamp', 0) > 86400:
+            return None
+        return state
+    except Exception as e:
+        logger.warning(f"加载登录状态失败: {e}")
+        return None
 
 
 def _parse_fee(fee_str: str) -> float:
@@ -363,6 +397,8 @@ class FundService:
         'https://www.jisilu.cn/data/lof/index_lof_list/',
     ]
 
+    JISILU_QDII_URL = 'https://www.jisilu.cn/data/qdii/qdii_list/'
+
     JISILU_AES_KEY = '397151C04723421F'
 
     HEADERS = {
@@ -420,6 +456,8 @@ class FundService:
                 _jisilu_session = session
                 _jisilu_logged_in = True
                 _cache.clear()
+                # 保存登录状态
+                _save_login_state(dict(session.cookies))
                 return {'success': True, 'msg': '登录成功'}
             else:
                 err_msg = result.get('msg', '登录失败')
@@ -430,6 +468,38 @@ class FundService:
     @staticmethod
     def get_login_status() -> dict:
         return {'logged_in': _jisilu_logged_in}
+
+    @staticmethod
+    def restore_login() -> bool:
+        """从文件恢复登录状态"""
+        global _jisilu_session, _jisilu_logged_in
+
+        state = _load_login_state()
+        if not state:
+            return False
+
+        try:
+            session = requests.Session()
+            session.headers.update({
+                'User-Agent': FundService.HEADERS['User-Agent'],
+                'Referer': 'https://www.jisilu.cn/data/lof/',
+            })
+            # 恢复 cookies
+            for name, value in state.get('cookies', {}).items():
+                session.cookies.set(name, value)
+
+            # 验证登录状态
+            resp = session.get('https://www.jisilu.cn/data/lof/stock_lof_list/', timeout=10)
+            data = resp.json()
+            if 'rows' in data:
+                _jisilu_session = session
+                _jisilu_logged_in = True
+                logger.info("从文件恢复集思录登录状态成功")
+                return True
+        except Exception as e:
+            logger.warning(f"恢复登录状态失败: {e}")
+
+        return False
 
     @staticmethod
     def _get_session() -> requests.Session:
@@ -446,6 +516,7 @@ class FundService:
         all_funds = []
         session = FundService._get_session()
 
+        # 获取 stock_lof_list 和 index_lof_list
         for url in FundService.JISILU_LOF_URLS:
             try:
                 headers = dict(FundService.HEADERS)
@@ -458,6 +529,24 @@ class FundService:
                         all_funds.append(cell)
             except Exception as e:
                 logger.warning(f"获取集思录数据失败 [{url}]: {e}")
+
+        # 获取 QDII 列表中的 LOF 基金
+        try:
+            headers = dict(FundService.HEADERS)
+            headers['Referer'] = 'https://www.jisilu.cn/data/qdii/'
+            resp = session.get(FundService.JISILU_QDII_URL, headers=headers, timeout=15)
+            resp.raise_for_status()
+            data = resp.json()
+            for row in data.get('rows', []):
+                cell = row.get('cell', {})
+                if cell:
+                    # 筛选 LOF 类型的基金 (lof_type 为 QDII 或名称包含 LOF)
+                    lof_type = cell.get('lof_type', '')
+                    fund_nm = cell.get('fund_nm', '')
+                    if lof_type == 'QDII' or 'LOF' in fund_nm:
+                        all_funds.append(cell)
+        except Exception as e:
+            logger.warning(f"获取集思录QDII数据失败 [{FundService.JISILU_QDII_URL}]: {e}")
 
         return all_funds
 
@@ -492,6 +581,62 @@ class FundService:
             return []
 
     @staticmethod
+    def _fetch_eastmoney_lof_list() -> List[dict]:
+        """从东方财富获取LOF数据(备用)"""
+        try:
+            url = 'https://push2.eastmoney.com/api/qt/clist/get'
+            params = {
+                'pn': 1,
+                'pz': 1000,
+                'po': 1,
+                'np': 1,
+                'ut': 'bd1d9ddb04089700cf9c27f6f7426281',
+                'fltt': 2,
+                'invt': 2,
+                'fid': 'f3',
+                'fs': 'b:MK0404,b:MK0405,b:MK0406,b:MK0407',
+                'fields': 'f12,f14,f2,f3,f5,f6,f15,f16,f17,f18',
+            }
+
+            headers = {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                'Referer': 'https://quote.eastmoney.com/',
+            }
+
+            resp = requests.get(url, headers=headers, params=params, timeout=15)
+            data = resp.json()
+            rows = data.get('data', {}).get('diff', [])
+
+            funds = []
+            for row in rows:
+                fund_id = row.get('f12', '')
+                price = row.get('f2', 0) / 100 if row.get('f2') else 0
+                volume = row.get('f5', 0)  # 成交量
+                amount = row.get('f6', 0)  # 成交额
+
+                funds.append({
+                    'fund_id': fund_id,
+                    'fund_nm': row.get('f14', ''),
+                    'price': str(price),
+                    'fund_nav': '0',  # 净值需要从其他来源获取
+                    'nav_discount_rt': '0',
+                    'increase_rt': str(row.get('f3', 0) / 100 if row.get('f3') else 0),
+                    'volume': str(volume),
+                    'amount': 0,
+                    'apply_fee': '',
+                    'redeem_fee': '',
+                    'apply_status': '',
+                    'redeem_status': '',
+                    'nav_dt': '',
+                    'price_dt': datetime.now().strftime('%Y-%m-%d'),
+                    'issuer_nm': '',
+                })
+            return funds
+        except Exception as e:
+            logger.warning(f"东方财富获取LOF数据失败: {e}")
+            return []
+
+    @staticmethod
     def _normalize_fund(cell: dict) -> Optional[dict]:
         """标准化基金数据"""
         try:
@@ -507,8 +652,12 @@ class FundService:
             except (ValueError, TypeError):
                 return None
 
-            if price <= 0 or nav <= 0:
+            if price <= 0:
                 return None
+
+            # 允许净值为 0 的基金通过，后续会从天天基金获取净值
+            if nav <= 0:
+                nav = 0
 
             try:
                 nav_discount_rt = float(discount_str) if discount_str and discount_str != '-' else None
@@ -602,12 +751,32 @@ class FundService:
         if cached:
             return cached
 
-        raw_funds = FundService._fetch_jisilu_lof()
+        # 获取集思录数据
+        jisilu_funds = FundService._fetch_jisilu_lof()
         data_source = "集思录"
 
-        if not raw_funds:
-            raw_funds = FundService._fetch_akshare_lof()
-            data_source = "AKShare"
+        # 获取备用数据源
+        backup_funds = FundService._fetch_akshare_lof()
+        if not backup_funds:
+            backup_funds = FundService._fetch_eastmoney_lof_list()
+            if backup_funds:
+                data_source = "集思录+东方财富"
+        else:
+            data_source = "集思录+AKShare"
+
+        # 合并数据：集思录为主，备用数据源补充
+        if jisilu_funds:
+            # 已存在的基金 ID
+            existing_ids = {f.get('fund_id') for f in jisilu_funds}
+            # 从备用数据源中补充集思录没有的基金
+            for fund in backup_funds:
+                fund_id = fund.get('fund_id', '')
+                if fund_id and fund_id not in existing_ids:
+                    jisilu_funds.append(fund)
+            raw_funds = jisilu_funds
+        else:
+            raw_funds = backup_funds
+            data_source = "AKShare" if backup_funds else "无数据"
 
         if not raw_funds:
             return {
@@ -644,6 +813,14 @@ class FundService:
                     price = fund.get('price', 0)
                     if ed['est_nav'] > 0:
                         fund['est_discount_rt'] = round((price - ed['est_nav']) / ed['est_nav'] * 100, 2)
+                    # 如果原始净值为 0，使用天天基金的净值
+                    if fund['fund_nav'] <= 0 and ed.get('nav', 0) > 0:
+                        fund['fund_nav'] = round(ed['nav'], 4)
+                        # 重新计算折溢价率
+                        if fund['fund_nav'] > 0:
+                            fund['nav_discount_rt'] = round((price - fund['fund_nav']) / fund['fund_nav'] * 100, 2)
+                            fund['direction'] = "溢价" if fund['nav_discount_rt'] > 0 else "折价"
+                            fund['estimated_profit'] = _estimate_profit(price, fund['fund_nav'], fund['apply_fee'], fund['redeem_fee'], fund['direction'])
                 else:
                     fund['est_nav'] = None
                     fund['est_discount_rt'] = None
@@ -695,3 +872,50 @@ class FundService:
     def refresh_data() -> dict:
         _cache.clear()
         return FundService.get_arbitrage_opportunities()
+
+    @staticmethod
+    def _fetch_eastmoney_fund(fund_id: str) -> Optional[dict]:
+        """从东方财富API获取单只基金数据"""
+        try:
+            # 东方财富单只基金行情 API
+            url = 'https://push2.eastmoney.com/api/qt/stock/get'
+            params = {
+                'secid': f'0.{fund_id}',  # 0 表示深圳，1 表示上海
+                'fields': 'f43,f44,f45,f46,f47,f48,f57,f58,f60,f170',
+                'ut': 'fa5fd1943c7b386f172d6893dbfba10b',
+            }
+
+            headers = {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                'Referer': 'https://quote.eastmoney.com/',
+            }
+
+            resp = requests.get(url, headers=headers, params=params, timeout=10)
+            data = resp.json()
+
+            if data.get('data'):
+                d = data['data']
+                price = d.get('f43', 0) / 1000  # 最新价
+                volume = d.get('f47', 0)  # 成交量
+                amount = d.get('f48', 0)  # 成交额
+
+                return {
+                    'fund_id': d.get('f57', fund_id),
+                    'fund_nm': d.get('f58', ''),
+                    'price': str(price),
+                    'fund_nav': '0',  # 净值需要从其他来源获取
+                    'nav_discount_rt': '0',
+                    'increase_rt': str(d.get('f170', 0) / 100),
+                    'volume': str(volume),
+                    'amount': 0,
+                    'apply_fee': '',
+                    'redeem_fee': '',
+                    'apply_status': '',
+                    'redeem_status': '',
+                    'nav_dt': '',
+                    'price_dt': datetime.now().strftime('%Y-%m-%d'),
+                    'issuer_nm': '',
+                }
+        except Exception as e:
+            logger.warning(f"从东方财富获取基金 {fund_id} 数据失败: {e}")
+        return None
