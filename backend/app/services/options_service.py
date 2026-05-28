@@ -13,21 +13,11 @@ from app.services.vi_service import _get_hk_stock_data
 # Cache
 # ============================================================
 
-_cache = {}
+from app.core.cache import get_cache as _base_get_cache, set_cache as _set_cached
 _CACHE_TTL = 600
 
-
 def _get_cached(key: str):
-    if key in _cache:
-        entry = _cache[key]
-        if time.time() - entry['ts'] < _CACHE_TTL:
-            return entry['data']
-        del _cache[key]
-    return None
-
-
-def _set_cached(key: str, data):
-    _cache[key] = {'data': data, 'ts': time.time()}
+    return _base_get_cache(key, ttl_seconds=_CACHE_TTL)
 
 
 # ============================================================

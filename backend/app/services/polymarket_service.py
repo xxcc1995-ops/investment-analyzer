@@ -31,20 +31,8 @@ def _get_proxies():
 # Cache
 # ============================================================
 
-_cache = {}
-_CACHE_TTL = 300  # 5 minutes
-
-
-def _get_cached(key: str):
-    if key in _cache:
-        data, ts = _cache[key]
-        if time.time() - ts < _CACHE_TTL:
-            return data
-    return None
-
-
-def _set_cached(key: str, data):
-    _cache[key] = (data, time.time())
+from app.core.cache import get_cache as _get_cached, set_cache as _set_cached
+_CACHE_TTL = 300
 
 
 # ============================================================

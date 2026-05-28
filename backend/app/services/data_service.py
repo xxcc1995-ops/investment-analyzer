@@ -2,8 +2,15 @@
 
 import requests
 import json
+import logging
 from typing import Optional
 from datetime import datetime
+from urllib.parse import quote
+
+from app.core.cache import cached
+from app.core.utils import safe_float as _safe_float
+
+logger = logging.getLogger(__name__)
 
 
 class DataService:
@@ -15,6 +22,7 @@ class DataService:
         return len(code) == 5 and code.isdigit()
 
     @staticmethod
+    @cached(ttl_seconds=30, key_prefix="stock_basic")
     def get_stock_basic(stock_code: str) -> dict:
         """获取股票基本信息和实时行情"""
         # 港股
@@ -86,7 +94,8 @@ class DataService:
                 "fetch_time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             }
         except Exception as e:
-            return {"code": stock_code, "error": str(e)}
+            logger.error(f"get_stock_basic failed for {stock_code}: {e}")
+            return {"code": stock_code, "error": "获取行情数据失败，请稍后重试"}
 
     @staticmethod
     def _get_valuation_data(stock_code: str, market: str, price: float) -> tuple:
@@ -122,7 +131,8 @@ class DataService:
                 return total_share, pe, pb
 
             return 0, None, None
-        except Exception:
+        except Exception as e:
+            logger.warning(f"_get_valuation_data failed for {stock_code}: {e}")
             return 0, None, None
 
     @staticmethod
@@ -243,7 +253,8 @@ class DataService:
                 "fetch_time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             }
         except Exception as e:
-            return {"code": stock_code, "error": str(e)}
+            logger.error(f"_get_hk_stock_basic failed for {stock_code}: {e}")
+            return {"code": stock_code, "error": "获取港股行情失败，请稍后重试"}
 
     @staticmethod
     def _calc_hk_valuation(stock_code: str, price: float, total_shares: float) -> tuple:
@@ -376,7 +387,8 @@ class DataService:
                 pb = round(price / bps_hkd, 2)
 
             return pe, pb
-        except Exception:
+        except Exception as e:
+            logger.warning(f"_calc_hk_valuation failed for {stock_code}: {e}")
             return None, None
 
     @staticmethod
@@ -512,9 +524,11 @@ class DataService:
                 "fetch_time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             }
         except Exception as e:
-            return {"code": stock_code, "error": str(e), "reports": []}
+            logger.error(f"_get_hk_financial_indicators failed for {stock_code}: {e}")
+            return {"code": stock_code, "error": "获取港股财务数据失败，请稍后重试", "reports": []}
 
     @staticmethod
+    @cached(ttl_seconds=300, key_prefix="financial_indicators")
     def get_financial_indicators(stock_code: str) -> dict:
         """获取财务指标 - ROE/增长率取年报，BPS取最新财报"""
         if DataService._is_hk_code(stock_code):
@@ -582,13 +596,15 @@ class DataService:
                 "fetch_time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             }
         except Exception as e:
-            return {"code": stock_code, "error": str(e), "reports": []}
+            logger.error(f"get_financial_indicators failed for {stock_code}: {e}")
+            return {"code": stock_code, "error": "获取财务数据失败，请稍后重试", "reports": []}
 
     @staticmethod
+    @cached(ttl_seconds=300, key_prefix="search_stock")
     def search_stock(keyword: str) -> list:
         """搜索股票（A股 + 港股）- 使用腾讯财经搜索API"""
         try:
-            url = f'https://smartbox.gtimg.cn/s3/?v=2&q={keyword}&t=all&c=1'
+            url = f'https://smartbox.gtimg.cn/s3/?v=2&q={quote(keyword)}&t=all&c=1'
             headers = {
                 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
                 'Referer': 'https://stockapp.finance.qq.com/'
@@ -695,7 +711,7 @@ class DataService:
 
             return stocks
         except Exception as e:
-            print(f"获取高股息股票数据失败: {e}")
+            logger.error(f"获取高股息股票数据失败: {e}")
             return []
 
     @staticmethod
@@ -748,7 +764,7 @@ class DataService:
                 "report_period": latest.get("report_period", ""),
             }
         except Exception as e:
-            print(f"获取{stock_code}数据失败: {e}")
+            logger.warning(f"获取{stock_code}数据失败: {e}")
             return None
 
     @staticmethod
@@ -833,10 +849,11 @@ class DataService:
             return total_dividend_per_share, consecutive_years, dividend_ratio
 
         except Exception as e:
-            print(f"获取{stock_code}分红数据失败: {e}")
+            logger.warning(f"获取{stock_code}分红数据失败: {e}")
             return 0, 0, 0
 
     @staticmethod
+    @cached(ttl_seconds=300, key_prefix="valuation_history")
     def get_valuation_history(stock_code: str) -> dict:
         """获取个股历史PE(TTM)/PB/股息率估值数据和统计指标"""
         if DataService._is_hk_code(stock_code):
@@ -863,7 +880,8 @@ class DataService:
                 "stats": DataService._calc_valuation_stats(pe_history, pb_history, div_history),
             }
         except Exception as e:
-            return {"pe_history": [], "pb_history": [], "div_history": [], "stats": None, "error": str(e)}
+            logger.error(f"get_valuation_history failed for {stock_code}: {e}")
+            return {"pe_history": [], "pb_history": [], "div_history": [], "stats": None, "error": "获取估值历史失败，请稍后重试"}
 
     @staticmethod
     def _calc_valuation_stats(pe_history: list, pb_history: list, div_history: list = None) -> dict:
@@ -1142,7 +1160,8 @@ class DataService:
                 "stats": DataService._calc_valuation_stats(pe_history, pb_history, div_history),
             }
         except Exception as e:
-            return {"pe_history": [], "pb_history": [], "div_history": [], "stats": None, "error": str(e)}
+            logger.error(f"_get_hk_valuation_history failed for {stock_code}: {e}")
+            return {"pe_history": [], "pb_history": [], "div_history": [], "stats": None, "error": "获取港股估值历史失败，请稍后重试"}
 
     @staticmethod
     def _fetch_hk_kline(stock_code: str) -> list:
@@ -1174,14 +1193,7 @@ class DataService:
             return []
 
 
-def _safe_float(val) -> Optional[float]:
-    """安全转换为浮点数"""
-    if val is None:
-        return None
-    try:
-        return round(float(val), 4)
-    except (ValueError, TypeError):
-        return None
+# _safe_float is now imported from app.core.utils (see top of file)
 
 
 def _classify_report(report: dict) -> dict:

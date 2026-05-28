@@ -18,6 +18,7 @@ const ExportChampions = lazy(() => import('./pages/ExportChampions'))
 const OptionsRotation = lazy(() => import('./pages/OptionsRotation'))
 const GridTrading = lazy(() => import('./pages/GridTrading'))
 const XueqiuGurus = lazy(() => import('./pages/XueqiuGurus'))
+const NationalTeamMonitor = lazy(() => import('./pages/NationalTeamMonitor'))
 
 const API_BASE = '/api'
 
@@ -190,7 +191,7 @@ function App() {
   const [cbLoggedIn, setCbLoggedIn] = useState(false)
 
   // 基金套利状态
-  const [mainView, setMainView] = useState<'stock' | 'arbitrage' | 'option' | 'cb' | 'hki' | 'indexVal' | 'usMarket' | 'dividend' | 'cigarButt' | 'valueInvesting' | 'reit' | 'crypto' | 'macro' | 'futures' | 'jcScreener' | 'polymarket' | 'exportChampions' | 'optionsRotation' | 'gridTrading' | 'xueqiuGurus'>('stock')
+  const [mainView, setMainView] = useState<'stock' | 'arbitrage' | 'option' | 'cb' | 'hki' | 'indexVal' | 'usMarket' | 'dividend' | 'cigarButt' | 'valueInvesting' | 'reit' | 'crypto' | 'macro' | 'futures' | 'jcScreener' | 'polymarket' | 'exportChampions' | 'optionsRotation' | 'gridTrading' | 'xueqiuGurus' | 'nationalTeam'>('stock')
   const [arbFunds, setArbFunds] = useState<FundArbitrage[]>([])
   const [arbLoading, setArbLoading] = useState(false)
   const [arbFetchTime, setArbFetchTime] = useState('')
@@ -774,6 +775,8 @@ function App() {
             onClick={() => setMainView('gridTrading')}>网格交易</div>
           <div className={`list-tab ${mainView === 'xueqiuGurus' ? 'active' : ''}`}
             onClick={() => setMainView('xueqiuGurus')}>雪球大V</div>
+          <div className={`list-tab ${mainView === 'nationalTeam' ? 'active' : ''}`}
+            onClick={() => setMainView('nationalTeam')}>国家队监控</div>
         </div>
 
         {mainView === 'stock' && (
@@ -925,6 +928,12 @@ function App() {
             <p>鹿鼎公 · 管我财 · 小卡叔</p>
           </div>
         )}
+        {mainView === 'nationalTeam' && (
+          <div className="stock-list sidebar-info">
+            <p>国家队监控</p>
+            <p>汇金 · 证金 · 社保 · 养老保险</p>
+          </div>
+        )}
       </div>
 
       {/* 右侧内容 */}
@@ -967,6 +976,8 @@ function App() {
           <GridTrading />
         ) : mainView === 'xueqiuGurus' ? (
           <XueqiuGurus />
+        ) : mainView === 'nationalTeam' ? (
+          <NationalTeamMonitor />
         ) : mainView === 'option' ? (
           /* 期权收益计算器 */
           <div className="option-page">

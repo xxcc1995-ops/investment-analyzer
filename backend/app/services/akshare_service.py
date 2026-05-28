@@ -9,32 +9,8 @@ from typing import List, Dict, Optional, Any
 
 logger = logging.getLogger(__name__)
 
-CACHE_TTL = 300
-_cache: Dict[str, tuple] = {}
-
-
-def _get_cached(key: str) -> Optional[Any]:
-    if key in _cache:
-        data, timestamp = _cache[key]
-        if time.time() - timestamp < CACHE_TTL:
-            return data
-    return None
-
-
-def _set_cache(key: str, data: Any):
-    _cache[key] = (data, time.time())
-
-
-def _safe_float(val) -> Optional[float]:
-    if val is None:
-        return None
-    try:
-        f = float(val)
-        if math.isnan(f) or math.isinf(f):
-            return None
-        return f
-    except (ValueError, TypeError):
-        return None
+from app.core.cache import get_cache as _get_cached, set_cache as _set_cache
+from app.core.utils import safe_float as _safe_float
 
 
 class AKShareService:

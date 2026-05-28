@@ -5,7 +5,7 @@ objShell.Run "cmd /c cd /d """ & strRoot & "backend"" && venv\Scripts\python.exe
 
 objShell.Run "cmd /c cd /d """ & strRoot & "frontend"" && npx vite --port 5173", 0, False
 
-WScript.Sleep 8000
+WScript.Sleep 15000
 
 objShell.Run "http://localhost:5173", 1, False
 

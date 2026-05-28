@@ -17,18 +17,63 @@ if not exist "%ROOT%frontend\node_modules" (
     cd /d "%ROOT%frontend" && npm install
 )
 
+:: Check for port conflicts
+netstat -ano | findstr ":8001 " | findstr "LISTENING" >nul 2>&1
+if not errorlevel 1 (
+    echo [ERROR] Port 8001 is already in use. Run stop.bat first or kill the process.
+    pause
+    exit /b 1
+)
+netstat -ano | findstr ":5173 " | findstr "LISTENING" >nul 2>&1
+if not errorlevel 1 (
+    echo [ERROR] Port 5173 is already in use. Run stop.bat first or kill the process.
+    pause
+    exit /b 1
+)
+
 :: Start backend (minimized)
 start "Invest-Backend" /min cmd /c "cd /d "%ROOT%backend" && venv\Scripts\python.exe -m uvicorn app.main:app --reload --port 8001"
 
 :: Start frontend (minimized)
 start "Invest-Frontend" /min cmd /c "cd /d "%ROOT%frontend" && npx vite --port 5173"
 
-:: Wait for services
-timeout /t 8 /nobreak >nul
+:: Poll for backend readiness (max 30s)
+echo Waiting for services...
+set /a ATTEMPTS=0
+:WAIT_BACKEND
+set /a ATTEMPTS+=1
+if %ATTEMPTS% GTR 30 (
+    echo [ERROR] Backend failed to start within 30 seconds.
+    pause
+    exit /b 1
+)
+powershell -Command "$c = New-Object System.Net.Sockets.TcpClient; try { $c.Connect('localhost', 8001); $c.Close(); exit 0 } catch { exit 1 }" >nul 2>&1
+if errorlevel 1 (
+    timeout /t 1 /nobreak >nul
+    goto WAIT_BACKEND
+)
+echo Backend ready on port 8001.
+
+:: Poll for frontend readiness (max 30s)
+set /a ATTEMPTS=0
+:WAIT_FRONTEND
+set /a ATTEMPTS+=1
+if %ATTEMPTS% GTR 30 (
+    echo [ERROR] Frontend failed to start within 30 seconds.
+    pause
+    exit /b 1
+)
+powershell -Command "$c = New-Object System.Net.Sockets.TcpClient; try { $c.Connect('localhost', 5173); $c.Close(); exit 0 } catch { exit 1 }" >nul 2>&1
+if errorlevel 1 (
+    timeout /t 1 /nobreak >nul
+    goto WAIT_FRONTEND
+)
+echo Frontend ready on port 5173.
 
 :: Open browser
 start "" http://localhost:5173
 
-echo 已启动！前端: http://localhost:5173  后端: http://localhost:8001
-echo 如需停止，请在任务管理器中结束 python 和 node 进程。
+echo.
+echo Started! Frontend: http://localhost:5173  Backend: http://localhost:8001
+echo Run stop.bat to stop all services.
 timeout /t 3 /nobreak >nul

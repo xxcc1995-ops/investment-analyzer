@@ -13,10 +13,6 @@ from cryptography.hazmat.backends import default_backend
 
 logger = logging.getLogger(__name__)
 
-# 缓存: {cache_key: (data, timestamp)}
-_cache: Dict[str, tuple] = {}
-CACHE_TTL = 300  # 5分钟缓存
-
 # 集思录登录态
 _jisilu_session: Optional[requests.Session] = None
 _jisilu_logged_in = False
@@ -25,17 +21,7 @@ _jisilu_logged_in = False
 _LOGIN_STATE_FILE = os.path.join(os.path.dirname(__file__), '..', '..', '.jisilu_login.json')
 
 
-def _get_cache(key: str) -> Optional[dict]:
-    if key in _cache:
-        data, ts = _cache[key]
-        if time.time() - ts < CACHE_TTL:
-            return data
-        del _cache[key]
-    return None
-
-
-def _set_cache(key: str, data: dict):
-    _cache[key] = (data, time.time())
+from app.core.cache import get_cache as _get_cache, set_cache as _set_cache, clear_cache as _clear_cache
 
 
 def _save_login_state(cookies: dict):
@@ -400,7 +386,8 @@ class FundService:
 
     JISILU_QDII_URL = 'https://www.jisilu.cn/data/qdii/qdii_list/'
 
-    JISILU_AES_KEY = '397151C04723421F'
+    # Note: ECB mode is required by jisilu.cn's login protocol. Do not change.
+    JISILU_AES_KEY = os.environ.get('JISILU_AES_KEY', '397151C04723421F')
 
     HEADERS = {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
@@ -456,7 +443,7 @@ class FundService:
             if result.get('code') == 200:
                 _jisilu_session = session
                 _jisilu_logged_in = True
-                _cache.clear()
+                _clear_cache()
                 # 保存登录状态
                 _save_login_state(dict(session.cookies))
                 return {'success': True, 'msg': '登录成功'}
@@ -701,29 +688,31 @@ class FundService:
 
             # 1) 从 min_amt 中提取日累计申购限额
             if '限额' in min_amt:
-                for line in min_amt.split('\r\n'):
+                for line in min_amt.splitlines():
                     if '限额' in line:
                         val = line.strip()
                         if '无限额' not in val:
                             apply_limit = val
                         break
 
-            # 2) 从 apply_status 中提取限大额信息 (如 "限1万", "限20万", "限1千")
+            # 2) 从 apply_status 中提取限大额信息 (如 "限1万", "限20万", "限1千", "限500")
             if not apply_limit and apply_status.startswith('限') and apply_status != '开放申购':
-                raw = apply_status  # e.g. "限1万", "限20万", "限1千", "限0"
+                raw = apply_status
                 if raw == '限0':
                     apply_limit = '暂停申购'
                 else:
-                    # 解析 "限X万" / "限X千" 格式为具体金额
-                    m = re.match(r'限(\d+(?:\.\d+)?)(万|千)', raw)
+                    # 解析 "限X万" / "限X千" / "限X"(元) 格式为具体金额
+                    m = re.match(r'限(\d+(?:\.\d+)?)(万|千)?', raw)
                     if m:
                         num = float(m.group(1))
                         unit = m.group(2)
                         if unit == '万':
-                            amount = int(num * 10000)
+                            limit_amount = int(num * 10000)
+                        elif unit == '千':
+                            limit_amount = int(num * 1000)
                         else:
-                            amount = int(num * 1000)
-                        apply_limit = f'日限额{amount:,}元'
+                            limit_amount = int(num)
+                        apply_limit = f'日限额{limit_amount:,}元'
                     else:
                         apply_limit = raw
 
@@ -863,9 +852,11 @@ class FundService:
         if min_turnover > 0:
             funds = [f for f in funds if f['turnover'] >= min_turnover]
 
-        # 筛选: 开放申购
+        # 筛选: 开放申购（含有限购的也算开放，排除暂停/停止申购）
         if open_subscribe_only:
-            funds = [f for f in funds if '开放' in f.get('apply_status', '')]
+            funds = [f for f in funds if f.get('apply_limit') != '暂停申购'
+                     and '暂停' not in f.get('apply_status', '')
+                     and '停止' not in f.get('apply_status', '')]
 
         # 筛选: 折溢价方向
         if direction == "溢价":
@@ -894,7 +885,7 @@ class FundService:
 
     @staticmethod
     def refresh_data() -> dict:
-        _cache.clear()
+        _clear_cache()
         return FundService.get_arbitrage_opportunities()
 
     @staticmethod

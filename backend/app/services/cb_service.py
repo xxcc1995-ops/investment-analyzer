@@ -8,31 +8,8 @@ from datetime import datetime
 
 logger = logging.getLogger(__name__)
 
-# 缓存
-_cache: Dict[str, tuple] = {}
-CACHE_TTL = 300  # 5分钟缓存
-
-
-def _get_cache(key: str) -> Optional[dict]:
-    if key in _cache:
-        data, ts = _cache[key]
-        if time.time() - ts < CACHE_TTL:
-            return data
-        del _cache[key]
-    return None
-
-
-def _set_cache(key: str, data: dict):
-    _cache[key] = (data, time.time())
-
-
-def _safe_float(val, default=0.0) -> float:
-    try:
-        if val is None or val == '' or val == '-':
-            return default
-        return float(val)
-    except (ValueError, TypeError):
-        return default
+from app.core.cache import get_cache as _get_cache, set_cache as _set_cache
+from app.core.utils import safe_float as _safe_float
 
 
 class CBService:

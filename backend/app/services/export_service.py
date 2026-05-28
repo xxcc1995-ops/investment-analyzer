@@ -285,20 +285,11 @@ def _score_export_champion(stock: dict) -> tuple:
 # 缓存
 # ============================================================
 
-_cache = {}
-_CACHE_TTL = 600  # 10 minutes
-
+from app.core.cache import get_cache as _base_get_cache, set_cache as _set_cached
+_CACHE_TTL = 600
 
 def _get_cached(key: str):
-    if key in _cache:
-        data, ts = _cache[key]
-        if time.time() - ts < _CACHE_TTL:
-            return data
-    return None
-
-
-def _set_cached(key: str, data):
-    _cache[key] = (data, time.time())
+    return _base_get_cache(key, ttl_seconds=_CACHE_TTL)
 
 
 # ============================================================
