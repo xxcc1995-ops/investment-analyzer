@@ -768,6 +768,118 @@ class DataService:
             return None
 
     @staticmethod
+    @cached(ttl_seconds=300, key_prefix="dividend_history")
+    def get_dividend_history(stock_code: str) -> dict:
+        """获取历史分红明细（用于攒股收息计算）"""
+        if DataService._is_hk_code(stock_code):
+            return DataService._get_hk_dividend_history(stock_code)
+        try:
+            # 东方财富分红数据API
+            url = "https://datacenter-web.eastmoney.com/api/data/v1/get"
+            params = {
+                "reportName": "RPT_SHAREBONUS_DET",
+                "columns": "SECURITY_CODE,REPORT_DATE,PRETAX_BONUS_RMB,BASIC_EPS,ASSIGN_PROGRESS,EX_DIVIDEND_DATE",
+                "filter": f"(SECURITY_CODE=\"{stock_code}\")",
+                "pageNumber": "1",
+                "pageSize": "30",
+                "sortTypes": "-1",
+                "sortColumns": "REPORT_DATE",
+                "source": "HSF10",
+                "client": "PC"
+            }
+
+            r = requests.get(url, params=params, timeout=15)
+            data = r.json()
+
+            if not data.get("result") or not data["result"].get("data"):
+                return {"code": stock_code, "dividends": [], "message": "暂无分红数据"}
+
+            # 按年度汇总分红（中期+年终）
+            year_dividends = {}
+            for div in data["result"]["data"]:
+                bonus_per_10 = _safe_float(div.get("PRETAX_BONUS_RMB"))
+                if bonus_per_10 and bonus_per_10 > 0:
+                    report_date = div.get("REPORT_DATE", "")[:10]
+                    year = report_date[:4]
+                    ex_date = div.get("EX_DIVIDEND_DATE", "")[:10] if div.get("EX_DIVIDEND_DATE") else ""
+                    progress = div.get("ASSIGN_PROGRESS", "")
+                    eps = _safe_float(div.get("BASIC_EPS"))
+                    dps = round(bonus_per_10 / 10, 4)
+
+                    if year not in year_dividends:
+                        year_dividends[year] = {
+                            "year": year,
+                            "total_dps": 0,
+                            "eps": eps,
+                            "ex_date": ex_date,
+                            "progress": progress,
+                            "details": [],
+                        }
+                    year_dividends[year]["total_dps"] = round(year_dividends[year]["total_dps"] + dps, 4)
+                    year_dividends[year]["details"].append({
+                        "report_date": report_date,
+                        "dividend_per_share": dps,
+                        "ex_date": ex_date,
+                        "progress": progress,
+                    })
+                    # 用年报的EPS
+                    if report_date.endswith("12-31") and eps:
+                        year_dividends[year]["eps"] = eps
+                    # 取最新的实施进度
+                    if progress == "实施分配":
+                        year_dividends[year]["progress"] = progress
+
+            # 按年度降序排列
+            dividends = sorted(year_dividends.values(), key=lambda x: x["year"], reverse=True)
+
+            return {
+                "code": stock_code,
+                "dividends": dividends,
+                "fetch_time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            }
+        except Exception as e:
+            logger.warning(f"get_dividend_history failed for {stock_code}: {e}")
+            return {"code": stock_code, "dividends": [], "error": "获取分红数据失败"}
+
+    @staticmethod
+    def _get_hk_dividend_history(stock_code: str) -> dict:
+        """获取港股历史分红明细"""
+        try:
+            import akshare as ak
+            import re
+
+            df_div = ak.stock_hk_dividend_payout_em(symbol=stock_code)
+            if df_div.empty:
+                return {"code": stock_code, "dividends": [], "message": "暂无分红数据"}
+
+            dividends = []
+            for _, row in df_div.iterrows():
+                ex_date = row.iloc[4]  # 除净日
+                scheme = str(row.iloc[2])  # 分红方案
+                if not ex_date or not scheme:
+                    continue
+                m = re.search(r'[\d.]+', scheme)
+                if m:
+                    dps = float(m.group())
+                    if dps > 0:
+                        dividends.append({
+                            "report_date": str(row.iloc[1])[:10] if row.iloc[1] else "",
+                            "ex_date": str(ex_date)[:10],
+                            "dividend_per_share": dps,
+                            "eps": None,
+                            "progress": str(row.iloc[3]) if row.iloc[3] else "",
+                        })
+
+            return {
+                "code": stock_code,
+                "dividends": dividends,
+                "fetch_time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            }
+        except Exception as e:
+            logger.warning(f"_get_hk_dividend_history failed for {stock_code}: {e}")
+            return {"code": stock_code, "dividends": [], "error": "获取港股分红数据失败"}
+
+    @staticmethod
     def _get_actual_dividend(stock_code: str) -> tuple:
         """获取实际分红数据：每股股息、连续分红年数、分红比例"""
         try:

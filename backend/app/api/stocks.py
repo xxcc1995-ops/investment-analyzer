@@ -34,3 +34,9 @@ def get_stock_financials(stock_code: str):
 def get_valuation_history(stock_code: str):
     """获取历史PE/PB估值数据"""
     return data_service.get_valuation_history(stock_code)
+
+
+@router.get("/{stock_code}/dividend-history")
+def get_dividend_history(stock_code: str):
+    """获取历史分红明细"""
+    return data_service.get_dividend_history(stock_code)

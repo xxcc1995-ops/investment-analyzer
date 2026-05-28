@@ -101,9 +101,31 @@ body {
 
 .sidebar-header h1 {
   font-size: 18px;
-  margin-bottom: 12px;
+  margin-bottom: 8px;
   font-weight: 600;
   letter-spacing: 0.5px;
+}
+
+.invest-credo {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 10px;
+  background: rgba(255, 255, 255, 0.06);
+  border-radius: 6px;
+  margin-bottom: 12px;
+  border-left: 3px solid var(--accent-orange);
+}
+
+.invest-credo span:first-child {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--accent-orange);
+}
+
+.invest-credo span:last-child {
+  font-size: 11px;
+  color: var(--text-secondary);
 }
 
 .search-box {
@@ -463,10 +485,75 @@ body {
   font-weight: 500;
 }
 
+.metric-percentile {
+  font-size: 11px;
+  opacity: 0.7;
+}
+
 .metric-desc {
   font-size: 11px;
   color: var(--text-muted);
   margin-top: 4px;
+}
+
+/* 每股分红 */
+.dividend-section {
+  background: var(--bg-secondary);
+  padding: 20px;
+  border-radius: var(--radius-md);
+  margin-bottom: 16px;
+  box-shadow: var(--shadow-card);
+}
+
+.dividend-section h3 {
+  font-size: 16px;
+  font-weight: 600;
+  margin-bottom: 16px;
+}
+
+.dividend-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  margin-bottom: 16px;
+  padding: 12px;
+  background: var(--bg-tertiary, rgba(255,255,255,0.03));
+  border-radius: var(--radius-sm);
+}
+
+.dividend-metric {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.dividend-metric-label {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.dividend-metric-value {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.dividend-table {
+  width: 100%;
+  font-size: 13px;
+}
+
+.dividend-table th {
+  text-align: left;
+  padding: 8px 12px;
+  color: var(--text-muted);
+  font-weight: 500;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.dividend-table td {
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border-color);
 }
 
 /* 巴菲特指标 */

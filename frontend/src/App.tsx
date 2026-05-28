@@ -36,6 +36,7 @@ interface StockBasic {
   amount: number
   pe: number | null
   pb: number | null
+  dividend_yield?: number | null
   market_cap: number
   trade_date?: string
   trade_time?: string
@@ -161,6 +162,7 @@ function App() {
   const [selectedStock, setSelectedStock] = useState<StockBasic | null>(null)
   const [financials, setFinancials] = useState<FinancialReport[]>([])
   const [valuationHistory, setValuationHistory] = useState<ValuationHistory | null>(null)
+  const [dividendHistory, setDividendHistory] = useState<any>(null)
   const [activeTab, setActiveTab] = useState('overview')
   const [loading, setLoading] = useState(false)
   const [watchlist, setWatchlist] = useState<StockBasic[]>([])
@@ -280,10 +282,13 @@ function App() {
       setFetchTime(basicRes.data.fetch_time || new Date().toLocaleString())
       setLatestReport(finRes.data.latest_report_date || '')
 
-      // 异步加载估值历史（不阻塞主数据展示）
+      // 异步加载估值历史和分红历史（不阻塞主数据展示）
       axios.get(`${API_BASE}/stocks/${code}/valuation-history`)
         .then(res => setValuationHistory(res.data))
         .catch(() => setValuationHistory(null))
+      axios.get(`${API_BASE}/stocks/${code}/dividend-history`)
+        .then(res => setDividendHistory(res.data))
+        .catch(() => setDividendHistory(null))
     } catch (err) {
       console.error('加载失败:', err)
     } finally {
@@ -433,20 +438,24 @@ function App() {
     return num + '股'
   }
 
-  // 计算估值分位数（简化版）
-  const getValuationLevel = (value: number | null, type: 'pe' | 'pb') => {
-    if (!value) return { level: '-', color: 'var(--text-muted)' }
-    if (type === 'pe') {
-      if (value < 15) return { level: '低估', color: '#3fb950' }
-      if (value < 25) return { level: '合理', color: '#1890ff' }
-      if (value < 40) return { level: '偏高', color: '#faad14' }
-      return { level: '高估', color: '#ff4d4f' }
-    } else {
-      if (value < 1) return { level: '低估', color: '#3fb950' }
-      if (value < 3) return { level: '合理', color: '#58a6ff' }
-      if (value < 5) return { level: '偏高', color: '#d29922' }
-      return { level: '高估', color: '#f85149' }
+  // 基于历史分位数的估值评级
+  const getValuationLevel = (type: 'pe' | 'pb' | 'div') => {
+    const stats = valuationHistory?.stats?.[type]
+    if (!stats) return { level: '-', color: 'var(--text-muted)', percentile: null }
+
+    const p = stats.percentile
+    if (type === 'div') {
+      // 股息率：分位越高越好（与PE/PB相反）
+      if (p >= 70) return { level: '高股息', color: '#3fb950', percentile: p }
+      if (p >= 30) return { level: '适中', color: '#1890ff', percentile: p }
+      return { level: '低股息', color: '#ff4d4f', percentile: p }
     }
+    // PE/PB：分位越低越便宜
+    if (p <= 20) return { level: '极度低估', color: '#3fb950', percentile: p }
+    if (p <= 40) return { level: '低估', color: '#58a6ff', percentile: p }
+    if (p <= 60) return { level: '合理', color: '#8b949e', percentile: p }
+    if (p <= 80) return { level: '偏高', color: '#d29922', percentile: p }
+    return { level: '高估', color: '#f85149', percentile: p }
   }
 
   // ROE图表
@@ -621,8 +630,9 @@ function App() {
 
   // 计算最新财务指标
   const latestFin = financials.length > 0 ? financials[0] : null
-  const peLevel = getValuationLevel(selectedStock?.pe ?? null, 'pe')
-  const pbLevel = getValuationLevel(selectedStock?.pb ?? null, 'pb')
+  const peLevel = getValuationLevel('pe')
+  const pbLevel = getValuationLevel('pb')
+  const divLevel = getValuationLevel('div')
 
   return (
     <div className="app">
@@ -630,6 +640,10 @@ function App() {
       <div className="sidebar">
         <div className="sidebar-header">
           <h1>新源的Invest工具</h1>
+          <div className="invest-credo">
+            <span>不被自媒体带节奏</span>
+            <span>拆解问题 · 补齐证据链 · 用概率表达</span>
+          </div>
           <div className="search-box" ref={searchBoxRef}>
             <input
               type="text"
@@ -1688,12 +1702,26 @@ function App() {
                 <div className="metric-card">
                   <div className="metric-label">滚动市盈率(TTM)</div>
                   <div className="metric-value">{formatNum(selectedStock.pe)}</div>
-                  <div className="metric-tag" style={{ color: peLevel.color }}>{peLevel.level}</div>
+                  <div className="metric-tag" style={{ color: peLevel.color }}>
+                    {peLevel.level}
+                    {peLevel.percentile !== null && <span className="metric-percentile"> ({peLevel.percentile}%)</span>}
+                  </div>
                 </div>
                 <div className="metric-card">
                   <div className="metric-label">市净率(PB)</div>
                   <div className="metric-value">{formatNum(selectedStock.pb)}</div>
-                  <div className="metric-tag" style={{ color: pbLevel.color }}>{pbLevel.level}</div>
+                  <div className="metric-tag" style={{ color: pbLevel.color }}>
+                    {pbLevel.level}
+                    {pbLevel.percentile !== null && <span className="metric-percentile"> ({pbLevel.percentile}%)</span>}
+                  </div>
+                </div>
+                <div className="metric-card">
+                  <div className="metric-label">股息率</div>
+                  <div className="metric-value">{valuationHistory?.stats?.div?.current ? valuationHistory.stats.div.current + '%' : (selectedStock.dividend_yield ? selectedStock.dividend_yield + '%' : '-')}</div>
+                  <div className="metric-tag" style={{ color: divLevel.color }}>
+                    {divLevel.level}
+                    {divLevel.percentile !== null && <span className="metric-percentile"> ({divLevel.percentile}%)</span>}
+                  </div>
                 </div>
                 <div className="metric-card">
                   <div className="metric-label">ROE</div>
@@ -1773,6 +1801,7 @@ function App() {
               <div className={`tab ${activeTab === 'growth' ? 'active' : ''}`} onClick={() => setActiveTab('growth')}>成长能力</div>
               <div className={`tab ${activeTab === 'profit' ? 'active' : ''}`} onClick={() => setActiveTab('profit')}>盈利能力</div>
               <div className={`tab ${activeTab === 'debt' ? 'active' : ''}`} onClick={() => setActiveTab('debt')}>负债分析</div>
+              <div className={`tab ${activeTab === 'dividend' ? 'active' : ''}`} onClick={() => setActiveTab('dividend')}>分红</div>
             </div>
 
             {/* 表格 */}
@@ -1891,6 +1920,84 @@ function App() {
                     ))}
                   </tbody>
                 </table>
+              )}
+
+              {activeTab === 'dividend' && dividendHistory && dividendHistory.dividends && dividendHistory.dividends.length > 0 && (
+                <>
+                  <div className="dividend-summary">
+                    {(() => {
+                      const divs = dividendHistory.dividends
+                      const latestDps = divs[0]?.total_dps || 0
+                      const price = selectedStock?.price || 0
+                      const currentYield = price > 0 ? (latestDps / price * 100).toFixed(2) : '-'
+                      const recent5 = divs.slice(0, 5)
+                      const avgDps = recent5.length > 0 ? (recent5.reduce((s: number, d: any) => s + d.total_dps, 0) / recent5.length) : 0
+                      const avgYield = price > 0 ? (avgDps / price * 100).toFixed(2) : '-'
+                      const oldest = recent5[recent5.length - 1]?.total_dps || 0
+                      const divGrowth = oldest > 0 ? (((latestDps - oldest) / oldest) * 100).toFixed(1) : '-'
+                      return (
+                        <>
+                          <div className="dividend-metric">
+                            <span className="dividend-metric-label">最新年度分红</span>
+                            <span className="dividend-metric-value">{latestDps.toFixed(4)}元</span>
+                          </div>
+                          <div className="dividend-metric">
+                            <span className="dividend-metric-label">当前股息率</span>
+                            <span className="dividend-metric-value">{currentYield}%</span>
+                          </div>
+                          <div className="dividend-metric">
+                            <span className="dividend-metric-label">近5年均值</span>
+                            <span className="dividend-metric-value">{avgDps.toFixed(4)}元 ({avgYield}%)</span>
+                          </div>
+                          <div className="dividend-metric">
+                            <span className="dividend-metric-label">分红增长</span>
+                            <span className="dividend-metric-value" style={{ color: parseFloat(String(divGrowth)) >= 0 ? '#3fb950' : '#f85149' }}>{divGrowth !== '-' ? divGrowth + '%' : '-'}</span>
+                          </div>
+                          {price > 0 && (
+                            <div className="dividend-metric">
+                              <span className="dividend-metric-label">每万元持股年收息</span>
+                              <span className="dividend-metric-value" style={{ color: '#58a6ff' }}>{(10000 / price * latestDps).toFixed(2)}元</span>
+                            </div>
+                          )}
+                        </>
+                      )
+                    })()}
+                  </div>
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>年度</th>
+                        <th>年度合计每股分红(元)</th>
+                        <th>每股收益(元)</th>
+                        <th>分红比例</th>
+                        <th>股息率</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {dividendHistory.dividends.map((d: any, i: number) => {
+                        const yieldVal = selectedStock?.price && d.total_dps
+                          ? (d.total_dps / selectedStock.price * 100).toFixed(2) + '%'
+                          : '-'
+                        const ratio = d.eps && d.total_dps
+                          ? (d.total_dps / d.eps * 100).toFixed(1) + '%'
+                          : '-'
+                        return (
+                          <tr key={i}>
+                            <td>{d.year}</td>
+                            <td>{d.total_dps.toFixed(4)}</td>
+                            <td>{d.eps ? d.eps.toFixed(4) : '-'}</td>
+                            <td>{ratio}</td>
+                            <td>{yieldVal}</td>
+                          </tr>
+                        )
+                      })}
+                    </tbody>
+                  </table>
+                </>
+              )}
+
+              {activeTab === 'dividend' && (!dividendHistory || !dividendHistory.dividends || dividendHistory.dividends.length === 0) && (
+                <div style={{ padding: '20px', textAlign: 'center', color: 'var(--text-muted)' }}>暂无分红数据</div>
               )}
             </div>
 
