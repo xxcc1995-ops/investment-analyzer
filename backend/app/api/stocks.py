@@ -30,6 +30,16 @@ def get_stock_financials(stock_code: str):
     return data
 
 
+@router.get("/{stock_code}/fragility")
+def get_fragility(stock_code: str):
+    """商业模式脆弱性/反脆弱性分析"""
+    from app.services.fragility_service import analyze_fragility
+    result = analyze_fragility(stock_code)
+    if "error" in result:
+        raise HTTPException(status_code=400, detail=result["error"])
+    return result
+
+
 @router.get("/{stock_code}/valuation-history")
 def get_valuation_history(stock_code: str):
     """获取历史PE/PB估值数据"""

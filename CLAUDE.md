@@ -41,8 +41,8 @@
 ## 启动命令
 
 ```bash
-# 后端（端口8001）
-cd backend && python -m uvicorn app.main:app --reload --port 8001
+# 后端（端口8002）
+cd backend && python -m uvicorn app.main:app --reload --port 8002
 
 # 前端（端口5173）
 cd frontend && npx vite --port 5173
@@ -51,4 +51,4 @@ cd frontend && npx vite --port 5173
 ## 访问地址
 
 - 前端：http://localhost:5173
-- 后端API：http://localhost:8001
+- 后端API：http://localhost:8002

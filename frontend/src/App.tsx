@@ -19,6 +19,7 @@ const OptionsRotation = lazy(() => import('./pages/OptionsRotation'))
 const GridTrading = lazy(() => import('./pages/GridTrading'))
 const XueqiuGurus = lazy(() => import('./pages/XueqiuGurus'))
 const NationalTeamMonitor = lazy(() => import('./pages/NationalTeamMonitor'))
+const RightSideTrading = lazy(() => import('./pages/RightSideTrading'))
 
 const API_BASE = '/api'
 
@@ -163,6 +164,7 @@ function App() {
   const [financials, setFinancials] = useState<FinancialReport[]>([])
   const [valuationHistory, setValuationHistory] = useState<ValuationHistory | null>(null)
   const [dividendHistory, setDividendHistory] = useState<any>(null)
+  const [fragility, setFragility] = useState<any>(null)
   const [activeTab, setActiveTab] = useState('overview')
   const [loading, setLoading] = useState(false)
   const [watchlist, setWatchlist] = useState<StockBasic[]>([])
@@ -193,7 +195,7 @@ function App() {
   const [cbLoggedIn, setCbLoggedIn] = useState(false)
 
   // 基金套利状态
-  const [mainView, setMainView] = useState<'stock' | 'arbitrage' | 'option' | 'cb' | 'hki' | 'indexVal' | 'usMarket' | 'dividend' | 'cigarButt' | 'valueInvesting' | 'reit' | 'crypto' | 'macro' | 'futures' | 'jcScreener' | 'polymarket' | 'exportChampions' | 'optionsRotation' | 'gridTrading' | 'xueqiuGurus' | 'nationalTeam'>('stock')
+  const [mainView, setMainView] = useState<'stock' | 'arbitrage' | 'option' | 'cb' | 'hki' | 'indexVal' | 'usMarket' | 'dividend' | 'cigarButt' | 'valueInvesting' | 'reit' | 'crypto' | 'macro' | 'futures' | 'jcScreener' | 'polymarket' | 'exportChampions' | 'optionsRotation' | 'gridTrading' | 'xueqiuGurus' | 'nationalTeam' | 'rightSide'>('stock')
   const [arbFunds, setArbFunds] = useState<FundArbitrage[]>([])
   const [arbLoading, setArbLoading] = useState(false)
   const [arbFetchTime, setArbFetchTime] = useState('')
@@ -289,6 +291,10 @@ function App() {
       axios.get(`${API_BASE}/stocks/${code}/dividend-history`)
         .then(res => setDividendHistory(res.data))
         .catch(() => setDividendHistory(null))
+      setFragility(null)
+      axios.get(`${API_BASE}/stocks/${code}/fragility`)
+        .then(res => setFragility(res.data))
+        .catch(() => setFragility(null))
     } catch (err) {
       console.error('加载失败:', err)
     } finally {
@@ -791,6 +797,8 @@ function App() {
             onClick={() => setMainView('xueqiuGurus')}>雪球大V</div>
           <div className={`list-tab ${mainView === 'nationalTeam' ? 'active' : ''}`}
             onClick={() => setMainView('nationalTeam')}>国家队监控</div>
+          <div className={`list-tab ${mainView === 'rightSide' ? 'active' : ''}`}
+            onClick={() => setMainView('rightSide')}>右侧交易</div>
         </div>
 
         {mainView === 'stock' && (
@@ -948,6 +956,12 @@ function App() {
             <p>汇金 · 证金 · 社保 · 养老保险</p>
           </div>
         )}
+        {mainView === 'rightSide' && (
+          <div className="stock-list sidebar-info">
+            <p>右侧交易判断</p>
+            <p>趋势反转确认 · 五维度评分</p>
+          </div>
+        )}
       </div>
 
       {/* 右侧内容 */}
@@ -992,6 +1006,8 @@ function App() {
           <XueqiuGurus />
         ) : mainView === 'nationalTeam' ? (
           <NationalTeamMonitor />
+        ) : mainView === 'rightSide' ? (
+          <RightSideTrading />
         ) : mainView === 'option' ? (
           /* 期权收益计算器 */
           <div className="option-page">
@@ -1748,6 +1764,27 @@ function App() {
                   <div className="metric-desc">同比增长</div>
                 </div>
                 <div className="metric-card">
+                  <div className="metric-label">PEG</div>
+                  <div className="metric-value">
+                    {selectedStock?.pe && latestFin?.profit_growth && latestFin.profit_growth > 0
+                      ? (selectedStock.pe / latestFin.profit_growth).toFixed(2)
+                      : '-'}
+                  </div>
+                  <div className="metric-tag" style={{
+                    color: selectedStock?.pe && latestFin?.profit_growth && latestFin.profit_growth > 0
+                      ? (selectedStock.pe / latestFin.profit_growth) < 1 ? '#16a34a'
+                        : (selectedStock.pe / latestFin.profit_growth) < 2 ? '#ca8a04'
+                        : '#dc2626'
+                      : '#6b7280'
+                  }}>
+                    {selectedStock?.pe && latestFin?.profit_growth && latestFin.profit_growth > 0
+                      ? (selectedStock.pe / latestFin.profit_growth) < 1 ? '低估'
+                        : (selectedStock.pe / latestFin.profit_growth) < 2 ? '合理'
+                        : '高估'
+                      : '数据不足'}
+                  </div>
+                </div>
+                <div className="metric-card">
                   <div className="metric-label">毛利率</div>
                   <div className="metric-value">{formatNum(latestFin?.gross_margin, '%')}</div>
                   <div className="metric-desc">销售毛利率</div>
@@ -1794,6 +1831,52 @@ function App() {
                 </div>
               </div>
             </div>
+
+            {/* 商业模式脆弱性/反脆弱性分析 */}
+            {fragility && !fragility.error && (
+              <div className="buffett-section">
+                <h3>商业模式韧性分析</h3>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginBottom: 16 }}>
+                  <div style={{
+                    width: 64, height: 64, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    background: fragility.total_score >= 75 ? '#16a34a' : fragility.total_score >= 60 ? '#ca8a04' : fragility.total_score >= 40 ? '#ea580c' : '#dc2626',
+                    color: '#fff', fontWeight: 700, fontSize: 20, flexShrink: 0,
+                  }}>
+                    {fragility.total_score}
+                  </div>
+                  <div>
+                    <div style={{ fontSize: 16, fontWeight: 600, color: '#f3f4f6' }}>{fragility.verdict}</div>
+                    <div style={{ fontSize: 12, color: '#9ca3af', marginTop: 4 }}>
+                      {fragility.total_score >= 75 ? '商业模式坚韧，抗风险能力强' :
+                       fragility.total_score >= 60 ? '有一定护城河，需关注薄弱环节' :
+                       fragility.total_score >= 40 ? '存在明显弱点，需谨慎投资' :
+                       '商业模式风险大，建议排除'}
+                    </div>
+                  </div>
+                </div>
+                <div className="buffett-grid">
+                  {fragility.dimensions?.map((dim: any, i: number) => (
+                    <div key={i} className="buffett-item">
+                      <div className="buffett-label">{dim.name}</div>
+                      <div className="buffett-value" style={{
+                        color: dim.score / dim.max >= 0.75 ? '#16a34a' : dim.score / dim.max >= 0.5 ? '#ca8a04' : '#dc2626'
+                      }}>
+                        {dim.score}/{dim.max}
+                      </div>
+                      <div className="buffett-desc">{dim.signal || dim.label || ''}</div>
+                    </div>
+                  ))}
+                </div>
+                {fragility.warnings?.length > 0 && (
+                  <div style={{ marginTop: 12, padding: '10px 14px', background: 'rgba(220,38,38,0.1)', borderRadius: 8, border: '1px solid rgba(220,38,38,0.3)' }}>
+                    <div style={{ fontSize: 13, fontWeight: 600, color: '#ef4444', marginBottom: 6 }}>风险警告</div>
+                    {fragility.warnings.map((w: any, i: number) => (
+                      <div key={i} style={{ fontSize: 12, color: '#fca5a5', lineHeight: 1.8 }}>· {typeof w === 'string' ? w : `${w.name || ''}: ${w.signal || ''}`}</div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
 
             {/* Tab切换 */}
             <div className="tabs">

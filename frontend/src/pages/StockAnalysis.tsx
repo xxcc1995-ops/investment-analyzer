@@ -1,9 +1,38 @@
 // @ts-nocheck
-import React, { useState } from 'react';
-import { Card, Input, Button, Descriptions, Spin, message } from 'antd';
+import React, { useState, useMemo } from 'react';
+import { Card, Input, Button, Descriptions, Spin, message, Tag } from 'antd';
 import { SearchOutlined } from '@ant-design/icons';
 import ReactECharts from 'echarts-for-react';
 import { stockApi, valuationApi, StockBasicInfo, StockFinancials, DCFValuation } from '../services/api';
+
+interface FragilityDimension {
+  name: string;
+  score: number;
+  max: number;
+  label: string;
+  signal: string;
+  value: string;
+}
+
+interface FragilityResult {
+  code: string;
+  name: string;
+  total_score: number;
+  max_score: number;
+  verdict: string;
+  verdict_desc: string;
+  color: string;
+  dimensions: FragilityDimension[];
+  warnings: { name: string; label: string; signal: string }[];
+  report_period: string;
+}
+
+const VERDICT_COLORS: Record<string, string> = {
+  '反脆弱型': '#16a34a',
+  '稳健型': '#ca8a04',
+  '脆弱型': '#ea580c',
+  '高度脆弱': '#dc2626',
+};
 
 const StockAnalysis: React.FC = () => {
   const [stockCode, setStockCode] = useState('');
@@ -11,6 +40,7 @@ const StockAnalysis: React.FC = () => {
   const [basicInfo, setBasicInfo] = useState<StockBasicInfo | null>(null);
   const [financials, setFinancials] = useState<StockFinancials | null>(null);
   const [dcf, setDcf] = useState<DCFValuation | null>(null);
+  const [fragility, setFragility] = useState<FragilityResult | null>(null);
 
   const handleSearch = async () => {
     if (!stockCode) {
@@ -19,6 +49,7 @@ const StockAnalysis: React.FC = () => {
     }
 
     setLoading(true);
+    setFragility(null);
     try {
       const [basicRes, finRes] = await Promise.all([
         stockApi.getBasicInfo(stockCode),
@@ -35,12 +66,49 @@ const StockAnalysis: React.FC = () => {
       } catch {
         setDcf(null);
       }
+
+      // 脆弱性分析
+      try {
+        const fragRes = await fetch(`/api/stocks/${stockCode}/fragility`);
+        if (fragRes.ok) {
+          setFragility(await fragRes.json());
+        }
+      } catch {
+        setFragility(null);
+      }
     } catch (error) {
       message.error('查询失败，请检查股票代码');
     } finally {
       setLoading(false);
     }
   };
+
+  const fragilityRadarOption = useMemo(() => {
+    if (!fragility) return {};
+    const dims = fragility.dimensions;
+    return {
+      tooltip: {},
+      radar: {
+        indicator: dims.map(d => ({ name: d.name, max: d.max })),
+        shape: 'polygon',
+        splitArea: { areaStyle: { color: ['rgba(59,130,246,0.05)', 'rgba(59,130,246,0.1)'] } },
+        axisLine: { lineStyle: { color: '#374151' } },
+        splitLine: { lineStyle: { color: '#374151' } },
+        axisName: { color: '#9ca3af', fontSize: 11 },
+      },
+      series: [{
+        type: 'radar',
+        data: [{
+          value: dims.map(d => d.score),
+          name: fragility.verdict,
+          areaStyle: { color: `${fragility.color}33` },
+          lineStyle: { color: fragility.color, width: 2 },
+          itemStyle: { color: fragility.color },
+        }],
+      }],
+      backgroundColor: 'transparent',
+    };
+  }, [fragility]);
 
   const getFCFChartOption = () => {
     if (!dcf) return {};
@@ -86,6 +154,16 @@ const StockAnalysis: React.FC = () => {
               <Descriptions.Item label="PE (市盈率)">{basicInfo.pe}</Descriptions.Item>
               <Descriptions.Item label="PB (市净率)">{basicInfo.pb}</Descriptions.Item>
               <Descriptions.Item label="ROE (%)">{basicInfo.roe}%</Descriptions.Item>
+              {(() => {
+                const pe = basicInfo.pe;
+                const growth = financials?.profit_growth;
+                if (pe && growth && growth > 0) {
+                  const peg = (pe / growth).toFixed(2);
+                  const color = parseFloat(peg) < 1 ? '#52c41a' : parseFloat(peg) <= 2 ? '#1890ff' : '#ff4d4f';
+                  return <Descriptions.Item label="PEG"><span style={{ color, fontWeight: 600 }}>{peg}</span></Descriptions.Item>;
+                }
+                return <Descriptions.Item label="PEG">--</Descriptions.Item>;
+              })()}
             </Descriptions>
           </Card>
         )}
@@ -99,6 +177,51 @@ const StockAnalysis: React.FC = () => {
               <Descriptions.Item label="营收同比增长">{financials.revenue_growth}%</Descriptions.Item>
               <Descriptions.Item label="净利润同比增长">{financials.profit_growth}%</Descriptions.Item>
             </Descriptions>
+          </Card>
+        )}
+
+        {fragility && (
+          <Card
+            title={
+              <span>
+                商业模式脆弱性分析
+                <Tag color={fragility.color} style={{ marginLeft: 12 }}>
+                  {fragility.verdict} {fragility.total_score}分
+                </Tag>
+              </span>
+            }
+            style={{ marginTop: 16 }}
+          >
+            <div style={{ display: 'flex', gap: 24, flexWrap: 'wrap' }}>
+              <div style={{ flex: '0 0 320px' }}>
+                <ReactECharts option={fragilityRadarOption} style={{ height: 300 }} />
+              </div>
+              <div style={{ flex: 1, minWidth: 300 }}>
+                <div style={{ marginBottom: 16, padding: 12, background: `${fragility.color}15`, borderRadius: 8, border: `1px solid ${fragility.color}40` }}>
+                  <div style={{ fontSize: 18, fontWeight: 700, color: fragility.color }}>{fragility.verdict}</div>
+                  <div style={{ fontSize: 13, color: '#d1d5db', marginTop: 4 }}>{fragility.verdict_desc}</div>
+                  <div style={{ fontSize: 12, color: '#6b7280', marginTop: 4 }}>报告期: {fragility.report_period}</div>
+                </div>
+                {fragility.dimensions.map((d, i) => (
+                  <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '8px 0', borderBottom: '1px solid #1f2937' }}>
+                    <div style={{ width: 80, fontSize: 13, color: '#9ca3af' }}>{d.name}</div>
+                    <div style={{ flex: 1, height: 6, background: '#1f2937', borderRadius: 3 }}>
+                      <div style={{ height: '100%', width: `${(d.score / d.max) * 100}%`, background: d.score / d.max >= 0.6 ? '#16a34a' : d.score / d.max >= 0.4 ? '#ca8a04' : '#dc2626', borderRadius: 3 }} />
+                    </div>
+                    <div style={{ width: 50, fontSize: 13, color: '#f3f4f6', textAlign: 'right' }}>{d.score}/{d.max}</div>
+                    <div style={{ width: 60, fontSize: 11, color: '#6b7280' }}>{d.value}</div>
+                  </div>
+                ))}
+                {fragility.warnings.length > 0 && (
+                  <div style={{ marginTop: 12, padding: 10, background: '#7f1d1d20', borderRadius: 6, border: '1px solid #7f1d1d40' }}>
+                    <div style={{ fontSize: 12, color: '#fca5a5', fontWeight: 600, marginBottom: 6 }}>薄弱环节</div>
+                    {fragility.warnings.map((w, i) => (
+                      <div key={i} style={{ fontSize: 12, color: '#fca5a5', padding: '2px 0' }}>{w.name}: {w.signal}</div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
           </Card>
         )}
 

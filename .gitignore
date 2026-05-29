@@ -37,3 +37,6 @@ Thumbs.db
 
 # Malformed pip install artifacts
 =*
+
+# Sensitive login data
+backend/.jisilu_login.json

@@ -22,6 +22,23 @@ class DataService:
         return len(code) == 5 and code.isdigit()
 
     @staticmethod
+    def _is_b_share(code: str) -> bool:
+        """判断是否为B股代码（深圳200开头，上海900开头）"""
+        return len(code) == 6 and code.isdigit() and (code.startswith('200') or code.startswith('900'))
+
+    @staticmethod
+    def _get_a_share_code(b_code: str) -> str:
+        """将B股代码转换为对应的A股代码
+        深圳B股 200xxx -> A股 000xxx
+        上海B股 900xxx -> A股 600xxx
+        """
+        if b_code.startswith('200'):
+            return '000' + b_code[3:]
+        elif b_code.startswith('900'):
+            return '600' + b_code[3:]
+        return b_code
+
+    @staticmethod
     @cached(ttl_seconds=30, key_prefix="stock_basic")
     def get_stock_basic(stock_code: str) -> dict:
         """获取股票基本信息和实时行情"""
@@ -774,12 +791,15 @@ class DataService:
         if DataService._is_hk_code(stock_code):
             return DataService._get_hk_dividend_history(stock_code)
         try:
+            # B股需要转换为对应的A股代码来查询分红（东方财富API不支持B股代码）
+            query_code = DataService._get_a_share_code(stock_code) if DataService._is_b_share(stock_code) else stock_code
+
             # 东方财富分红数据API
             url = "https://datacenter-web.eastmoney.com/api/data/v1/get"
             params = {
                 "reportName": "RPT_SHAREBONUS_DET",
                 "columns": "SECURITY_CODE,REPORT_DATE,PRETAX_BONUS_RMB,BASIC_EPS,ASSIGN_PROGRESS,EX_DIVIDEND_DATE",
-                "filter": f"(SECURITY_CODE=\"{stock_code}\")",
+                "filter": f"(SECURITY_CODE=\"{query_code}\")",
                 "pageNumber": "1",
                 "pageSize": "30",
                 "sortTypes": "-1",
@@ -885,12 +905,15 @@ class DataService:
         try:
             from datetime import datetime, timedelta
 
+            # B股需要转换为对应的A股代码来查询分红（东方财富API不支持B股代码）
+            query_code = DataService._get_a_share_code(stock_code) if DataService._is_b_share(stock_code) else stock_code
+
             # 东方财富分红数据API
             url = "https://datacenter-web.eastmoney.com/api/data/v1/get"
             params = {
                 "reportName": "RPT_SHAREBONUS_DET",
                 "columns": "SECURITY_CODE,REPORT_DATE,PRETAX_BONUS_RMB,BASIC_EPS,ASSIGN_PROGRESS",
-                "filter": f"(SECURITY_CODE=\"{stock_code}\")",
+                "filter": f"(SECURITY_CODE=\"{query_code}\")",
                 "pageNumber": "1",
                 "pageSize": "20",
                 "sortTypes": "-1",

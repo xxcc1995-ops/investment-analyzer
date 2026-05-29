@@ -213,6 +213,43 @@ export default function ValueInvesting() {
     )
   }
 
+  const getFragility = (s: VIStock) => {
+    let score = 0
+    // Debt (20)
+    const d = s.debt_ratio
+    if (d !== null && d !== undefined) {
+      score += d < 30 ? 20 : d < 50 ? 15 : d < 70 ? 8 : 2
+    } else score += 10
+    // Gross margin (20)
+    const gm = s.gross_margin
+    if (gm !== null && gm !== undefined) {
+      score += gm > 50 ? 20 : gm > 30 ? 14 : gm > 15 ? 8 : 2
+    } else score += 10
+    // Net margin (15)
+    const nm = s.net_margin
+    if (nm !== null && nm !== undefined) {
+      score += nm > 20 ? 15 : nm > 10 ? 10 : nm > 5 ? 6 : 2
+    } else score += 7
+    // Growth (15)
+    const rg = s.revenue_growth, pg = s.profit_growth
+    if (rg !== null && pg !== null && rg !== undefined && pg !== undefined) {
+      score += rg > 15 && pg > 15 ? 15 : rg > 5 && pg > 5 ? 10 : (rg > 0) !== (pg > 0) ? 6 : rg < 0 && pg < 0 ? 2 : 8
+    } else score += 7
+    // ROE (15)
+    const roe = s.roe
+    if (roe !== null && roe !== undefined) {
+      score += roe > 20 ? 15 : roe > 15 ? 11 : roe > 10 ? 7 : 3
+    } else score += 7
+    // Valuation (15)
+    const pe = s.pe, pb = s.pb
+    if (pe !== null && pb !== null && pe !== undefined && pb !== undefined) {
+      score += pe <= 0 ? 4 : pe < 15 && pb < 2 ? 15 : pe < 25 && pb < 4 ? 10 : pe < 40 && pb < 8 ? 6 : 4
+    } else score += 7
+    const label = score >= 75 ? '反脆弱' : score >= 60 ? '稳健' : score >= 40 ? '脆弱' : '高度脆弱'
+    const color = score >= 75 ? '#16a34a' : score >= 60 ? '#ca8a04' : score >= 40 ? '#ea580c' : '#dc2626'
+    return { score, label, color }
+  }
+
   const selectStyle: React.CSSProperties = {
     padding: '6px 12px', border: '1px solid var(--border-primary)',
     borderRadius: '4px', background: 'var(--bg-primary)', color: 'var(--text-primary)',
@@ -460,6 +497,7 @@ export default function ValueInvesting() {
                     <th>涨跌</th>
                     <th>PE</th>
                     <th>PB</th>
+                    <th>PEG</th>
                     <th>ROE%</th>
                     <th>毛利率%</th>
                     <th>负债率%</th>
@@ -469,6 +507,7 @@ export default function ValueInvesting() {
                     <th style={{ color: MASTER_COLORS.duan_yongping }}>段永平</th>
                     <th>综合</th>
                     <th>匹配</th>
+                    <th>抗脆弱</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -498,6 +537,15 @@ export default function ValueInvesting() {
                             color: (s.pb ?? 999) <= 2 ? '#52c41a' : (s.pb ?? 999) <= 4 ? '#1890ff' : '#faad14',
                             fontWeight: 600,
                           }}>{s.pb?.toFixed(2) ?? '--'}</td>
+                          <td style={{ fontWeight: 600, color: (() => {
+                            if (s.pe && s.profit_growth && s.profit_growth > 0) {
+                              const peg = s.pe / s.profit_growth;
+                              return peg < 1 ? '#52c41a' : peg <= 2 ? '#1890ff' : '#ff4d4f';
+                            }
+                            return '#6b7280';
+                          })() }}>
+                            {(s.pe && s.profit_growth && s.profit_growth > 0) ? (s.pe / s.profit_growth).toFixed(2) : '--'}
+                          </td>
                           <td style={{
                             color: (s.roe ?? 0) >= 15 ? '#52c41a' : (s.roe ?? 0) >= 10 ? '#1890ff' : '#faad14',
                           }}>{s.roe?.toFixed(1) ?? '--'}</td>
@@ -522,10 +570,25 @@ export default function ValueInvesting() {
                               {getMatchLevelText(s.match_level)}
                             </span>
                           </td>
+                          <td>
+                            {(() => {
+                              const f = getFragility(s)
+                              return (
+                                <span style={{
+                                  display: 'inline-block', padding: '2px 8px', borderRadius: '4px',
+                                  fontSize: '12px', fontWeight: 600,
+                                  background: `${f.color}20`,
+                                  color: f.color,
+                                }}>
+                                  {f.label} {f.score}
+                                </span>
+                              )
+                            })()}
+                          </td>
                         </tr>
                         {isExpanded && s.score_details && (
                           <tr key={`${s.market}-${s.code}-detail`} style={{ background: 'var(--bg-secondary)' }}>
-                            <td colSpan={18} style={{ padding: '12px 20px' }}>
+                            <td colSpan={20} style={{ padding: '12px 20px' }}>
                               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '12px' }}>
                                 {masterKeys.map((mk) => {
                                   const detail = s.score_details[mk]
@@ -559,7 +622,7 @@ export default function ValueInvesting() {
                   })}
                   {stocks.length === 0 && (
                     <tr>
-                      <td colSpan={18} style={{ textAlign: 'center', padding: '40px', color: 'var(--text-muted)' }}>
+                      <td colSpan={20} style={{ textAlign: 'center', padding: '40px', color: 'var(--text-muted)' }}>
                         点击"筛选"按钮开始价值投资选股
                       </td>
                     </tr>
