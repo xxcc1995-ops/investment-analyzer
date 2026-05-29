@@ -387,7 +387,7 @@ class FundService:
     JISILU_QDII_URL = 'https://www.jisilu.cn/data/qdii/qdii_list/'
 
     # Note: ECB mode is required by jisilu.cn's login protocol. Do not change.
-    JISILU_AES_KEY = os.environ.get('JISILU_AES_KEY', '397151C04723421F')
+    JISILU_AES_KEY = os.environ.get('JISILU_AES_KEY', '')
 
     HEADERS = {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
