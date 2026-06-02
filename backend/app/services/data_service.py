@@ -9,6 +9,7 @@ from urllib.parse import quote
 
 from app.core.cache import cached
 from app.core.utils import safe_float as _safe_float
+from app.services.multi_source_quote import multi_source_service
 
 logger = logging.getLogger(__name__)
 
@@ -41,11 +42,67 @@ class DataService:
     @staticmethod
     @cached(ttl_seconds=30, key_prefix="stock_basic")
     def get_stock_basic(stock_code: str) -> dict:
-        """获取股票基本信息和实时行情"""
+        """获取股票基本信息和实时行情
+
+        使用多数据源自动切换：通达信 -> 新浪 -> 东方财富
+        """
         # 港股
         if DataService._is_hk_code(stock_code):
             return DataService._get_hk_stock_basic(stock_code)
 
+        try:
+            # 使用多数据源服务获取行情
+            quote = multi_source_service.get_quote(stock_code, market='A')
+
+            if quote:
+                # 获取总股本和PE/PB（从东方财富获取补充数据）
+                market = "1" if stock_code.startswith('6') else "0"
+                total_shares, pe, pb = DataService._get_valuation_data(stock_code, market, quote.price)
+
+                # 如果多数据源返回了PE/PB，优先使用
+                if quote.pe:
+                    pe = quote.pe
+                if quote.pb:
+                    pb = quote.pb
+
+                market_cap = quote.price * total_shares if total_shares else None
+                if quote.total_market_cap:
+                    market_cap = quote.total_market_cap / 1e8  # 转换为亿元
+
+                return {
+                    "code": stock_code,
+                    "name": quote.name,
+                    "price": quote.price,
+                    "open": quote.open,
+                    "high": quote.high,
+                    "low": quote.low,
+                    "pre_close": quote.pre_close,
+                    "change_pct": quote.change_pct,
+                    "change_amount": quote.change_amount,
+                    "volume": int(quote.volume),
+                    "amount": quote.amount,
+                    "turnover_rate": quote.turnover_rate,
+                    "pe": pe,
+                    "pe_type": "TTM",
+                    "pb": pb,
+                    "market_cap": round(market_cap, 2) if market_cap else None,
+                    "trade_date": quote.trade_date,
+                    "trade_time": quote.timestamp,
+                    "data_source": quote.source,
+                    "fetch_time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                }
+
+            # 多数据源失败，降级到原有逻辑
+            logger.warning(f"多数据源获取失败，降级到新浪: {stock_code}")
+            return DataService._get_stock_basic_fallback(stock_code)
+
+        except Exception as e:
+            logger.error(f"get_stock_basic failed for {stock_code}: {e}")
+            return {"code": stock_code, "error": "获取行情数据失败，请稍后重试"}
+
+    @staticmethod
+    def _get_stock_basic_fallback(stock_code: str) -> dict:
+        """降级方案：使用原有新浪接口"""
         try:
             # 判断市场
             if stock_code.startswith('6'):
@@ -108,10 +165,11 @@ class DataService:
                 "market_cap": round(market_cap, 2),
                 "trade_date": trade_date,
                 "trade_time": trade_time,
+                "data_source": "新浪(降级)",
                 "fetch_time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             }
         except Exception as e:
-            logger.error(f"get_stock_basic failed for {stock_code}: {e}")
+            logger.error(f"_get_stock_basic_fallback failed for {stock_code}: {e}")
             return {"code": stock_code, "error": "获取行情数据失败，请稍后重试"}
 
     @staticmethod

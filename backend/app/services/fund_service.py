@@ -385,6 +385,7 @@ class FundService:
     ]
 
     JISILU_QDII_URL = 'https://www.jisilu.cn/data/qdii/qdii_list/'
+    JISILU_QDII_E_URL = 'https://www.jisilu.cn/data/qdii/qdii_list/E'
 
     # Note: ECB mode is required by jisilu.cn's login protocol. Do not change.
     JISILU_AES_KEY = os.environ.get('JISILU_AES_KEY', '')
@@ -536,6 +537,24 @@ class FundService:
         except Exception as e:
             logger.warning(f"获取集思录QDII数据失败 [{FundService.JISILU_QDII_URL}]: {e}")
 
+        # 获取 QDII /E 列表（包含部分主列表没有的 LOF 基金，如海外科技LOF）
+        try:
+            headers = dict(FundService.HEADERS)
+            headers['Referer'] = 'https://www.jisilu.cn/data/qdii/'
+            resp = session.get(FundService.JISILU_QDII_E_URL, headers=headers, timeout=15)
+            resp.raise_for_status()
+            data = resp.json()
+            existing_ids = {f.get('fund_id') for f in all_funds}
+            for row in data.get('rows', []):
+                cell = row.get('cell', {})
+                if cell and cell.get('fund_id') not in existing_ids:
+                    lof_type = cell.get('lof_type', '')
+                    fund_nm = cell.get('fund_nm', '')
+                    if lof_type == 'QDII' or 'LOF' in fund_nm:
+                        all_funds.append(cell)
+        except Exception as e:
+            logger.warning(f"获取集思录QDII/E数据失败 [{FundService.JISILU_QDII_E_URL}]: {e}")
+
         return all_funds
 
     @staticmethod
@@ -582,7 +601,7 @@ class FundService:
                 'fltt': 2,
                 'invt': 2,
                 'fid': 'f3',
-                'fs': 'b:MK0404,b:MK0405,b:MK0406,b:MK0407',
+                'fs': 'b:MK0405',
                 'fields': 'f12,f14,f2,f3,f5,f6,f15,f16,f17,f18',
             }
 
@@ -686,8 +705,12 @@ class FundService:
             min_amt = cell.get('min_amt', '') or ''
             apply_status = cell.get('apply_status', '') or ''
 
+            # 0) 直接匹配暂停/停止申购状态（如 "暂停申购"、"停止申购"）
+            if apply_status and ('暂停' in apply_status or '停止' in apply_status):
+                apply_limit = '暂停申购'
+
             # 1) 从 min_amt 中提取日累计申购限额
-            if '限额' in min_amt:
+            if not apply_limit and '限额' in min_amt:
                 for line in min_amt.splitlines():
                     if '限额' in line:
                         val = line.strip()
@@ -695,14 +718,14 @@ class FundService:
                             apply_limit = val
                         break
 
-            # 2) 从 apply_status 中提取限大额信息 (如 "限1万", "限20万", "限1千", "限500")
-            if not apply_limit and apply_status.startswith('限') and apply_status != '开放申购':
+            # 2) 从 apply_status 中提取限大额信息 (如 "限0", "限1万", "限20万", "限1千", "限500", "限100万")
+            if not apply_limit and apply_status and apply_status.startswith('限') and apply_status != '开放申购':
                 raw = apply_status
                 if raw == '限0':
                     apply_limit = '暂停申购'
                 else:
                     # 解析 "限X万" / "限X千" / "限X"(元) 格式为具体金额
-                    m = re.match(r'限(\d+(?:\.\d+)?)(万|千)?', raw)
+                    m = re.match(r'限(\d+(?:\.\d+)?)\s*(万|千)?', raw)
                     if m:
                         num = float(m.group(1))
                         unit = m.group(2)
@@ -810,7 +833,22 @@ class FundService:
         for cell in raw_funds:
             fund = FundService._normalize_fund(cell)
             if fund:
+                # 过滤掉ETF基金（只保留LOF）
+                fund_nm = fund.get('fund_nm', '')
+                if 'ETF' in fund_nm and 'LOF' not in fund_nm:
+                    continue
                 funds.append(fund)
+
+        # 手动覆盖已知暂停申购的基金（数据源更新不及时）
+        SUSPENDED_FUNDS = {
+            '164906': '暂停申购',  # 中概互联网LOF
+            # 可以在这里添加更多暂停申购的基金
+        }
+        for fund in funds:
+            fid = fund['fund_id']
+            if fid in SUSPENDED_FUNDS:
+                fund['apply_status'] = SUSPENDED_FUNDS[fid]
+                fund['apply_limit'] = '暂停申购'
 
         # EST估算净值 - 优先使用天天基金API，回退到底层资产计算
         fund_ids = [f['fund_id'] for f in funds]
@@ -934,3 +972,4 @@ class FundService:
         except Exception as e:
             logger.warning(f"从东方财富获取基金 {fund_id} 数据失败: {e}")
         return None
+

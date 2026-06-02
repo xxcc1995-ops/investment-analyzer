@@ -1,5 +1,6 @@
 from fastapi import APIRouter, HTTPException
 from app.services.data_service import DataService
+from app.services.multi_source_quote import multi_source_service
 
 router = APIRouter()
 data_service = DataService()
@@ -10,6 +11,19 @@ def search_stock(keyword: str):
     """搜索股票"""
     results = data_service.search_stock(keyword)
     return {"results": results}
+
+
+@router.get("/data-source-status")
+def get_data_source_status():
+    """获取数据源状态"""
+    return multi_source_service.get_source_status()
+
+
+@router.post("/data-source-reconnect")
+def reconnect_data_sources():
+    """重新连接所有数据源"""
+    multi_source_service.reconnect_all()
+    return {"message": "正在重新连接数据源...", "status": multi_source_service.get_source_status()}
 
 
 @router.get("/{stock_code}/basic")

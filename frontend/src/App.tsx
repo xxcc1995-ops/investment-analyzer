@@ -1342,11 +1342,11 @@ function App() {
             <div className="arb-info">
               <div className="arb-info-item">
                 <span className="arb-info-label">溢价套利:</span>
-                <span>场外申购 → 转托管到场内 → 卖出 (T+3~T+4)</span>
+                <span>场内申购(按净值) → T+2到账 → 场内卖出(按市价)</span>
               </div>
               <div className="arb-info-item">
                 <span className="arb-info-label">折价套利:</span>
-                <span>场内买入 → 转托管到场外 → 赎回 (T+2~T+3)</span>
+                <span>场内买入(按市价) → 转托管到场外 → 赎回(按净值)</span>
               </div>
             </div>
 
@@ -1506,8 +1506,8 @@ function App() {
                     <div className="arb-risk-section">
                       <h4>2. 预估收益率计算</h4>
                       <div style={{ background: 'var(--bg-secondary)', padding: '12px', borderRadius: '6px', margin: '8px 0', fontFamily: 'monospace' }}>
-                        <div><strong>溢价套利收益率(%)</strong> = 溢价率 - 申购费率</div>
-                        <div><strong>折价套利收益率(%)</strong> = 折价率 - 赎回费率</div>
+                        <div><strong>溢价套利收益率(%)</strong> = (场内价格 - 场内申购净值) / 场内申购净值 × 100% - 申购费率</div>
+                        <div><strong>折价套利收益率(%)</strong> = (场内买入价格 - 赎回净值) / 场内买入价格 × 100% - 赎回费率</div>
                         <div style={{ marginTop: '8px', color: 'var(--text-muted)' }}>注：还需扣除交易佣金（约0.03%-0.05%）和冲击成本</div>
                       </div>
                     </div>
@@ -1606,8 +1606,8 @@ function App() {
                     <div className="arb-risk-section">
                       <h4>时间风险（核心风险）</h4>
                       <ul>
-                        <li><strong>溢价套利</strong>：场外申购 → T+1确认份额 → T+2转托管到账 → 场内卖出，全程约3-4个工作日</li>
-                        <li><strong>折价套利</strong>：场内买入 → T+1转托管到场外 → T+2赎回，全程约2-3个工作日</li>
+                        <li><strong>溢价套利</strong>：场内申购(按净值) → T+2份额到账 → 场内卖出(按市价)，全程约2-3个工作日</li>
+                        <li><strong>折价套利</strong>：场内买入(按市价) → 转托管到场外 → 赎回(按净值)，全程约2-3个工作日</li>
                         <li>等待期间基金净值可能大幅波动，溢价/折价可能消失甚至反转</li>
                       </ul>
                     </div>
