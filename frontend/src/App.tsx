@@ -116,6 +116,10 @@ interface FundArbitrage {
   est_discount_rt?: number | null
   underlying_name?: string | null
   underlying_change?: number | null
+  price_fetch_time?: string | null
+  est_nav_date?: string | null
+  ref_est_nav?: number | null
+  ref_est_discount_rt?: number | null
 }
 
 interface ConvertibleBond {
@@ -1368,9 +1372,13 @@ function App() {
                         <th>代码</th>
                         <th>名称</th>
                         <th>场内价格</th>
+                        <th>时间</th>
                         <th>场外净值</th>
                         <th>底层资产</th>
-                        <th>EST净值</th>
+                        <th>官方EST</th>
+                        <th>官方EST日期</th>
+                        <th>参考EST</th>
+                        <th>参考溢价率</th>
                         <th>EST溢价率</th>
                         <th>溢价率</th>
                         <th>申购费率</th>
@@ -1387,6 +1395,7 @@ function App() {
                           <td>{f.fund_id}</td>
                           <td>{f.fund_nm}</td>
                           <td>{f.price.toFixed(3)}</td>
+                          <td style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{f.price_fetch_time || '-'}</td>
                           <td>{f.fund_nav.toFixed(4)}</td>
                           <td style={{ fontSize: 12 }}>
                             {f.underlying_name ? (
@@ -1395,8 +1404,15 @@ function App() {
                               </span>
                             ) : '-'}
                           </td>
-                          <td style={{ fontWeight: 600, color: f.est_nav ? '#d4a76a' : 'var(--text-muted)' }}>
+                          <td style={{ fontWeight: 600, color: f.est_nav ? '#1890ff' : 'var(--text-muted)' }}>
                             {f.est_nav ? f.est_nav.toFixed(4) : '-'}
+                          </td>
+                          <td style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{f.est_nav_date || '-'}</td>
+                          <td style={{ fontWeight: 600, color: f.ref_est_nav ? '#722ed1' : 'var(--text-muted)' }}>
+                            {f.ref_est_nav ? f.ref_est_nav.toFixed(4) : '-'}
+                          </td>
+                          <td style={{ fontWeight: 600, color: f.ref_est_discount_rt != null ? (f.ref_est_discount_rt > 0 ? '#ff4d4f' : '#52c41a') : 'var(--text-muted)' }}>
+                            {f.ref_est_discount_rt != null ? `${f.ref_est_discount_rt > 0 ? '+' : ''}${f.ref_est_discount_rt.toFixed(2)}%` : '-'}
                           </td>
                           <td style={{ fontWeight: 600, color: f.est_discount_rt != null ? (f.est_discount_rt > 0 ? '#ff4d4f' : '#52c41a') : 'var(--text-muted)' }}>
                             {f.est_discount_rt != null ? `${f.est_discount_rt > 0 ? '+' : ''}${f.est_discount_rt.toFixed(2)}%` : '-'}
@@ -1413,7 +1429,7 @@ function App() {
                       ))}
                       {arbFunds.filter(f => f.direction === '溢价').length === 0 && (
                         <tr>
-                          <td colSpan={15} style={{ textAlign: 'center', padding: '40px', color: 'var(--text-muted)' }}>
+                          <td colSpan={19} style={{ textAlign: 'center', padding: '40px', color: 'var(--text-muted)' }}>
                             暂无溢价LOF基金
                           </td>
                         </tr>
@@ -1432,9 +1448,13 @@ function App() {
                         <th>代码</th>
                         <th>名称</th>
                         <th>场内价格</th>
+                        <th>时间</th>
                         <th>场外净值</th>
                         <th>底层资产</th>
-                        <th>EST净值</th>
+                        <th>官方EST</th>
+                        <th>官方EST日期</th>
+                        <th>参考EST</th>
+                        <th>参考折价率</th>
                         <th>EST折价率</th>
                         <th>折价率</th>
                         <th>赎回费率</th>
@@ -1451,6 +1471,7 @@ function App() {
                           <td>{f.fund_id}</td>
                           <td>{f.fund_nm}</td>
                           <td>{f.price.toFixed(3)}</td>
+                          <td style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{f.price_fetch_time || '-'}</td>
                           <td>{f.fund_nav.toFixed(4)}</td>
                           <td style={{ fontSize: 12 }}>
                             {f.underlying_name ? (
@@ -1459,8 +1480,15 @@ function App() {
                               </span>
                             ) : '-'}
                           </td>
-                          <td style={{ fontWeight: 600, color: f.est_nav ? '#d4a76a' : 'var(--text-muted)' }}>
+                          <td style={{ fontWeight: 600, color: f.est_nav ? '#1890ff' : 'var(--text-muted)' }}>
                             {f.est_nav ? f.est_nav.toFixed(4) : '-'}
+                          </td>
+                          <td style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{f.est_nav_date || '-'}</td>
+                          <td style={{ fontWeight: 600, color: f.ref_est_nav ? '#722ed1' : 'var(--text-muted)' }}>
+                            {f.ref_est_nav ? f.ref_est_nav.toFixed(4) : '-'}
+                          </td>
+                          <td style={{ fontWeight: 600, color: f.ref_est_discount_rt != null ? (f.ref_est_discount_rt < 0 ? '#52c41a' : '#ff4d4f') : 'var(--text-muted)' }}>
+                            {f.ref_est_discount_rt != null ? `${f.ref_est_discount_rt.toFixed(2)}%` : '-'}
                           </td>
                           <td style={{ fontWeight: 600, color: f.est_discount_rt != null ? (f.est_discount_rt < 0 ? '#52c41a' : '#ff4d4f') : 'var(--text-muted)' }}>
                             {f.est_discount_rt != null ? `${f.est_discount_rt.toFixed(2)}%` : '-'}
@@ -1477,13 +1505,40 @@ function App() {
                       ))}
                       {arbFunds.filter(f => f.direction === '折价').length === 0 && (
                         <tr>
-                          <td colSpan={15} style={{ textAlign: 'center', padding: '40px', color: 'var(--text-muted)' }}>
+                          <td colSpan={19} style={{ textAlign: 'center', padding: '40px', color: 'var(--text-muted)' }}>
                             暂无折价LOF基金
                           </td>
                         </tr>
                       )}
                     </tbody>
                   </table>
+                </div>
+
+                {/* 筛选逻辑说明 */}
+                <div className="arb-notes">
+                  <h3>当前筛选逻辑</h3>
+                  <div className="arb-notes-grid">
+                    <div className="arb-note-item">
+                      <span className="arb-note-label">溢价率阈值</span>
+                      <span className="arb-note-value">&gt; 2%</span>
+                      <span className="arb-note-desc">绝对值低于此阈值的套利空间不足以覆盖交易成本和时间风险</span>
+                    </div>
+                    <div className="arb-note-item">
+                      <span className="arb-note-label">最低成交额</span>
+                      <span className="arb-note-value">≥ 1000万</span>
+                      <span className="arb-note-desc">确保流动性，避免卖不出去或冲击成本过大</span>
+                    </div>
+                    <div className="arb-note-item">
+                      <span className="arb-note-label">基金类型</span>
+                      <span className="arb-note-value">LOF基金</span>
+                      <span className="arb-note-desc">显示所有LOF基金（含暂停申购的），排除纯ETF</span>
+                    </div>
+                    <div className="arb-note-item">
+                      <span className="arb-note-label">数据来源</span>
+                      <span className="arb-note-value">多源</span>
+                      <span className="arb-note-desc">场内价格/净值：集思录；官方EST：天天基金；底层资产价格：新浪财经</span>
+                    </div>
+                  </div>
                 </div>
 
                 {/* 计算方式说明 */}
@@ -1499,7 +1554,7 @@ function App() {
                       </div>
                       <ul>
                         <li><strong>场内价格</strong>：LOF基金在证券交易所的实时交易价格</li>
-                        <li><strong>场外净值</strong>：基金公司公布的T日净值（T+1公布），非实时估算</li>
+                        <li><strong>场外净值</strong>：基金公司公布的净值（通常为T-2日净值，T-1日公布），非实时估算</li>
                         <li><strong>正数为溢价</strong>（场内价格 {'>'} 场外净值），负数为折价</li>
                       </ul>
                     </div>
@@ -1512,53 +1567,7 @@ function App() {
                       </div>
                     </div>
                     <div className="arb-risk-section">
-                      <h4>3. 与 palmmicro 数据差异说明</h4>
-                      <div style={{ background: 'var(--bg-secondary)', padding: '12px', borderRadius: '6px', margin: '8px 0' }}>
-                        <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-                          <thead>
-                            <tr style={{ borderBottom: '1px solid var(--border)' }}>
-                              <th style={{ textAlign: 'left', padding: '8px', color: 'var(--text-muted)' }}>对比项</th>
-                              <th style={{ textAlign: 'left', padding: '8px', color: 'var(--accent-blue)' }}>本系统</th>
-                              <th style={{ textAlign: 'left', padding: '8px', color: 'var(--accent-green)' }}>palmmicro</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            <tr style={{ borderBottom: '1px solid var(--border)' }}>
-                              <td style={{ padding: '8px' }}>数据来源</td>
-                              <td style={{ padding: '8px' }}>集思录</td>
-                              <td style={{ padding: '8px' }}>自建EST估算系统</td>
-                            </tr>
-                            <tr style={{ borderBottom: '1px solid var(--border)' }}>
-                              <td style={{ padding: '8px' }}>净值类型</td>
-                              <td style={{ padding: '8px' }}>场外净值（T+1公布）</td>
-                              <td style={{ padding: '8px' }}>实时EST估算净值</td>
-                            </tr>
-                            <tr style={{ borderBottom: '1px solid var(--border)' }}>
-                              <td style={{ padding: '8px' }}>溢价率计算</td>
-                              <td style={{ padding: '8px' }}>(价格 - 场外净值) / 场外净值</td>
-                              <td style={{ padding: '8px' }}>(价格 - EST) / EST</td>
-                            </tr>
-                            <tr style={{ borderBottom: '1px solid var(--border)' }}>
-                              <td style={{ padding: '8px' }}>数据时效</td>
-                              <td style={{ padding: '8px' }}>T日净值，T+1公布</td>
-                              <td style={{ padding: '8px' }}>实时估算（盘中更新）</td>
-                            </tr>
-                            <tr>
-                              <td style={{ padding: '8px' }}>筛选条件</td>
-                              <td style={{ padding: '8px' }}>溢价≥2%，成交额{'>'}1000万</td>
-                              <td style={{ padding: '8px' }}>显示全部LOF（53只）</td>
-                            </tr>
-                          </tbody>
-                        </table>
-                      </div>
-                      <p style={{ color: 'var(--text-muted)', fontSize: '13px', marginTop: '8px' }}>
-                        <strong>注意</strong>：由于净值来源不同，两个系统的溢价率会有差异。
-                        palmmicro的EST是实时估算，而本系统使用的是T日实际净值（T+1公布）。
-                        建议以基金公司官方公布的净值为准进行核对。
-                      </p>
-                    </div>
-                    <div className="arb-risk-section">
-                      <h4>4. 数据字段说明</h4>
+                      <h4>3. 数据字段说明</h4>
                       <ul>
                         <li><strong>代码</strong>：基金代码，如 161128</li>
                         <li><strong>名称</strong>：基金简称</li>
@@ -1569,32 +1578,25 @@ function App() {
                         <li><strong>预估收益</strong>：扣除申购/赎回费后的预估收益率</li>
                       </ul>
                     </div>
-                  </div>
-                </div>
-
-                {/* 筛选逻辑说明 */}
-                <div className="arb-notes">
-                  <h3>当前筛选逻辑</h3>
-                  <div className="arb-notes-grid">
-                    <div className="arb-note-item">
-                      <span className="arb-note-label">溢价率阈值</span>
-                      <span className="arb-note-value">≥ 2%</span>
-                      <span className="arb-note-desc">低于此阈值的套利空间不足以覆盖交易成本和时间风险</span>
-                    </div>
-                    <div className="arb-note-item">
-                      <span className="arb-note-label">最低成交额</span>
-                      <span className="arb-note-value">&gt; 1000万</span>
-                      <span className="arb-note-desc">确保流动性，避免卖不出去或冲击成本过大</span>
-                    </div>
-                    <div className="arb-note-item">
-                      <span className="arb-note-label">基金类型</span>
-                      <span className="arb-note-value">LOF基金</span>
-                      <span className="arb-note-desc">仅显示可场内外转托管的LOF基金</span>
-                    </div>
-                    <div className="arb-note-item">
-                      <span className="arb-note-label">数据来源</span>
-                      <span className="arb-note-value">集思录</span>
-                      <span className="arb-note-desc">登录后可获取完整数据，未登录数据可能不全</span>
+                    <div className="arb-risk-section">
+                      <h4>4. 参考EST计算公式（参考 palmmicro）</h4>
+                      <div style={{ background: 'var(--bg-secondary)', padding: '12px', borderRadius: '6px', margin: '8px 0', fontFamily: 'monospace' }}>
+                        <div><strong>参考EST</strong> = 前一日净值 × (1 + 底层资产涨跌幅 × 仓位因子)</div>
+                        <div style={{ marginTop: '8px', color: 'var(--text-muted)' }}>示例：前一日净值 = 4.6067，底层资产涨幅 = 0.46%，仓位因子 = 0.95</div>
+                        <div style={{ color: 'var(--text-muted)' }}>参考EST = 4.6067 × (1 + 0.46% × 0.95) = 4.6067 × 1.00437 = 4.6268</div>
+                      </div>
+                      <ul>
+                        <li><strong>底层资产涨跌幅</strong>：从新浪财经API实时获取底层资产（美股ETF/期货/A股指数）的当日涨跌幅</li>
+                        <li><strong>仓位因子</strong>：基金实际持仓比例，参考 palmmicro 设定
+                          <ul>
+                            <li>美股QDII类：0.95（基金约95%仓位跟踪底层资产）</li>
+                            <li>商品期货类：1.0</li>
+                            <li>A股指数类：1.0</li>
+                          </ul>
+                        </li>
+                        <li><strong>与官方EST的区别</strong>：官方EST来自天天基金API（基金公司披露），参考EST基于底层资产价格自行计算</li>
+                        <li><strong>参考溢价率</strong>：(场内价格 - 参考EST) / 参考EST × 100%</li>
+                      </ul>
                     </div>
                   </div>
                 </div>

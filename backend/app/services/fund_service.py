@@ -162,6 +162,13 @@ _UNDERLYING_MAP = {
 _underlying_cache = {}
 _UNDERLYING_CACHE_TTL = 300  # 5分钟
 
+# 仓位因子 - 参考palmmicro，用于计算参考EST
+_POSITION_FACTOR = {
+    'us_etf': 0.95,   # 美股QDII类，基金约95%仓位跟踪底层资产
+    'futures': 1.0,   # 商品期货类
+    'a_index': 1.0,   # A股指数类
+}
+
 
 def _fetch_single_est_nav(fid: str) -> tuple:
     """获取单只基金的EST估算净值"""
@@ -184,6 +191,7 @@ def _fetch_single_est_nav(fid: str) -> tuple:
                 'est_change': gszzl,
                 'name': data.get('name', ''),
                 'gztime': data.get('gztime', ''),
+                'est_nav_date': data.get('gztime', ''),
             }
     except Exception:
         pass
@@ -316,6 +324,7 @@ def _fetch_underlying_prices() -> dict:
     except Exception as e:
         logger.warning(f"获取底层资产价格失败: {e}")
 
+    logger.info(f"底层资产价格: 获取到 {len(result)} 个, keys={list(result.keys())}")
     _underlying_cache = (result, time.time())
     return result
 
@@ -330,6 +339,7 @@ def _estimate_nav(fund: dict, prices: dict) -> dict:
         fund['est_discount_rt'] = None
         fund['underlying_name'] = None
         fund['underlying_change'] = None
+        fund['est_nav_date'] = None
         return fund
 
     api_code = mapping['code']
@@ -340,6 +350,7 @@ def _estimate_nav(fund: dict, prices: dict) -> dict:
         fund['est_discount_rt'] = None
         fund['underlying_name'] = mapping['name']
         fund['underlying_change'] = None
+        fund['est_nav_date'] = None
         return fund
 
     nav = fund.get('fund_nav', 0)
@@ -348,6 +359,7 @@ def _estimate_nav(fund: dict, prices: dict) -> dict:
         fund['est_discount_rt'] = None
         fund['underlying_name'] = mapping['name']
         fund['underlying_change'] = price_data['change_pct']
+        fund['est_nav_date'] = None
         return fund
 
     change_pct = price_data['change_pct']
@@ -372,6 +384,47 @@ def _estimate_nav(fund: dict, prices: dict) -> dict:
         fund['est_discount_rt'] = round((price - est_nav) / est_nav * 100, 2)
     else:
         fund['est_discount_rt'] = None
+
+    return fund
+
+
+def _calculate_ref_est(fund: dict, prices: dict) -> dict:
+    """计算参考EST净值 = 前一日净值 × (1 + 底层资产涨跌幅 × 仓位因子)"""
+    fund_id = fund.get('fund_id', '')
+    mapping = _UNDERLYING_MAP.get(fund_id)
+
+    if not mapping:
+        fund['ref_est_nav'] = None
+        fund['ref_est_discount_rt'] = None
+        return fund
+
+    api_code = mapping['code']
+    price_data = prices.get(api_code)
+
+    if not price_data or price_data.get('prev_close', 0) <= 0:
+        logger.debug(f"参考EST: {fund_id} 底层资产 {api_code} 无价格数据, prices keys={list(prices.keys())[:5]}")
+        fund['ref_est_nav'] = None
+        fund['ref_est_discount_rt'] = None
+        return fund
+
+    nav = fund.get('fund_nav', 0)
+    if nav <= 0:
+        fund['ref_est_nav'] = None
+        fund['ref_est_discount_rt'] = None
+        return fund
+
+    position = _POSITION_FACTOR.get(mapping['type'], 1.0)
+    change_pct = price_data['change_pct']
+    ref_est_nav = round(nav * (1 + change_pct / 100 * position), 4)
+
+    fund['ref_est_nav'] = ref_est_nav
+
+    # 计算参考EST溢价率
+    price = fund.get('price', 0)
+    if ref_est_nav > 0:
+        fund['ref_est_discount_rt'] = round((price - ref_est_nav) / ref_est_nav * 100, 2)
+    else:
+        fund['ref_est_discount_rt'] = None
 
     return fund
 
@@ -850,6 +903,11 @@ class FundService:
                 fund['apply_status'] = SUSPENDED_FUNDS[fid]
                 fund['apply_limit'] = '暂停申购'
 
+        # 记录场内价格获取时间
+        price_fetch_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        for fund in funds:
+            fund['price_fetch_time'] = price_fetch_time
+
         # EST估算净值 - 优先使用天天基金API，回退到底层资产计算
         fund_ids = [f['fund_id'] for f in funds]
         try:
@@ -861,6 +919,7 @@ class FundService:
                     fund['est_nav'] = round(ed['est_nav'], 4)
                     fund['underlying_change'] = ed['est_change']
                     fund['underlying_name'] = ed.get('name', '')
+                    fund['est_nav_date'] = ed.get('est_nav_date', '')
                     price = fund.get('price', 0)
                     if ed['est_nav'] > 0:
                         fund['est_discount_rt'] = round((price - ed['est_nav']) / ed['est_nav'] * 100, 2)
@@ -877,6 +936,7 @@ class FundService:
                     fund['est_discount_rt'] = None
                     fund['underlying_name'] = None
                     fund['underlying_change'] = None
+                    fund['est_nav_date'] = None
         except Exception as e:
             logger.warning(f"天天基金EST获取失败，回退到底层资产计算: {e}")
             try:
@@ -885,6 +945,29 @@ class FundService:
                     _estimate_nav(fund, underlying_prices)
             except Exception as e2:
                 logger.warning(f"EST估算完全失败: {e2}")
+
+        # 确保所有基金都有这两个字段（防止异常路径遗漏）
+        for fund in funds:
+            fund.setdefault('price_fetch_time', price_fetch_time)
+            fund.setdefault('est_nav_date', None)
+
+        # 计算参考EST（基于底层资产实时价格 + 仓位因子）
+        try:
+            underlying_prices = _fetch_underlying_prices()
+            logger.info(f"参考EST: 获取到 {len(underlying_prices)} 个底层资产价格, keys={list(underlying_prices.keys())[:5]}")
+            ref_count = 0
+            for fund in funds:
+                _calculate_ref_est(fund, underlying_prices)
+                if fund.get('ref_est_nav') is not None:
+                    ref_count += 1
+            logger.info(f"参考EST: {ref_count}/{len(funds)} 只基金计算成功")
+        except Exception as e:
+            logger.warning(f"参考EST计算失败: {e}")
+            import traceback
+            traceback.print_exc()
+            for fund in funds:
+                fund.setdefault('ref_est_nav', None)
+                fund.setdefault('ref_est_discount_rt', None)
 
         # 筛选: 成交额 ≥ 300万
         if min_turnover > 0:

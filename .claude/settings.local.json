@@ -20,7 +20,30 @@
       "Bash(curl *)",
       "Bash(pkill -f \"uvicorn app.main:app\")",
       "Bash(netstat -ano)",
-      "Bash(kill 4684 10540)"
+      "Bash(kill 4684 10540)",
+      "mcp__ide__getDiagnostics",
+      "Bash(where python *)",
+      "Bash(./venv/Scripts/python.exe -c ' *)",
+      "Bash(python -c ' *)",
+      "Bash(./venv/Scripts/python.exe -m uvicorn app.main:app --port 8002)",
+      "WebFetch(domain:github.com)",
+      "Bash(gh repo *)",
+      "WebSearch",
+      "Bash(git clone *)",
+      "Bash(mkdir -p ~/.claude/hooks)",
+      "Bash(cp \"C:/Users/11847/AppData/Local/Temp/superpowers/hooks/hooks.json\" ~/.claude/hooks/)",
+      "Bash(cp \"C:/Users/11847/AppData/Local/Temp/superpowers/hooks/run-hook.cmd\" ~/.claude/hooks/)",
+      "Bash(cp -r \"C:/Users/11847/AppData/Local/Temp/superpowers/hooks/session-start\" ~/.claude/hooks/)",
+      "WebFetch(domain:mp.weixin.qq.com)",
+      "Bash(mkdir -p ~/.claude/skills/web-access)",
+      "Bash(cp /tmp/web-access/SKILL.md ~/.claude/skills/web-access/)",
+      "Bash(cp -r /tmp/web-access/scripts ~/.claude/skills/web-access/)",
+      "Bash(cp -r /tmp/web-access/references ~/.claude/skills/web-access/)",
+      "Bash(cp -r /tmp/web-access/templates ~/.claude/skills/web-access/)",
+      "Bash(npx tsc *)",
+      "Bash(git add *)",
+      "Bash(git commit -m 'feat: 新增Polymarket跨平台套利模块（Polymarket vs Opinion） *)",
+      "Bash(git push *)"
     ]
   }
 }

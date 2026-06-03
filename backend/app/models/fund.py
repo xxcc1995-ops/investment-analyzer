@@ -29,6 +29,10 @@ class FundArbitrage(BaseModel):
     est_discount_rt: Optional[float] = None   # EST溢价率(%)
     underlying_name: Optional[str] = None     # 底层资产名称
     underlying_change: Optional[float] = None # 底层资产涨跌幅(%)
+    price_fetch_time: Optional[str] = None    # 场内价格获取时间
+    est_nav_date: Optional[str] = None        # 官方EST日期(天天基金估值时间)
+    ref_est_nav: Optional[float] = None       # 参考EST净值(底层资产实时估算)
+    ref_est_discount_rt: Optional[float] = None  # 参考EST溢价率(%)
 
 
 class ArbitrageResponse(BaseModel):
