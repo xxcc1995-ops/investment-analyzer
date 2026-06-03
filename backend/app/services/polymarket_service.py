@@ -510,3 +510,412 @@ def analyze_market(market_id: str) -> Dict:
             'volume_liquidity_ratio': round(volume / liquidity, 2) if liquidity > 0 else 0,
         },
     }
+
+
+# ============================================================
+# 跨平台套利功能（Polymarket vs Opinion）
+# ============================================================
+
+# 延迟导入 Opinion 适配器
+_opinion_source = None
+_polymarket_source = None
+
+
+def _get_opinion_source():
+    """延迟获取 Opinion 数据源"""
+    global _opinion_source
+    if _opinion_source is None:
+        try:
+            from app.services.prediction_market.opinion import OpinionSource
+            _opinion_source = OpinionSource()
+        except Exception as e:
+            print(f"Opinion source init error: {e}")
+    return _opinion_source
+
+
+def _get_polymarket_source():
+    """延迟获取 Polymarket 数据源"""
+    global _polymarket_source
+    if _polymarket_source is None:
+        try:
+            from app.services.prediction_market.polymarket import PolymarketSource
+            _polymarket_source = PolymarketSource()
+        except Exception as e:
+            print(f"Polymarket source init error: {e}")
+    return _polymarket_source
+
+
+def calculate_opinion_fee(price: float, amount: float) -> float:
+    """
+    Opinion 手续费计算
+
+    规则：
+    - 吃单（Taker）收费 0%～2%
+    - 价格越接近 50%，手续费越高；接近 0 或 1 越低
+    - 最低 0.5U
+
+    简化模型：使用二次函数模拟
+    fee_rate = 2% * (1 - |price - 0.5| * 2)^2
+    """
+    if amount <= 0:
+        return 0
+
+    # 计算费率：价格越接近0.5，费率越高
+    price_from_center = abs(price - 0.5)  # 0 到 0.5
+    fee_rate = 0.02 * (1 - 2 * price_from_center) ** 2
+
+    # 确保费率在 0% 到 2% 之间
+    fee_rate = max(0, min(0.02, fee_rate))
+
+    # 计算手续费，最低 0.5U
+    fee = amount * fee_rate
+    fee = max(0.5, fee)
+
+    return round(fee, 2)
+
+
+def calculate_polymarket_fee(price: float, amount: float) -> float:
+    """
+    Polymarket 手续费计算
+    基本无交易手续费，只需承担少量链上 Gas 费或滑点
+    """
+    return 0
+
+
+def _normalize_question(question: str) -> str:
+    """标准化问题文本，用于模糊匹配"""
+    import re
+    # 转小写
+    q = question.lower().strip()
+    # 移除多余空格
+    q = re.sub(r'\s+', ' ', q)
+    # 移除标点符号
+    q = re.sub(r'[?？!！.。,，]', '', q)
+    return q
+
+
+def _find_matching_markets(pm_markets, op_markets):
+    """
+    匹配两个平台的相同事件
+
+    使用模糊匹配：
+    1. 精确匹配（标准化后完全相同）
+    2. 包含匹配（一个包含另一个）
+    3. 关键词匹配（提取关键实体进行匹配）
+    """
+    matches = []
+
+    for pm in pm_markets:
+        pm_q = _normalize_question(pm.question)
+        if not pm_q:
+            continue
+
+        for op in op_markets:
+            op_q = _normalize_question(op.question)
+            if not op_q:
+                continue
+
+            # 精确匹配
+            if pm_q == op_q:
+                matches.append((pm, op, 'exact'))
+                continue
+
+            # 包含匹配
+            if pm_q in op_q or op_q in pm_q:
+                matches.append((pm, op, 'contains'))
+                continue
+
+            # 关键词匹配（至少70%的关键词重叠）
+            pm_words = set(pm_q.split())
+            op_words = set(op_q.split())
+            if pm_words and op_words:
+                overlap = len(pm_words & op_words)
+                min_len = min(len(pm_words), len(op_words))
+                if min_len > 0 and overlap / min_len >= 0.7:
+                    matches.append((pm, op, 'keyword'))
+
+    return matches
+
+
+def find_cross_platform_arbitrage(
+    min_profit: float = 0.5,
+    budget: float = 100,
+    pm_limit: int = 100,
+    op_limit: int = 100
+) -> List[Dict]:
+    """
+    跨平台套利检测（Polymarket vs Opinion）
+
+    检测逻辑：
+    1. 从两个平台获取市场列表
+    2. 匹配相同事件
+    3. 计算套利机会：
+       - 策略1：Opinion买YES + Polymarket买NO
+       - 策略2：Opinion买NO + Polymarket买YES
+    4. 考虑手续费后的真实利润
+
+    Args:
+        min_profit: 最低利润率（%）
+        budget: 总预算（U）
+        pm_limit: Polymarket市场数量
+        op_limit: Opinion市场数量
+
+    Returns:
+        套利机会列表
+    """
+    cache_key = f"cross_arb_{min_profit}_{budget}_{pm_limit}_{op_limit}"
+    cached = _get_cached(cache_key)
+    if cached:
+        return cached
+
+    # 获取两个平台的市场数据
+    pm_source = _get_polymarket_source()
+    op_source = _get_opinion_source()
+
+    if not pm_source or not op_source:
+        return []
+
+    try:
+        pm_markets = pm_source.get_markets(limit=pm_limit)
+        op_markets = op_source.get_markets(limit=op_limit)
+    except Exception as e:
+        print(f"获取市场数据失败: {e}")
+        return []
+
+    if not pm_markets or not op_markets:
+        return []
+
+    # 匹配相同事件
+    matches = _find_matching_markets(pm_markets, op_markets)
+
+    opportunities = []
+    for pm, op, match_type in matches:
+        # 策略1：Opinion买YES + Polymarket买NO
+        s1_yes = op.yes_price
+        s1_no = pm.no_price
+        s1_sum = s1_yes + s1_no
+        s1_op_fee = calculate_opinion_fee(s1_yes, budget * s1_yes / s1_sum)
+        s1_pm_fee = calculate_polymarket_fee(s1_no, budget * s1_no / s1_sum)
+        s1_total_fee = s1_op_fee + s1_pm_fee
+
+        # 策略2：Opinion买NO + Polymarket买YES
+        s2_no = op.no_price
+        s2_yes = pm.yes_price
+        s2_sum = s2_no + s2_yes
+        s2_op_fee = calculate_opinion_fee(s2_no, budget * s2_no / s2_sum)
+        s2_pm_fee = calculate_polymarket_fee(s2_yes, budget * s2_yes / s2_sum)
+        s2_total_fee = s2_op_fee + s2_pm_fee
+
+        # 选择最优策略
+        if s1_sum < 1 and s2_sum < 1:
+            # 两个策略都可行，选择利润更高的
+            s1_profit = (1 - s1_sum) * budget - s1_total_fee
+            s2_profit = (1 - s2_sum) * budget - s2_total_fee
+            if s1_profit > s2_profit:
+                best = 'strategy_1'
+                best_sum = s1_sum
+                best_fee = s1_total_fee
+                best_profit = s1_profit
+            else:
+                best = 'strategy_2'
+                best_sum = s2_sum
+                best_fee = s2_total_fee
+                best_profit = s2_profit
+        elif s1_sum < 1:
+            best = 'strategy_1'
+            best_sum = s1_sum
+            best_fee = s1_total_fee
+            best_profit = (1 - s1_sum) * budget - s1_total_fee
+        elif s2_sum < 1:
+            best = 'strategy_2'
+            best_sum = s2_sum
+            best_fee = s2_total_fee
+            best_profit = (1 - s2_sum) * budget - s2_total_fee
+        else:
+            continue  # 没有套利机会
+
+        # 计算利润率
+        profit_rate = best_profit / budget * 100
+
+        if profit_rate < min_profit:
+            continue
+
+        # 计算最优配资
+        if best == 'strategy_1':
+            allocation = calculate_optimal_allocation(
+                yes_price=s1_yes,
+                no_price=s1_no,
+                budget=budget,
+                yes_fee_rate=calculate_opinion_fee(s1_yes, 100) / 100,
+                no_fee_rate=0
+            )
+        else:
+            allocation = calculate_optimal_allocation(
+                yes_price=s2_yes,
+                no_price=s2_no,
+                budget=budget,
+                yes_fee_rate=0,
+                no_fee_rate=calculate_opinion_fee(s2_no, 100) / 100
+            )
+
+        opportunities.append({
+            'question': pm.question,
+            'match_type': match_type,
+            # 策略1详情
+            'strategy_1': {
+                'description': f'Opinion买YES + Polymarket买NO',
+                'opinion_yes_price': round(s1_yes, 4),
+                'polymarket_no_price': round(s1_no, 4),
+                'price_sum': round(s1_sum, 4),
+                'fee': round(s1_total_fee, 2),
+            },
+            # 策略2详情
+            'strategy_2': {
+                'description': f'Opinion买NO + Polymarket买YES',
+                'opinion_no_price': round(s2_no, 4),
+                'polymarket_yes_price': round(s2_yes, 4),
+                'price_sum': round(s2_sum, 4),
+                'fee': round(s2_total_fee, 2),
+            },
+            # 最优策略
+            'best_strategy': best,
+            'best_sum': round(best_sum, 4),
+            'total_fee': round(best_fee, 2),
+            'guaranteed_profit': round(best_profit, 2),
+            'profit_rate': round(profit_rate, 2),
+            # 配资建议
+            'allocation': allocation,
+            # 市场信息
+            'polymarket': {
+                'id': pm.id,
+                'yes_price': round(pm.yes_price, 4),
+                'no_price': round(pm.no_price, 4),
+                'volume': pm.volume,
+                'liquidity': pm.liquidity,
+            },
+            'opinion': {
+                'id': op.id,
+                'yes_price': round(op.yes_price, 4),
+                'no_price': round(op.no_price, 4),
+                'volume': op.volume,
+                'liquidity': op.liquidity,
+            },
+            'end_date': pm.end_date or op.end_date,
+            'volume': pm.volume + op.volume,
+        })
+
+    # 按利润率排序
+    opportunities.sort(key=lambda x: x['profit_rate'], reverse=True)
+
+    _set_cached(cache_key, opportunities)
+    return opportunities
+
+
+def calculate_optimal_allocation(
+    yes_price: float,
+    no_price: float,
+    budget: float,
+    yes_fee_rate: float = 0,
+    no_fee_rate: float = 0
+) -> Dict:
+    """
+    最优配资计算器
+
+    让两边"赢的金额"完全相等，实现无风险套利。
+
+    数学推导：
+    设总预算为 B，YES投入为 x，NO投入为 B-x
+    YES费率 f_y，NO费率 f_n
+
+    事件发生时回款：
+    R_yes = x / yes_price * 1 - x * (1 + f_y)
+         = x * (1/yes_price - 1 - f_y)
+
+    事件不发生时回款：
+    R_no = (B-x) / no_price * 1 - (B-x) * (1 + f_n)
+         = (B-x) * (1/no_price - 1 - f_n)
+
+    令 R_yes = R_no：
+    x * (1/yes_price - 1 - f_y) = (B-x) * (1/no_price - 1 - f_n)
+
+    解得：
+    x = B * (1/no_price - 1 - f_n) / [(1/yes_price - 1 - f_y) + (1/no_price - 1 - f_n)]
+
+    Args:
+        yes_price: YES价格 (0-1)
+        no_price: NO价格 (0-1)
+        budget: 总预算
+        yes_fee_rate: YES平台费率 (0-1)
+        no_fee_rate: NO平台费率 (0-1)
+
+    Returns:
+        配资方案和预期利润
+    """
+    if yes_price <= 0 or no_price <= 0 or budget <= 0:
+        return {'error': '参数必须大于0'}
+
+    # 计算净收益率（扣除费率后）
+    yes_net_return = 1.0 / yes_price - 1 - yes_fee_rate
+    no_net_return = 1.0 / no_price - 1 - no_fee_rate
+
+    # 如果两边净收益率都为负，没有套利机会
+    if yes_net_return <= 0 and no_net_return <= 0:
+        return {
+            'error': '无套利机会：两边净收益率均为负',
+            'yes_net_return': round(yes_net_return * 100, 2),
+            'no_net_return': round(no_net_return * 100, 2),
+        }
+
+    # 计算最优配资
+    if yes_net_return + no_net_return == 0:
+        yes_amount = budget / 2
+    else:
+        yes_amount = budget * no_net_return / (yes_net_return + no_net_return)
+
+    no_amount = budget - yes_amount
+
+    # 确保金额为正
+    yes_amount = max(0, min(budget, yes_amount))
+    no_amount = budget - yes_amount
+
+    # 计算两种结果下的回款
+    # 事件发生：YES兑付，NO归零
+    yes_shares = yes_amount / yes_price if yes_price > 0 else 0
+    yes_payout = yes_shares * 1.0  # 每份兑付1美元
+    yes_fee = yes_amount * yes_fee_rate
+    profit_if_yes = yes_payout - yes_amount - yes_fee - no_amount  # NO部分全损
+
+    # 事件不发生：NO兑付，YES归零
+    no_shares = no_amount / no_price if no_price > 0 else 0
+    no_payout = no_shares * 1.0  # 每份兑付1美元
+    no_fee = no_amount * no_fee_rate
+    profit_if_no = no_payout - no_amount - no_fee - yes_amount  # YES部分全损
+
+    # 保底利润（取两者最小值）
+    guaranteed_profit = min(profit_if_yes, profit_if_no)
+    profit_rate = guaranteed_profit / budget * 100
+
+    return {
+        'budget': round(budget, 2),
+        'yes_price': round(yes_price, 4),
+        'no_price': round(no_price, 4),
+        'yes_fee_rate': round(yes_fee_rate * 100, 2),
+        'no_fee_rate': round(no_fee_rate * 100, 2),
+        # 配资方案
+        'yes_amount': round(yes_amount, 2),
+        'no_amount': round(no_amount, 2),
+        'yes_ratio': round(yes_amount / budget * 100, 2),
+        'no_ratio': round(no_amount / budget * 100, 2),
+        # 预期收益
+        'profit_if_yes': round(profit_if_yes, 2),
+        'profit_if_no': round(profit_if_no, 2),
+        'guaranteed_profit': round(guaranteed_profit, 2),
+        'profit_rate': round(profit_rate, 2),
+        # 手续费
+        'yes_fee': round(yes_fee, 2),
+        'no_fee': round(no_fee, 2),
+        'total_fee': round(yes_fee + no_fee, 2),
+        # 净收益率
+        'yes_net_return': round(yes_net_return * 100, 2),
+        'no_net_return': round(no_net_return * 100, 2),
+    }

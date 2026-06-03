@@ -31,12 +31,22 @@
 3. **财务指标** - ROE、毛利率、净利率、资产负债率
 4. **成长能力** - 营收增长率、净利润增长率
 5. **巴菲特选股指标** - 护城河、盈利能力、成长性、财务健康
+6. **Polymarket预测市场** - 市场扫描、套利检测、价值发现、趋势追踪、Kelly仓位
+7. **跨平台套利（Polymarket vs Opinion）** - 跨平台价差检测、手续费感知、最优配资计算
 
 ## 技术栈
 
 - **前端**: React + TypeScript + ECharts
 - **后端**: Python FastAPI
 - **数据源**: 新浪财经 + 东方财富
+
+## 环境变量
+
+| 变量名 | 说明 | 示例 |
+|-------|------|------|
+| POLYMARKET_PROXY | Polymarket API代理 | http://127.0.0.1:7890 |
+| OPINION_API_URL | Opinion平台API地址 | https://api.opinion.trading |
+| OPINION_PROXY | Opinion API代理 | http://127.0.0.1:7890 |
 
 ## 启动命令
 

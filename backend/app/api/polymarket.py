@@ -12,6 +12,9 @@ from app.services.polymarket_service import (
     find_trending_markets,
     calculate_kelly,
     analyze_market,
+    find_cross_platform_arbitrage,
+    calculate_optimal_allocation,
+    calculate_opinion_fee,
 )
 
 router = APIRouter()
@@ -22,6 +25,14 @@ class KellyRequest(BaseModel):
     estimated_prob: float
     bankroll: float = 1000
     fraction: float = 0.25
+
+
+class AllocationRequest(BaseModel):
+    yes_price: float
+    no_price: float
+    budget: float = 100
+    yes_fee_rate: float = 0
+    no_fee_rate: float = 0
 
 
 @router.get("/markets")
@@ -95,3 +106,104 @@ def kelly(req: KellyRequest):
         bankroll=req.bankroll,
         fraction=req.fraction,
     )
+
+
+# ============================================================
+# 跨平台套利功能（Polymarket vs Opinion）
+# ============================================================
+
+@router.get("/cross-arbitrage")
+def cross_arbitrage(
+    min_profit: float = Query(0.5, description="最低套利利润率(%)"),
+    budget: float = Query(100, description="总预算(U)"),
+    pm_limit: int = Query(100, description="Polymarket市场数量"),
+    op_limit: int = Query(100, description="Opinion市场数量"),
+):
+    """
+    跨平台套利扫描（Polymarket vs Opinion）
+
+    检测两个平台相同事件的价格差异，找到套利机会。
+    考虑手续费后计算真实利润。
+    """
+    data = find_cross_platform_arbitrage(
+        min_profit=min_profit,
+        budget=budget,
+        pm_limit=pm_limit,
+        op_limit=op_limit,
+    )
+    return {
+        "opportunities": data,
+        "total": len(data),
+        "budget": budget,
+        "note": "套利利润已扣除手续费，为保底净利润"
+    }
+
+
+@router.post("/allocation-calculator")
+def allocation_calculator(req: AllocationRequest):
+    """
+    最优配资计算器
+
+    输入两个平台的价格和费率，计算最优资金分配方案。
+    让两边"赢的金额"完全相等，实现无风险套利。
+    """
+    result = calculate_optimal_allocation(
+        yes_price=req.yes_price,
+        no_price=req.no_price,
+        budget=req.budget,
+        yes_fee_rate=req.yes_fee_rate,
+        no_fee_rate=req.no_fee_rate,
+    )
+    return result
+
+
+@router.get("/opinion-fee-calculator")
+def opinion_fee_calculator(
+    price: float = Query(..., description="价格 (0-1)"),
+    amount: float = Query(..., description="交易金额"),
+):
+    """
+    Opinion 手续费计算器
+
+    手续费规则：
+    - 吃单（Taker）收费 0%～2%
+    - 价格越接近 50%，手续费越高；接近 0 或 1 越低
+    - 最低 0.5U
+    """
+    fee = calculate_opinion_fee(price, amount)
+    fee_rate = fee / amount * 100 if amount > 0 else 0
+    return {
+        "price": price,
+        "amount": amount,
+        "fee": fee,
+        "fee_rate": round(fee_rate, 2),
+        "net_amount": round(amount - fee, 2),
+    }
+
+
+@router.get("/opinion-markets")
+def opinion_markets(
+    limit: int = Query(100, description="返回数量"),
+    tag: str = Query(None, description="标签过滤"),
+):
+    """
+    获取Opinion平台市场列表
+
+    注意：需要配置 OPINION_API_URL 环境变量
+    """
+    try:
+        from app.services.prediction_market.opinion import OpinionSource
+        source = OpinionSource()
+        markets = source.get_markets(limit=limit, tag=tag)
+        return {
+            "markets": [m.__dict__ for m in markets],
+            "total": len(markets),
+            "source": "opinion",
+        }
+    except Exception as e:
+        return {
+            "error": str(e),
+            "markets": [],
+            "total": 0,
+            "note": "请确保已配置 OPINION_API_URL 环境变量"
+        }

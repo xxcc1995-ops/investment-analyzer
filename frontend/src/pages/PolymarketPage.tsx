@@ -68,8 +68,70 @@ interface MarketAnalysis {
   }
 }
 
+// 跨平台套利相关接口
+interface StrategyDetail {
+  description: string
+  opinion_yes_price?: number
+  opinion_no_price?: number
+  polymarket_yes_price?: number
+  polymarket_no_price?: number
+  price_sum: number
+  fee: number
+}
+
+interface AllocationResult {
+  budget: number
+  yes_price: number
+  no_price: number
+  yes_fee_rate: number
+  no_fee_rate: number
+  yes_amount: number
+  no_amount: number
+  yes_ratio: number
+  no_ratio: number
+  profit_if_yes: number
+  profit_if_no: number
+  guaranteed_profit: number
+  profit_rate: number
+  yes_fee: number
+  no_fee: number
+  total_fee: number
+  yes_net_return: number
+  no_net_return: number
+  error?: string
+}
+
+interface CrossArbOpportunity {
+  question: string
+  match_type: string
+  strategy_1: StrategyDetail
+  strategy_2: StrategyDetail
+  best_strategy: string
+  best_sum: number
+  total_fee: number
+  guaranteed_profit: number
+  profit_rate: number
+  allocation: AllocationResult
+  polymarket: {
+    id: string
+    yes_price: number
+    no_price: number
+    volume: number
+    liquidity: number
+  }
+  opinion: {
+    id: string
+    yes_price: number
+    no_price: number
+    volume: number
+    liquidity: number
+  }
+  end_date: string
+  volume: number
+}
+
 export default function PolymarketPage() {
-  const [activeTab, setActiveTab] = useState<'markets' | 'arbitrage' | 'value' | 'trending' | 'kelly' | 'detail'>('markets')
+  const [activeTab, setActiveTab] = useState<'markets' | 'arbitrage' | 'crossArb' | 'allocation' | 'value' | 'trending' | 'kelly' | 'detail'>('markets')
 
   // Markets
   const [markets, setMarkets] = useState<Market[]>([])
@@ -82,6 +144,21 @@ export default function PolymarketPage() {
   const [arbOpps, setArbOpps] = useState<Market[]>([])
   const [arbLoading, setArbLoading] = useState(false)
   const [minProfit, setMinProfit] = useState(0.5)
+
+  // Cross-platform Arbitrage
+  const [crossArbOpps, setCrossArbOpps] = useState<CrossArbOpportunity[]>([])
+  const [crossArbLoading, setCrossArbLoading] = useState(false)
+  const [crossArbMinProfit, setCrossArbMinProfit] = useState(0.5)
+  const [crossArbBudget, setCrossArbBudget] = useState('100')
+
+  // Allocation Calculator
+  const [allocYesPrice, setAllocYesPrice] = useState('')
+  const [allocNoPrice, setAllocNoPrice] = useState('')
+  const [allocBudget, setAllocBudget] = useState('100')
+  const [allocYesFee, setAllocYesFee] = useState('0')
+  const [allocNoFee, setAllocNoFee] = useState('0')
+  const [allocResult, setAllocResult] = useState<AllocationResult | null>(null)
+  const [allocLoading, setAllocLoading] = useState(false)
 
   // Value
   const [valueData, setValueData] = useState<ValueMarkets | null>(null)
@@ -165,6 +242,51 @@ export default function PolymarketPage() {
     }
   }, [])
 
+  // 跨平台套利扫描
+  const loadCrossArbitrage = useCallback(async () => {
+    setCrossArbLoading(true)
+    try {
+      const res = await axios.get(`${API_BASE}/cross-arbitrage`, {
+        params: {
+          min_profit: crossArbMinProfit,
+          budget: parseFloat(crossArbBudget) || 100,
+        }
+      })
+      setCrossArbOpps(res.data.opportunities || [])
+    } catch (e) {
+      console.error('获取跨平台套利机会失败:', e)
+    } finally {
+      setCrossArbLoading(false)
+    }
+  }, [crossArbMinProfit, crossArbBudget])
+
+  // 配资计算器
+  const calcAllocation = useCallback(async () => {
+    const yesPrice = parseFloat(allocYesPrice)
+    const noPrice = parseFloat(allocNoPrice)
+    const budget = parseFloat(allocBudget) || 100
+    const yesFee = parseFloat(allocYesFee) / 100 || 0
+    const noFee = parseFloat(allocNoFee) / 100 || 0
+
+    if (isNaN(yesPrice) || isNaN(noPrice)) return
+
+    setAllocLoading(true)
+    try {
+      const res = await axios.post(`${API_BASE}/allocation-calculator`, {
+        yes_price: yesPrice,
+        no_price: noPrice,
+        budget: budget,
+        yes_fee_rate: yesFee,
+        no_fee_rate: noFee,
+      })
+      setAllocResult(res.data)
+    } catch (e) {
+      console.error('配资计算失败:', e)
+    } finally {
+      setAllocLoading(false)
+    }
+  }, [allocYesPrice, allocNoPrice, allocBudget, allocYesFee, allocNoFee])
+
   const calcKelly = useCallback(async () => {
     const price = parseFloat(kellyPrice)
     const prob = parseFloat(kellyProb)
@@ -183,9 +305,10 @@ export default function PolymarketPage() {
   useEffect(() => {
     if (activeTab === 'markets') loadMarkets()
     if (activeTab === 'arbitrage') loadArbitrage()
+    if (activeTab === 'crossArb') loadCrossArbitrage()
     if (activeTab === 'value') loadValue()
     if (activeTab === 'trending') loadTrending()
-  }, [activeTab, loadMarkets, loadArbitrage, loadValue, loadTrending])
+  }, [activeTab, loadMarkets, loadArbitrage, loadCrossArbitrage, loadValue, loadTrending])
 
   const formatPrice = (p: number) => `$${p.toFixed(2)}`
   const formatVolume = (v: number) => {
@@ -232,6 +355,8 @@ export default function PolymarketPage() {
         {[
           { key: 'markets', label: '市场扫描' },
           { key: 'arbitrage', label: '套利机会' },
+          { key: 'crossArb', label: '跨平台套利' },
+          { key: 'allocation', label: '配资计算器' },
           { key: 'value', label: '价值发现' },
           { key: 'trending', label: '趋势追踪' },
           { key: 'kelly', label: 'Kelly计算器' },
@@ -398,6 +523,348 @@ export default function PolymarketPage() {
                 )}
               </tbody>
             </table>
+          )}
+        </div>
+      )}
+
+      {/* Cross-Platform Arbitrage Tab */}
+      {activeTab === 'crossArb' && (
+        <div>
+          <div className="arb-notes" style={{ marginBottom: 16 }}>
+            <div className="arb-note-item">
+              <div className="note-label">跨平台套利原理</div>
+              <div className="note-value" style={{ fontSize: 13 }}>
+                在 Polymarket 和 Opinion 两个平台寻找相同事件，当价格出现差异时套利。
+                例：Opinion的NO + Polymarket的YES &lt; 1.00，即可锁定利润。
+                <strong>手续费已扣除</strong>，显示的是保底净利润。
+              </div>
+            </div>
+            <div className="arb-note-item">
+              <div className="note-label">最低利润</div>
+              <div className="note-value">
+                <select value={crossArbMinProfit} onChange={e => setCrossArbMinProfit(Number(e.target.value))}
+                  style={{ padding: '4px 8px', borderRadius: 4, background: 'var(--bg-secondary)', color: 'var(--text-primary)', border: '1px solid var(--border-primary)' }}>
+                  <option value={0.1}>0.1%</option>
+                  <option value={0.5}>0.5%</option>
+                  <option value={1}>1%</option>
+                  <option value={2}>2%</option>
+                  <option value={5}>5%</option>
+                </select>
+              </div>
+            </div>
+            <div className="arb-note-item">
+              <div className="note-label">总预算 (U)</div>
+              <div className="note-value">
+                <input type="number" min="10" step="10" placeholder="100"
+                  value={crossArbBudget} onChange={e => setCrossArbBudget(e.target.value)}
+                  style={{ padding: '4px 8px', borderRadius: 4, background: 'var(--bg-secondary)', color: 'var(--text-primary)', border: '1px solid var(--border-primary)', width: 100 }} />
+              </div>
+            </div>
+          </div>
+
+          <div style={{ marginBottom: 12 }}>
+            <button onClick={loadCrossArbitrage}
+              style={{ padding: '6px 16px', borderRadius: 6, background: '#3fb950', color: '#fff', border: 'none', cursor: 'pointer', fontWeight: 600 }}>
+              扫描跨平台套利
+            </button>
+            <span style={{ color: 'var(--text-secondary)', fontSize: 12, marginLeft: 12 }}>
+              找到 {crossArbOpps.length} 个机会
+            </span>
+          </div>
+
+          {crossArbLoading ? (
+            <div className="loading"><div className="spinner"></div>扫描中...</div>
+          ) : (
+            <>
+              {crossArbOpps.length > 0 ? (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+                  {crossArbOpps.map((opp, idx) => (
+                    <div key={idx} style={{
+                      background: 'var(--bg-secondary)', borderRadius: 12, padding: 16,
+                      border: opp.profit_rate > 2 ? '2px solid #3fb950' : '1px solid var(--border-primary)',
+                    }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 12 }}>
+                        <div style={{ flex: 1 }}>
+                          <div style={{ fontSize: 15, fontWeight: 600, marginBottom: 4 }}>{opp.question}</div>
+                          <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+                            匹配方式: {opp.match_type === 'exact' ? '精确匹配' : opp.match_type === 'contains' ? '包含匹配' : '关键词匹配'}
+                          </div>
+                        </div>
+                        <div style={{
+                          background: opp.profit_rate > 2 ? '#3fb95020' : '#58a6ff20',
+                          padding: '8px 16px', borderRadius: 8, textAlign: 'center',
+                        }}>
+                          <div style={{ fontSize: 12, color: 'var(--text-secondary)' }}>保底利润</div>
+                          <div style={{ fontSize: 20, fontWeight: 700, color: '#3fb950' }}>
+                            +${opp.guaranteed_profit.toFixed(2)}
+                          </div>
+                          <div style={{ fontSize: 14, fontWeight: 600, color: '#3fb950' }}>
+                            {opp.profit_rate.toFixed(2)}%
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* 策略对比 */}
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 12 }}>
+                        <div style={{
+                          padding: 12, borderRadius: 8,
+                          background: opp.best_strategy === 'strategy_1' ? '#3fb95010' : 'var(--bg-tertiary)',
+                          border: opp.best_strategy === 'strategy_1' ? '1px solid #3fb950' : '1px solid transparent',
+                        }}>
+                          <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 4 }}>
+                            策略1 {opp.best_strategy === 'strategy_1' && '✅ 最优'}
+                          </div>
+                          <div style={{ fontSize: 13, marginBottom: 4 }}>Opinion买YES + PM买NO</div>
+                          <div style={{ fontSize: 12 }}>
+                            OP YES: {formatPrice(opp.strategy_1.opinion_yes_price || 0)} +
+                            PM NO: {formatPrice(opp.strategy_1.polymarket_no_price || 0)}
+                          </div>
+                          <div style={{ fontSize: 14, fontWeight: 600, color: '#3fb950', marginTop: 4 }}>
+                            合计: {opp.strategy_1.price_sum.toFixed(4)} | 手续费: ${opp.strategy_1.fee.toFixed(2)}
+                          </div>
+                        </div>
+                        <div style={{
+                          padding: 12, borderRadius: 8,
+                          background: opp.best_strategy === 'strategy_2' ? '#3fb95010' : 'var(--bg-tertiary)',
+                          border: opp.best_strategy === 'strategy_2' ? '1px solid #3fb950' : '1px solid transparent',
+                        }}>
+                          <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 4 }}>
+                            策略2 {opp.best_strategy === 'strategy_2' && '✅ 最优'}
+                          </div>
+                          <div style={{ fontSize: 13, marginBottom: 4 }}>Opinion买NO + PM买YES</div>
+                          <div style={{ fontSize: 12 }}>
+                            OP NO: {formatPrice(opp.strategy_2.opinion_no_price || 0)} +
+                            PM YES: {formatPrice(opp.strategy_2.polymarket_yes_price || 0)}
+                          </div>
+                          <div style={{ fontSize: 14, fontWeight: 600, color: '#3fb950', marginTop: 4 }}>
+                            合计: {opp.strategy_2.price_sum.toFixed(4)} | 手续费: ${opp.strategy_2.fee.toFixed(2)}
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* 配资建议 */}
+                      {opp.allocation && !opp.allocation.error && (
+                        <div style={{ background: 'var(--bg-tertiary)', borderRadius: 8, padding: 12 }}>
+                          <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 8 }}>📊 最优配资方案</div>
+                          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 8 }}>
+                            <div>
+                              <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>YES投入</div>
+                              <div style={{ fontSize: 16, fontWeight: 700 }}>${opp.allocation.yes_amount.toFixed(2)}</div>
+                              <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>{opp.allocation.yes_ratio.toFixed(1)}%</div>
+                            </div>
+                            <div>
+                              <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>NO投入</div>
+                              <div style={{ fontSize: 16, fontWeight: 700 }}>${opp.allocation.no_amount.toFixed(2)}</div>
+                              <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>{opp.allocation.no_ratio.toFixed(1)}%</div>
+                            </div>
+                            <div>
+                              <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>事件发生利润</div>
+                              <div style={{ fontSize: 16, fontWeight: 700, color: opp.allocation.profit_if_yes > 0 ? '#3fb950' : '#f85149' }}>
+                                ${opp.allocation.profit_if_yes.toFixed(2)}
+                              </div>
+                            </div>
+                            <div>
+                              <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>事件不发生利润</div>
+                              <div style={{ fontSize: 16, fontWeight: 700, color: opp.allocation.profit_if_no > 0 ? '#3fb950' : '#f85149' }}>
+                                ${opp.allocation.profit_if_no.toFixed(2)}
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* 空投提示 */}
+                      <div style={{ marginTop: 8, fontSize: 11, color: 'var(--text-muted)' }}>
+                        💡 此操作同时积累两个平台的交易量，有助于获取空投积分
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div style={{ textAlign: 'center', padding: 60, color: 'var(--text-muted)' }}>
+                  暂无跨平台套利机会
+                  <div style={{ fontSize: 13, marginTop: 8 }}>
+                    请确保已配置 OPINION_API_URL 环境变量
+                  </div>
+                </div>
+              )}
+            </>
+          )}
+
+          {/* 空投积分指南 */}
+          <div style={{ marginTop: 24, background: 'var(--bg-secondary)', borderRadius: 12, padding: 16 }}>
+            <h4 style={{ marginBottom: 12 }}>🎯 空投积分获取指南</h4>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+              <div>
+                <div style={{ fontWeight: 600, marginBottom: 8, color: '#58a6ff' }}>Opinion 积分策略</div>
+                <ul style={{ fontSize: 13, lineHeight: 1.8, paddingLeft: 16 }}>
+                  <li>每周交易量 ≥ 200U 才算合格</li>
+                  <li>多挂限价单做市，提供流动性</li>
+                  <li>新市场、流动性少时进场有额外加成</li>
+                  <li>持仓时间越长，积分越多</li>
+                </ul>
+              </div>
+              <div>
+                <div style={{ fontWeight: 600, marginBottom: 8, color: '#3fb950' }}>Polymarket 积分策略</div>
+                <ul style={{ fontSize: 13, lineHeight: 1.8, paddingLeft: 16 }}>
+                  <li>挂限价单靠近中间价，得分更高</li>
+                  <li>双边挂单（买+卖）获得更高权重</li>
+                  <li>长期持仓有约4%年化收益</li>
+                  <li>保持真实活跃，避免频繁对冲</li>
+                </ul>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Allocation Calculator Tab */}
+      {activeTab === 'allocation' && (
+        <div>
+          <div className="arb-notes" style={{ marginBottom: 16 }}>
+            <div className="arb-note-item" style={{ gridColumn: 'span 2' }}>
+              <div className="note-label">配资计算器</div>
+              <div className="note-value" style={{ fontSize: 13 }}>
+                输入两个平台的YES/NO价格和手续费率，计算最优资金分配方案。
+                让两边"赢的金额"完全相等，实现无风险套利。
+                手续费参考：Polymarket基本为0%，Opinion为0%~2%（价格越接近50%越高）。
+              </div>
+            </div>
+          </div>
+
+          <div style={{
+            display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
+            gap: 12, marginBottom: 16,
+          }}>
+            <div>
+              <label style={{ display: 'block', fontSize: 12, color: 'var(--text-secondary)', marginBottom: 4 }}>YES 价格</label>
+              <input type="number" min="0.01" max="0.99" step="0.01" placeholder="如 0.05"
+                value={allocYesPrice} onChange={e => setAllocYesPrice(e.target.value)}
+                style={{ width: '100%', padding: '8px 12px', borderRadius: 6, background: 'var(--bg-secondary)', color: 'var(--text-primary)', border: '1px solid var(--border-primary)' }} />
+            </div>
+            <div>
+              <label style={{ display: 'block', fontSize: 12, color: 'var(--text-secondary)', marginBottom: 4 }}>NO 价格</label>
+              <input type="number" min="0.01" max="0.99" step="0.01" placeholder="如 0.90"
+                value={allocNoPrice} onChange={e => setAllocNoPrice(e.target.value)}
+                style={{ width: '100%', padding: '8px 12px', borderRadius: 6, background: 'var(--bg-secondary)', color: 'var(--text-primary)', border: '1px solid var(--border-primary)' }} />
+            </div>
+            <div>
+              <label style={{ display: 'block', fontSize: 12, color: 'var(--text-secondary)', marginBottom: 4 }}>总预算 (U)</label>
+              <input type="number" min="10" step="10" placeholder="100"
+                value={allocBudget} onChange={e => setAllocBudget(e.target.value)}
+                style={{ width: '100%', padding: '8px 12px', borderRadius: 6, background: 'var(--bg-secondary)', color: 'var(--text-primary)', border: '1px solid var(--border-primary)' }} />
+            </div>
+            <div>
+              <label style={{ display: 'block', fontSize: 12, color: 'var(--text-secondary)', marginBottom: 4 }}>YES 平台费率 (%)</label>
+              <input type="number" min="0" max="5" step="0.1" placeholder="0"
+                value={allocYesFee} onChange={e => setAllocYesFee(e.target.value)}
+                style={{ width: '100%', padding: '8px 12px', borderRadius: 6, background: 'var(--bg-secondary)', color: 'var(--text-primary)', border: '1px solid var(--border-primary)' }} />
+            </div>
+            <div>
+              <label style={{ display: 'block', fontSize: 12, color: 'var(--text-secondary)', marginBottom: 4 }}>NO 平台费率 (%)</label>
+              <input type="number" min="0" max="5" step="0.1" placeholder="0"
+                value={allocNoFee} onChange={e => setAllocNoFee(e.target.value)}
+                style={{ width: '100%', padding: '8px 12px', borderRadius: 6, background: 'var(--bg-secondary)', color: 'var(--text-primary)', border: '1px solid var(--border-primary)' }} />
+            </div>
+            <div style={{ display: 'flex', alignItems: 'flex-end' }}>
+              <button onClick={calcAllocation}
+                style={{ padding: '8px 24px', borderRadius: 6, background: '#58a6ff', color: '#fff', border: 'none', cursor: 'pointer', fontWeight: 600, width: '100%' }}>
+                计算配资
+              </button>
+            </div>
+          </div>
+
+          {allocResult && !allocResult.error && (
+            <>
+              {/* 配资方案 */}
+              <div style={{
+                display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))',
+                gap: 12, marginBottom: 16,
+              }}>
+                <div style={{
+                  background: 'var(--bg-secondary)', borderRadius: 8, padding: 16,
+                  border: '1px solid var(--border-primary)',
+                }}>
+                  <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 4 }}>YES 投入</div>
+                  <div style={{ fontSize: 22, fontWeight: 700, color: '#3fb950' }}>
+                    ${allocResult.yes_amount.toFixed(2)}
+                  </div>
+                  <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>{allocResult.yes_ratio.toFixed(1)}% 的资金</div>
+                </div>
+                <div style={{
+                  background: 'var(--bg-secondary)', borderRadius: 8, padding: 16,
+                  border: '1px solid var(--border-primary)',
+                }}>
+                  <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 4 }}>NO 投入</div>
+                  <div style={{ fontSize: 22, fontWeight: 700, color: '#f85149' }}>
+                    ${allocResult.no_amount.toFixed(2)}
+                  </div>
+                  <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>{allocResult.no_ratio.toFixed(1)}% 的资金</div>
+                </div>
+                <div style={{
+                  background: 'var(--bg-secondary)', borderRadius: 8, padding: 16,
+                  border: '1px solid var(--border-primary)',
+                }}>
+                  <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 4 }}>事件发生利润</div>
+                  <div style={{ fontSize: 22, fontWeight: 700, color: allocResult.profit_if_yes > 0 ? '#3fb950' : '#f85149' }}>
+                    ${allocResult.profit_if_yes.toFixed(2)}
+                  </div>
+                  <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>YES赢</div>
+                </div>
+                <div style={{
+                  background: 'var(--bg-secondary)', borderRadius: 8, padding: 16,
+                  border: '1px solid var(--border-primary)',
+                }}>
+                  <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 4 }}>事件不发生利润</div>
+                  <div style={{ fontSize: 22, fontWeight: 700, color: allocResult.profit_if_no > 0 ? '#3fb950' : '#f85149' }}>
+                    ${allocResult.profit_if_no.toFixed(2)}
+                  </div>
+                  <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>NO赢</div>
+                </div>
+                <div style={{
+                  background: '#3fb95020', borderRadius: 8, padding: 16,
+                  border: '2px solid #3fb950',
+                }}>
+                  <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 4 }}>保底利润</div>
+                  <div style={{ fontSize: 22, fontWeight: 700, color: '#3fb950' }}>
+                    ${allocResult.guaranteed_profit.toFixed(2)}
+                  </div>
+                  <div style={{ fontSize: 14, fontWeight: 600, color: '#3fb950' }}>
+                    {allocResult.profit_rate.toFixed(2)}%
+                  </div>
+                </div>
+                <div style={{
+                  background: 'var(--bg-secondary)', borderRadius: 8, padding: 16,
+                  border: '1px solid var(--border-primary)',
+                }}>
+                  <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 4 }}>总手续费</div>
+                  <div style={{ fontSize: 22, fontWeight: 700, color: '#d29922' }}>
+                    ${allocResult.total_fee.toFixed(2)}
+                  </div>
+                  <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+                    YES: ${allocResult.yes_fee.toFixed(2)} | NO: ${allocResult.no_fee.toFixed(2)}
+                  </div>
+                </div>
+              </div>
+
+              {/* 计算说明 */}
+              <div style={{ background: 'var(--bg-secondary)', borderRadius: 8, padding: 16 }}>
+                <h4 style={{ marginBottom: 8 }}>📐 计算说明</h4>
+                <div style={{ fontSize: 13, lineHeight: 1.8, color: 'var(--text-secondary)' }}>
+                  <p>• <strong>最优配资</strong>：让两种结果下的回款金额完全相等，实现真正的无风险套利</p>
+                  <p>• <strong>事件发生</strong>：YES每份兑付$1，NO归零 → 利润 = YES回款 - 总投入 - 手续费</p>
+                  <p>• <strong>事件不发生</strong>：NO每份兑付$1，YES归零 → 利润 = NO回款 - 总投入 - 手续费</p>
+                  <p>• <strong>保底利润</strong>：取两种结果利润的最小值，确保无论结果如何都盈利</p>
+                  <p>• <strong>费率参考</strong>：Polymarket基本为0%，Opinion为0%~2%（价格越接近50%越高，最低0.5U）</p>
+                </div>
+              </div>
+            </>
+          )}
+
+          {allocResult?.error && (
+            <div style={{ color: '#f85149', padding: 16, background: '#f8514920', borderRadius: 8 }}>
+              {allocResult.error}
+            </div>
           )}
         </div>
       )}
