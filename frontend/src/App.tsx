@@ -20,6 +20,7 @@ const GridTrading = lazy(() => import('./pages/GridTrading'))
 const XueqiuGurus = lazy(() => import('./pages/XueqiuGurus'))
 const NationalTeamMonitor = lazy(() => import('./pages/NationalTeamMonitor'))
 const RightSideTrading = lazy(() => import('./pages/RightSideTrading'))
+const FundEstPage = lazy(() => import('./pages/FundEstPage'))
 
 const API_BASE = '/api'
 
@@ -144,20 +145,6 @@ interface ConvertibleBond {
   is_matured: boolean
 }
 
-// 热门股票列表
-const HOT_STOCKS: StockBasic[] = [
-  { code: '600519', name: '贵州茅台', price: 0, open: 0, high: 0, low: 0, pre_close: 0, change_pct: 0, volume: 0, amount: 0, pe: null, pb: null, market_cap: 0 },
-  { code: '000858', name: '五粮液', price: 0, open: 0, high: 0, low: 0, pre_close: 0, change_pct: 0, volume: 0, amount: 0, pe: null, pb: null, market_cap: 0 },
-  { code: '600036', name: '招商银行', price: 0, open: 0, high: 0, low: 0, pre_close: 0, change_pct: 0, volume: 0, amount: 0, pe: null, pb: null, market_cap: 0 },
-  { code: '601318', name: '中国平安', price: 0, open: 0, high: 0, low: 0, pre_close: 0, change_pct: 0, volume: 0, amount: 0, pe: null, pb: null, market_cap: 0 },
-  { code: '000333', name: '美的集团', price: 0, open: 0, high: 0, low: 0, pre_close: 0, change_pct: 0, volume: 0, amount: 0, pe: null, pb: null, market_cap: 0 },
-  { code: '002714', name: '牧原股份', price: 0, open: 0, high: 0, low: 0, pre_close: 0, change_pct: 0, volume: 0, amount: 0, pe: null, pb: null, market_cap: 0 },
-  { code: '300750', name: '宁德时代', price: 0, open: 0, high: 0, low: 0, pre_close: 0, change_pct: 0, volume: 0, amount: 0, pe: null, pb: null, market_cap: 0 },
-  { code: '600900', name: '长江电力', price: 0, open: 0, high: 0, low: 0, pre_close: 0, change_pct: 0, volume: 0, amount: 0, pe: null, pb: null, market_cap: 0 },
-  { code: '601888', name: '中国中免', price: 0, open: 0, high: 0, low: 0, pre_close: 0, change_pct: 0, volume: 0, amount: 0, pe: null, pb: null, market_cap: 0 },
-  { code: '000568', name: '泸州老窖', price: 0, open: 0, high: 0, low: 0, pre_close: 0, change_pct: 0, volume: 0, amount: 0, pe: null, pb: null, market_cap: 0 },
-]
-
 function App() {
   const [searchKeyword, setSearchKeyword] = useState('')
   const [searchResults, setSearchResults] = useState<SearchItem[]>([])
@@ -172,7 +159,7 @@ function App() {
   const [activeTab, setActiveTab] = useState('overview')
   const [loading, setLoading] = useState(false)
   const [watchlist, setWatchlist] = useState<StockBasic[]>([])
-  const [selectedList, setSelectedList] = useState<'watchlist' | 'hot'>('hot')
+  const [selectedList, setSelectedList] = useState<'watchlist'>('watchlist')
   const [fetchTime, setFetchTime] = useState('')
   const [latestReport, setLatestReport] = useState('')
 
@@ -199,7 +186,7 @@ function App() {
   const [cbLoggedIn, setCbLoggedIn] = useState(false)
 
   // 基金套利状态
-  const [mainView, setMainView] = useState<'stock' | 'arbitrage' | 'option' | 'cb' | 'hki' | 'indexVal' | 'usMarket' | 'dividend' | 'cigarButt' | 'valueInvesting' | 'reit' | 'crypto' | 'macro' | 'futures' | 'jcScreener' | 'polymarket' | 'exportChampions' | 'optionsRotation' | 'gridTrading' | 'xueqiuGurus' | 'nationalTeam' | 'rightSide'>('stock')
+  const [mainView, setMainView] = useState<'stock' | 'arbitrage' | 'option' | 'cb' | 'hki' | 'indexVal' | 'usMarket' | 'dividend' | 'cigarButt' | 'valueInvesting' | 'reit' | 'crypto' | 'macro' | 'futures' | 'jcScreener' | 'polymarket' | 'exportChampions' | 'optionsRotation' | 'gridTrading' | 'xueqiuGurus' | 'nationalTeam' | 'rightSide' | 'fundEst'>('stock')
   const [arbFunds, setArbFunds] = useState<FundArbitrage[]>([])
   const [arbLoading, setArbLoading] = useState(false)
   const [arbFetchTime, setArbFetchTime] = useState('')
@@ -230,6 +217,19 @@ function App() {
   }, [])
 
   useEffect(() => { loadBondYields() }, [loadBondYields])
+
+  // 页面加载时检查集思录登录状态
+  useEffect(() => {
+    const checkLoginStatus = async () => {
+      try {
+        const res = await axios.get(`${API_BASE}/funds/login_status`)
+        setArbLoggedIn(res.data.logged_in || false)
+      } catch (e) {
+        console.error('检查登录状态失败:', e)
+      }
+    }
+    checkLoginStatus()
+  }, [])
 
   // 搜索股票
   const handleSearch = useCallback(async (keyword: string) => {
@@ -344,6 +344,7 @@ function App() {
         user_name: loginUser,
         password: loginPass,
       })
+      setArbLoggedIn(true)
       setShowLogin(false)
       setLoginUser('')
       setLoginPass('')
@@ -757,8 +758,6 @@ function App() {
 
         {/* Tab切换 */}
         <div className="list-tabs">
-          <div className={`list-tab ${mainView === 'stock' && selectedList === 'hot' ? 'active' : ''}`}
-            onClick={() => { setMainView('stock'); setSelectedList('hot') }}>热门股票</div>
           <div className={`list-tab ${mainView === 'stock' && selectedList === 'watchlist' ? 'active' : ''}`}
             onClick={() => { setMainView('stock'); setSelectedList('watchlist') }}>我的自选</div>
           <div className={`list-tab ${mainView === 'arbitrage' ? 'active' : ''}`}
@@ -803,11 +802,19 @@ function App() {
             onClick={() => setMainView('nationalTeam')}>国家队监控</div>
           <div className={`list-tab ${mainView === 'rightSide' ? 'active' : ''}`}
             onClick={() => setMainView('rightSide')}>右侧交易</div>
+          <div className={`list-tab ${mainView === 'fundEst' ? 'active' : ''}`}
+            onClick={() => setMainView('fundEst')}>基金EST</div>
         </div>
 
         {mainView === 'stock' && (
           <div className="stock-list">
-            {(selectedList === 'hot' ? HOT_STOCKS : watchlist).map(stock => (
+            {watchlist.length === 0 ? (
+              <div className="empty-watchlist">
+                <div className="icon">📋</div>
+                <div className="text">暂无自选股</div>
+                <div className="sub-text">使用搜索框搜索股票并添加到自选</div>
+              </div>
+            ) : watchlist.map(stock => (
               <div
                 key={stock.code}
                 className={`stock-item ${selectedStock?.code === stock.code ? 'active' : ''}`}
@@ -1012,6 +1019,8 @@ function App() {
           <NationalTeamMonitor />
         ) : mainView === 'rightSide' ? (
           <RightSideTrading />
+        ) : mainView === 'fundEst' ? (
+          <FundEstPage />
         ) : mainView === 'option' ? (
           /* 期权收益计算器 */
           <div className="option-page">
@@ -1243,7 +1252,7 @@ function App() {
                     ))}
                     {cbBonds.length === 0 && (
                       <tr>
-                        <td colSpan={11} style={{ textAlign: 'center', padding: '40px', color: 'var(--text-muted)' }}>
+                        <td colSpan={13} style={{ textAlign: 'center', padding: '40px', color: 'var(--text-muted)' }}>
                           暂无符合条件的可转债
                         </td>
                       </tr>
@@ -1354,6 +1363,234 @@ function App() {
               </div>
             </div>
 
+            {/* LOF基金套利机制详解 */}
+            <div className="arb-info" style={{ marginTop: '12px', flexDirection: 'column', gap: '16px' }}>
+              <div style={{ fontWeight: 700, marginBottom: '8px', fontSize: '16px', color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '10px' }}>
+                <span style={{ background: 'linear-gradient(135deg, var(--accent-blue), #722ed1)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent', backgroundClip: 'text' }}>📖</span>
+                LOF基金套利机制
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
+                <div style={{ background: 'var(--bg-primary)', padding: '16px', borderRadius: '8px', border: '1px solid var(--border-subtle)' }}>
+                  <div style={{ fontWeight: 700, marginBottom: '10px', color: '#52c41a', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span style={{ fontSize: '18px' }}>✅</span> 什么是LOF基金？
+                  </div>
+                  <div style={{ fontSize: '13px', lineHeight: '1.9', color: 'var(--text-secondary)' }}>
+                    LOF（Listed Open-ended Fund）即上市型开放式基金，同时具备：
+                    <ul style={{ margin: '8px 0', paddingLeft: '20px' }}>
+                      <li><strong style={{ color: 'var(--text-primary)' }}>场内交易</strong>：像股票一样在交易所买卖，按实时市价成交</li>
+                      <li><strong style={{ color: 'var(--text-primary)' }}>场外申赎</strong>：通过基金公司或代销渠道，按每日净值申购赎回</li>
+                    </ul>
+                  </div>
+                </div>
+                <div style={{ background: 'var(--bg-primary)', padding: '16px', borderRadius: '8px', border: '1px solid var(--border-subtle)' }}>
+                  <div style={{ fontWeight: 700, marginBottom: '10px', color: '#1890ff', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span style={{ fontSize: '18px' }}>💡</span> 套利核心原理
+                  </div>
+                  <div style={{ fontSize: '13px', lineHeight: '1.9', color: 'var(--text-secondary)' }}>
+                    LOF基金存在<strong style={{ color: 'var(--text-primary)' }}>两个价格体系</strong>：
+                    <ul style={{ margin: '8px 0', paddingLeft: '20px' }}>
+                      <li><strong style={{ color: 'var(--text-primary)' }}>场内价格</strong>：实时交易，受供需情绪影响</li>
+                      <li><strong style={{ color: 'var(--text-primary)' }}>场外净值</strong>：每日收盘计算，反映真实价值</li>
+                    </ul>
+                    当两者出现显著偏差时，就产生了套利机会。
+                  </div>
+                </div>
+              </div>
+
+              {/* 溢价套利机制 */}
+              <div style={{ marginTop: '16px', borderTop: '1px solid var(--border-subtle)', paddingTop: '16px' }}>
+                <div style={{ fontWeight: 700, marginBottom: '12px', color: '#ff4d4f', display: 'flex', alignItems: 'center', gap: '8px', fontSize: '15px' }}>
+                  <span style={{ fontSize: '18px' }}>📈</span> 溢价套利机制（场内价格 {'>'} 场外净值）
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
+                  <div style={{ background: 'var(--bg-primary)', padding: '16px', borderRadius: '8px', border: '1px solid var(--border-subtle)' }}>
+                    <div style={{ fontSize: '13px', lineHeight: '1.9', color: 'var(--text-secondary)' }}>
+                      <strong style={{ color: '#ff4d4f' }}>原理</strong>：场内价格高于净值时，通过场外低价申购、场内高价卖出获利
+                      <ol style={{ margin: '10px 0', paddingLeft: '20px' }}>
+                        <li>场外申购LOF（按净值，价格低）</li>
+                        <li>等待份额到账（T+2日）</li>
+                        <li>转托管至场内</li>
+                        <li>场内卖出（按市价，价格高）</li>
+                        <li>赚取差价 = 市价 - 净值 - 费用</li>
+                      </ol>
+                    </div>
+                  </div>
+                  <div style={{ background: 'var(--bg-primary)', padding: '16px', borderRadius: '8px', border: '1px solid var(--border-subtle)' }}>
+                    <div style={{ fontSize: '13px', lineHeight: '1.9', color: 'var(--text-secondary)' }}>
+                      <strong style={{ color: '#ff4d4f' }}>完整流程</strong>：
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap', marginTop: '10px' }}>
+                        <div style={{ background: 'linear-gradient(135deg, rgba(255,77,79,0.1), rgba(255,77,79,0.05))', padding: '8px 12px', borderRadius: '6px', textAlign: 'center', fontSize: '11px', border: '1px solid rgba(255,77,79,0.2)' }}>
+                          <div style={{ fontWeight: 700, color: '#ff4d4f' }}>T日</div>
+                          <div>场外申购</div>
+                        </div>
+                        <div style={{ fontSize: '18px', color: 'var(--text-muted)' }}>→</div>
+                        <div style={{ background: 'linear-gradient(135deg, rgba(255,77,79,0.1), rgba(255,77,79,0.05))', padding: '8px 12px', borderRadius: '6px', textAlign: 'center', fontSize: '11px', border: '1px solid rgba(255,77,79,0.2)' }}>
+                          <div style={{ fontWeight: 700, color: '#ff4d4f' }}>T+2日</div>
+                          <div>份额到账</div>
+                        </div>
+                        <div style={{ fontSize: '18px', color: 'var(--text-muted)' }}>→</div>
+                        <div style={{ background: 'linear-gradient(135deg, rgba(255,77,79,0.1), rgba(255,77,79,0.05))', padding: '8px 12px', borderRadius: '6px', textAlign: 'center', fontSize: '11px', border: '1px solid rgba(255,77,79,0.2)' }}>
+                          <div style={{ fontWeight: 700, color: '#ff4d4f' }}>T+2日</div>
+                          <div>转托管</div>
+                        </div>
+                        <div style={{ fontSize: '18px', color: 'var(--text-muted)' }}>→</div>
+                        <div style={{ background: 'linear-gradient(135deg, rgba(82,196,26,0.1), rgba(82,196,26,0.05))', padding: '8px 12px', borderRadius: '6px', textAlign: 'center', fontSize: '11px', border: '1px solid rgba(82,196,26,0.2)' }}>
+                          <div style={{ fontWeight: 700, color: '#52c41a' }}>T+3日</div>
+                          <div>场内卖出</div>
+                        </div>
+                      </div>
+                      <div style={{ marginTop: '12px', fontFamily: 'monospace', fontSize: '12px', background: 'linear-gradient(135deg, var(--bg-secondary), var(--bg-primary))', padding: '10px', borderRadius: '6px', border: '1px solid var(--border-subtle)' }}>
+                        <div><strong style={{ color: 'var(--text-primary)' }}>收益</strong> = 溢价率 - 申购费(0.12%) - 卖出佣金(0.03%)</div>
+                        <div style={{ color: 'var(--text-muted)', marginTop: '6px' }}>示例：净值1.50，市价1.58，溢价率5.3%，收益≈5.15%</div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* 折价套利机制 */}
+              <div style={{ marginTop: '16px', borderTop: '1px solid var(--border-subtle)', paddingTop: '16px' }}>
+                <div style={{ fontWeight: 700, marginBottom: '12px', color: '#52c41a', display: 'flex', alignItems: 'center', gap: '8px', fontSize: '15px' }}>
+                  <span style={{ fontSize: '18px' }}>📉</span> 折价套利机制（场内价格 {'<'} 场外净值）
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
+                  <div style={{ background: 'var(--bg-primary)', padding: '16px', borderRadius: '8px', border: '1px solid var(--border-subtle)' }}>
+                    <div style={{ fontSize: '13px', lineHeight: '1.9', color: 'var(--text-secondary)' }}>
+                      <strong style={{ color: '#52c41a' }}>原理</strong>：场内价格低于净值时，通过场内低价买入、场外高价赎回获利
+                      <ol style={{ margin: '10px 0', paddingLeft: '20px' }}>
+                        <li>场内买入LOF（按市价，价格低）</li>
+                        <li>转托管至场外</li>
+                        <li>场外赎回（按净值，价格高）</li>
+                        <li>赚取差价 = 净值 - 市价 - 费用</li>
+                      </ol>
+                    </div>
+                  </div>
+                  <div style={{ background: 'var(--bg-primary)', padding: '16px', borderRadius: '8px', border: '1px solid var(--border-subtle)' }}>
+                    <div style={{ fontSize: '13px', lineHeight: '1.9', color: 'var(--text-secondary)' }}>
+                      <strong style={{ color: '#52c41a' }}>完整流程</strong>：
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap', marginTop: '10px' }}>
+                        <div style={{ background: 'linear-gradient(135deg, rgba(82,196,26,0.1), rgba(82,196,26,0.05))', padding: '8px 12px', borderRadius: '6px', textAlign: 'center', fontSize: '11px', border: '1px solid rgba(82,196,26,0.2)' }}>
+                          <div style={{ fontWeight: 700, color: '#52c41a' }}>T日</div>
+                          <div>场内买入</div>
+                        </div>
+                        <div style={{ fontSize: '18px', color: 'var(--text-muted)' }}>→</div>
+                        <div style={{ background: 'linear-gradient(135deg, rgba(82,196,26,0.1), rgba(82,196,26,0.05))', padding: '8px 12px', borderRadius: '6px', textAlign: 'center', fontSize: '11px', border: '1px solid rgba(82,196,26,0.2)' }}>
+                          <div style={{ fontWeight: 700, color: '#52c41a' }}>T+1日</div>
+                          <div>转托管</div>
+                        </div>
+                        <div style={{ fontSize: '18px', color: 'var(--text-muted)' }}>→</div>
+                        <div style={{ background: 'linear-gradient(135deg, rgba(82,196,26,0.1), rgba(82,196,26,0.05))', padding: '8px 12px', borderRadius: '6px', textAlign: 'center', fontSize: '11px', border: '1px solid rgba(82,196,26,0.2)' }}>
+                          <div style={{ fontWeight: 700, color: '#52c41a' }}>T+2日</div>
+                          <div>份额到账</div>
+                        </div>
+                        <div style={{ fontSize: '18px', color: 'var(--text-muted)' }}>→</div>
+                        <div style={{ background: 'linear-gradient(135deg, rgba(82,196,26,0.1), rgba(82,196,26,0.05))', padding: '8px 12px', borderRadius: '6px', textAlign: 'center', fontSize: '11px', border: '1px solid rgba(82,196,26,0.2)' }}>
+                          <div style={{ fontWeight: 700, color: '#52c41a' }}>T+3~5日</div>
+                          <div>赎回款到账</div>
+                        </div>
+                      </div>
+                      <div style={{ marginTop: '12px', fontFamily: 'monospace', fontSize: '12px', background: 'linear-gradient(135deg, var(--bg-secondary), var(--bg-primary))', padding: '10px', borderRadius: '6px', border: '1px solid var(--border-subtle)' }}>
+                        <div><strong style={{ color: 'var(--text-primary)' }}>收益</strong> = 折价率 - 赎回费(0.5%) - 交易佣金(0.03%)</div>
+                        <div style={{ color: 'var(--text-muted)', marginTop: '6px' }}>示例：净值1.50，市价1.42，折价率5.3%，收益≈4.77%</div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* 套利对比 */}
+              <div style={{ marginTop: '16px', borderTop: '1px solid var(--border-subtle)', paddingTop: '16px' }}>
+                <div style={{ fontWeight: 700, marginBottom: '12px', color: '#722ed1', display: 'flex', alignItems: 'center', gap: '8px', fontSize: '15px' }}>
+                  <span style={{ fontSize: '18px' }}>⚖️</span> 溢价 vs 折价套利对比
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', fontSize: '13px' }}>
+                  <div style={{ background: 'linear-gradient(135deg, rgba(255,77,79,0.08), rgba(255,77,79,0.03))', padding: '16px', borderRadius: '8px', border: '1px solid rgba(255,77,79,0.15)' }}>
+                    <div style={{ fontWeight: 700, color: '#ff4d4f', marginBottom: '10px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <span style={{ fontSize: '16px' }}>📈</span> 溢价套利
+                    </div>
+                    <ul style={{ margin: 0, paddingLeft: '16px', lineHeight: '1.9' }}>
+                      <li><strong style={{ color: 'var(--text-primary)' }}>操作方向</strong>：场外申购 → 场内卖出</li>
+                      <li><strong style={{ color: 'var(--text-primary)' }}>资金占用</strong>：约3-4天</li>
+                      <li><strong style={{ color: 'var(--text-primary)' }}>主要费用</strong>：申购费(0.12%)</li>
+                      <li><strong style={{ color: 'var(--text-primary)' }}>风险点</strong>：溢价收窄、限购政策</li>
+                      <li><strong style={{ color: 'var(--text-primary)' }}>适用场景</strong>：高溢价、限购宽松</li>
+                    </ul>
+                  </div>
+                  <div style={{ background: 'linear-gradient(135deg, rgba(82,196,26,0.08), rgba(82,196,26,0.03))', padding: '16px', borderRadius: '8px', border: '1px solid rgba(82,196,26,0.15)' }}>
+                    <div style={{ fontWeight: 700, color: '#52c41a', marginBottom: '10px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <span style={{ fontSize: '16px' }}>📉</span> 折价套利
+                    </div>
+                    <ul style={{ margin: 0, paddingLeft: '16px', lineHeight: '1.9' }}>
+                      <li><strong style={{ color: 'var(--text-primary)' }}>操作方向</strong>：场内买入 → 场外赎回</li>
+                      <li><strong style={{ color: 'var(--text-primary)' }}>资金占用</strong>：约3-5天</li>
+                      <li><strong style={{ color: 'var(--text-primary)' }}>主要费用</strong>：赎回费(0.5%)</li>
+                      <li><strong style={{ color: 'var(--text-primary)' }}>风险点</strong>：折价扩大、赎回费递增</li>
+                      <li><strong style={{ color: 'var(--text-primary)' }}>适用场景</strong>：高折价、持有期短</li>
+                    </ul>
+                  </div>
+                </div>
+              </div>
+
+              {/* 赎回费率说明 */}
+              <div style={{ marginTop: '16px', borderTop: '1px solid var(--border-subtle)', paddingTop: '16px' }}>
+                <div style={{ fontWeight: 700, marginBottom: '12px', color: '#faad14', display: 'flex', alignItems: 'center', gap: '8px', fontSize: '15px' }}>
+                  <span style={{ fontSize: '18px' }}>💰</span> 赎回费率表（按持有时间）
+                </div>
+                <div style={{ fontSize: '13px', color: 'var(--text-secondary)', marginBottom: '16px', lineHeight: '1.7' }}>
+                  基金赎回费率与持有时间直接相关，持有时间越长费率越低。<span style={{ color: '#ff4d4f', fontWeight: 700 }}>特别注意：持有不满7天将收取1.5%惩罚性赎回费！</span>
+                </div>
+                <div style={{ background: 'var(--bg-primary)', borderRadius: '8px', overflow: 'hidden', border: '1px solid var(--border-subtle)' }}>
+                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
+                    <thead>
+                      <tr style={{ background: 'linear-gradient(135deg, var(--bg-secondary), var(--bg-primary))' }}>
+                        <th style={{ padding: '12px 16px', textAlign: 'left', borderBottom: '2px solid var(--accent-blue)', fontWeight: 700 }}>持有时间</th>
+                        <th style={{ padding: '12px 16px', textAlign: 'center', borderBottom: '2px solid var(--accent-blue)', fontWeight: 700 }}>赎回费率</th>
+                        <th style={{ padding: '12px 16px', textAlign: 'left', borderBottom: '2px solid var(--accent-blue)', fontWeight: 700 }}>套利影响</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr style={{ background: 'rgba(255,77,79,0.05)' }}>
+                        <td style={{ padding: '12px 16px', borderBottom: '1px solid var(--border-subtle)', color: '#ff4d4f', fontWeight: 700 }}>{'<'} 7天</td>
+                        <td style={{ padding: '12px 16px', textAlign: 'center', borderBottom: '1px solid var(--border-subtle)', color: '#ff4d4f', fontWeight: 700, fontSize: '15px' }}>1.50%</td>
+                        <td style={{ padding: '12px 16px', borderBottom: '1px solid var(--border-subtle)', color: '#ff4d4f' }}>🚫 禁止套利！惩罚性费率完全吞噬利润</td>
+                      </tr>
+                      <tr>
+                        <td style={{ padding: '12px 16px', borderBottom: '1px solid var(--border-subtle)' }}>7天 ≤ T {'<'} 30天</td>
+                        <td style={{ padding: '12px 16px', textAlign: 'center', borderBottom: '1px solid var(--border-subtle)', fontWeight: 600 }}>0.50%</td>
+                        <td style={{ padding: '12px 16px', borderBottom: '1px solid var(--border-subtle)' }}>⚠️ 常规套利适用，需折价率 {'>'} 0.5%才有利润</td>
+                      </tr>
+                      <tr style={{ background: 'rgba(88,166,255,0.03)' }}>
+                        <td style={{ padding: '12px 16px', borderBottom: '1px solid var(--border-subtle)' }}>30天 ≤ T {'<'} 365天</td>
+                        <td style={{ padding: '12px 16px', textAlign: 'center', borderBottom: '1px solid var(--border-subtle)', fontWeight: 600 }}>0.25%</td>
+                        <td style={{ padding: '12px 16px', borderBottom: '1px solid var(--border-subtle)' }}>✅ 较优费率，适合中短期套利</td>
+                      </tr>
+                      <tr>
+                        <td style={{ padding: '12px 16px', borderBottom: '1px solid var(--border-subtle)' }}>365天 ≤ T {'<'} 730天</td>
+                        <td style={{ padding: '12px 16px', textAlign: 'center', borderBottom: '1px solid var(--border-subtle)', fontWeight: 600 }}>0.10%</td>
+                        <td style={{ padding: '12px 16px', borderBottom: '1px solid var(--border-subtle)' }}>✅ 低费率，长期持有更划算</td>
+                      </tr>
+                      <tr style={{ background: 'rgba(82,196,26,0.05)' }}>
+                        <td style={{ padding: '12px 16px', fontWeight: 600 }}>≥ 730天</td>
+                        <td style={{ padding: '12px 16px', textAlign: 'center', color: '#52c41a', fontWeight: 700, fontSize: '15px' }}>0.00%</td>
+                        <td style={{ padding: '12px 16px', color: '#52c41a' }}>🎉 免赎回费！但资金占用时间过长，不适合套利</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+                <div style={{ marginTop: '16px', background: 'linear-gradient(135deg, rgba(88,166,255,0.08), rgba(114,46,209,0.08))', padding: '16px', borderRadius: '8px', fontSize: '12px', border: '1px solid rgba(88,166,255,0.15)' }}>
+                  <div style={{ fontWeight: 700, marginBottom: '10px', color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span style={{ fontSize: '14px' }}>📌</span> 套利实操要点：
+                  </div>
+                  <ul style={{ margin: 0, paddingLeft: '16px', lineHeight: '1.9' }}>
+                    <li><strong style={{ color: 'var(--accent-blue)' }}>折价套利</strong>：赎回费率直接影响收益，计算公式 = 折价率 - 赎回费 - 佣金</li>
+                    <li><strong style={{ color: 'var(--accent-blue)' }}>持有时间计算</strong>：从申购确认日（T+1）到赎回确认日（T+1），非自然日</li>
+                    <li><strong style={{ color: 'var(--accent-blue)' }}>费率查询</strong>：具体费率以基金公司公告为准，不同基金可能有差异</li>
+                    <li><strong style={{ color: 'var(--accent-blue)' }}>最优策略</strong>：折价率需 {'>'} 1%（7天内赎回）或 {'>'} 0.5%（7天以上赎回）才有套利价值</li>
+                  </ul>
+                </div>
+              </div>
+            </div>
+
             {/* 套利表格 */}
             {arbLoading ? (
               <div className="loading">
@@ -1368,35 +1605,33 @@ function App() {
                   <table className="arb-table">
                     <thead>
                       <tr>
-                        <th>序号</th>
                         <th>代码</th>
                         <th>名称</th>
-                        <th>场内价格</th>
-                        <th>时间</th>
+                        <th>场内价</th>
                         <th>场外净值</th>
-                        <th>底层资产</th>
+                        <th>净值日期</th>
                         <th>官方EST</th>
-                        <th>官方EST日期</th>
+                        <th>EST日期</th>
+                        <th>底层资产</th>
                         <th>参考EST</th>
-                        <th>参考溢价率</th>
-                        <th>EST溢价率</th>
                         <th>溢价率</th>
-                        <th>申购费率</th>
                         <th>预估收益</th>
                         <th>交易额(万)</th>
-                        <th>净值日期</th>
                         <th>限购</th>
                       </tr>
                     </thead>
                     <tbody>
                       {arbFunds.filter(f => f.direction === '溢价').map((f, i) => (
                         <tr key={f.fund_id}>
-                          <td>{i + 1}</td>
                           <td>{f.fund_id}</td>
                           <td>{f.fund_nm}</td>
                           <td>{f.price.toFixed(3)}</td>
-                          <td style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{f.price_fetch_time || '-'}</td>
                           <td>{f.fund_nav.toFixed(4)}</td>
+                          <td style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>{f.nav_dt || ''}</td>
+                          <td style={{ fontWeight: 600, color: f.est_nav ? '#722ed1' : 'var(--text-muted)' }}>
+                            {f.est_nav ? f.est_nav.toFixed(4) : '-'}
+                          </td>
+                          <td style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>{f.est_nav_date || ''}</td>
                           <td style={{ fontSize: 12 }}>
                             {f.underlying_name ? (
                               <span style={{ color: f.underlying_change && f.underlying_change >= 0 ? '#52c41a' : '#ff4d4f' }}>
@@ -1404,32 +1639,20 @@ function App() {
                               </span>
                             ) : '-'}
                           </td>
-                          <td style={{ fontWeight: 600, color: f.est_nav ? '#1890ff' : 'var(--text-muted)' }}>
-                            {f.est_nav ? f.est_nav.toFixed(4) : '-'}
-                          </td>
-                          <td style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{f.est_nav_date || '-'}</td>
                           <td style={{ fontWeight: 600, color: f.ref_est_nav ? '#722ed1' : 'var(--text-muted)' }}>
                             {f.ref_est_nav ? f.ref_est_nav.toFixed(4) : '-'}
                           </td>
-                          <td style={{ fontWeight: 600, color: f.ref_est_discount_rt != null ? (f.ref_est_discount_rt > 0 ? '#ff4d4f' : '#52c41a') : 'var(--text-muted)' }}>
-                            {f.ref_est_discount_rt != null ? `${f.ref_est_discount_rt > 0 ? '+' : ''}${f.ref_est_discount_rt.toFixed(2)}%` : '-'}
-                          </td>
-                          <td style={{ fontWeight: 600, color: f.est_discount_rt != null ? (f.est_discount_rt > 0 ? '#ff4d4f' : '#52c41a') : 'var(--text-muted)' }}>
-                            {f.est_discount_rt != null ? `${f.est_discount_rt > 0 ? '+' : ''}${f.est_discount_rt.toFixed(2)}%` : '-'}
-                          </td>
-                          <td className="up">+{f.nav_discount_rt.toFixed(2)}%</td>
-                          <td>{f.apply_fee || '-'}</td>
+                          <td style={{ fontWeight: 600, color: '#ff4d4f' }}>+{f.nav_discount_rt.toFixed(2)}%</td>
                           <td style={{ color: f.estimated_profit > 0 ? '#52c41a' : '#ff4d4f', fontWeight: 600 }}>
                             {f.estimated_profit > 0 ? '+' : ''}{f.estimated_profit.toFixed(2)}%
                           </td>
                           <td>{f.turnover.toFixed(0)}</td>
-                          <td style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{f.nav_dt}</td>
                           <td>{f.apply_limit || '-'}</td>
                         </tr>
                       ))}
                       {arbFunds.filter(f => f.direction === '溢价').length === 0 && (
                         <tr>
-                          <td colSpan={19} style={{ textAlign: 'center', padding: '40px', color: 'var(--text-muted)' }}>
+                          <td colSpan={13} style={{ textAlign: 'center', padding: '40px', color: 'var(--text-muted)' }}>
                             暂无溢价LOF基金
                           </td>
                         </tr>
@@ -1444,35 +1667,33 @@ function App() {
                   <table className="arb-table">
                     <thead>
                       <tr>
-                        <th>序号</th>
                         <th>代码</th>
                         <th>名称</th>
-                        <th>场内价格</th>
-                        <th>时间</th>
+                        <th>场内价</th>
                         <th>场外净值</th>
-                        <th>底层资产</th>
+                        <th>净值日期</th>
                         <th>官方EST</th>
-                        <th>官方EST日期</th>
+                        <th>EST日期</th>
+                        <th>底层资产</th>
                         <th>参考EST</th>
-                        <th>参考折价率</th>
-                        <th>EST折价率</th>
                         <th>折价率</th>
-                        <th>赎回费率</th>
                         <th>预估收益</th>
                         <th>交易额(万)</th>
-                        <th>净值日期</th>
                         <th>限购</th>
                       </tr>
                     </thead>
                     <tbody>
                       {arbFunds.filter(f => f.direction === '折价').map((f, i) => (
                         <tr key={f.fund_id}>
-                          <td>{i + 1}</td>
                           <td>{f.fund_id}</td>
                           <td>{f.fund_nm}</td>
                           <td>{f.price.toFixed(3)}</td>
-                          <td style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{f.price_fetch_time || '-'}</td>
                           <td>{f.fund_nav.toFixed(4)}</td>
+                          <td style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>{f.nav_dt || ''}</td>
+                          <td style={{ fontWeight: 600, color: f.est_nav ? '#722ed1' : 'var(--text-muted)' }}>
+                            {f.est_nav ? f.est_nav.toFixed(4) : '-'}
+                          </td>
+                          <td style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>{f.est_nav_date || ''}</td>
                           <td style={{ fontSize: 12 }}>
                             {f.underlying_name ? (
                               <span style={{ color: f.underlying_change && f.underlying_change >= 0 ? '#52c41a' : '#ff4d4f' }}>
@@ -1480,32 +1701,20 @@ function App() {
                               </span>
                             ) : '-'}
                           </td>
-                          <td style={{ fontWeight: 600, color: f.est_nav ? '#1890ff' : 'var(--text-muted)' }}>
-                            {f.est_nav ? f.est_nav.toFixed(4) : '-'}
-                          </td>
-                          <td style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{f.est_nav_date || '-'}</td>
                           <td style={{ fontWeight: 600, color: f.ref_est_nav ? '#722ed1' : 'var(--text-muted)' }}>
                             {f.ref_est_nav ? f.ref_est_nav.toFixed(4) : '-'}
                           </td>
-                          <td style={{ fontWeight: 600, color: f.ref_est_discount_rt != null ? (f.ref_est_discount_rt < 0 ? '#52c41a' : '#ff4d4f') : 'var(--text-muted)' }}>
-                            {f.ref_est_discount_rt != null ? `${f.ref_est_discount_rt.toFixed(2)}%` : '-'}
-                          </td>
-                          <td style={{ fontWeight: 600, color: f.est_discount_rt != null ? (f.est_discount_rt < 0 ? '#52c41a' : '#ff4d4f') : 'var(--text-muted)' }}>
-                            {f.est_discount_rt != null ? `${f.est_discount_rt.toFixed(2)}%` : '-'}
-                          </td>
-                          <td className="down">{f.nav_discount_rt.toFixed(2)}%</td>
-                          <td>{f.redeem_fee || '-'}</td>
+                          <td style={{ fontWeight: 600, color: '#52c41a' }}>{f.nav_discount_rt.toFixed(2)}%</td>
                           <td style={{ color: f.estimated_profit > 0 ? '#52c41a' : '#ff4d4f', fontWeight: 600 }}>
                             {f.estimated_profit > 0 ? '+' : ''}{f.estimated_profit.toFixed(2)}%
                           </td>
                           <td>{f.turnover.toFixed(0)}</td>
-                          <td style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{f.nav_dt}</td>
                           <td>{f.apply_limit || '-'}</td>
                         </tr>
                       ))}
                       {arbFunds.filter(f => f.direction === '折价').length === 0 && (
                         <tr>
-                          <td colSpan={19} style={{ textAlign: 'center', padding: '40px', color: 'var(--text-muted)' }}>
+                          <td colSpan={13} style={{ textAlign: 'center', padding: '40px', color: 'var(--text-muted)' }}>
                             暂无折价LOF基金
                           </td>
                         </tr>
@@ -2170,17 +2379,6 @@ function App() {
             <div className="icon">📊</div>
             <div className="text">新源的Invest工具</div>
             <div className="sub-text">输入股票代码开始分析 | 支持A股/港股</div>
-            <div className="hot-stocks">
-              <div className="hot-title">热门股票</div>
-              <div className="hot-list">
-                {HOT_STOCKS.map(stock => (
-                  <div key={stock.code} className="hot-item" onClick={() => loadStock(stock.code)}>
-                    <span className="hot-name">{stock.name}</span>
-                    <span className="hot-code">{stock.code}</span>
-                  </div>
-                ))}
-              </div>
-            </div>
           </div>
         )}
         </Suspense>

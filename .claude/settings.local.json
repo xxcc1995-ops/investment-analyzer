@@ -43,7 +43,8 @@
       "Bash(npx tsc *)",
       "Bash(git add *)",
       "Bash(git commit -m 'feat: 新增Polymarket跨平台套利模块（Polymarket vs Opinion） *)",
-      "Bash(git push *)"
+      "Bash(git push *)",
+      "Bash(git commit -m 'feat: 基金套利模块增强 - 新增参考EST净值和时间显示 *)"
     ]
   }
 }

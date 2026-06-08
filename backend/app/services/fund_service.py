@@ -113,6 +113,10 @@ _UNDERLYING_MAP = {
     '160140': {'code': 'gb_vnq', 'type': 'us_etf', 'name': '美国REIT'},
     # 道琼斯
     '513400': {'code': 'gb_dia', 'type': 'us_etf', 'name': '道琼斯'},
+    # 海外科技LOF - 使用ARKK作为底层资产，仓位90%
+    '501312': {'code': 'gb_arkk', 'type': 'us_etf', 'name': '海外科技', 'position': 0.90},
+    # 港美互联网LOF - 使用KWEB作为底层资产
+    '160644': {'code': 'gb_kweb', 'type': 'us_etf', 'name': '港美互联网'},
     # 原油类
     '162411': {'code': 'hf_CL', 'type': 'futures', 'name': '原油'},
     '162719': {'code': 'hf_CL', 'type': 'futures', 'name': '原油'},
@@ -185,13 +189,32 @@ def _fetch_single_est_nav(fid: str) -> tuple:
         gsz = float(data.get('gsz', 0))
         gszzl = float(data.get('gszzl', 0))
         if dwjz > 0 and gsz > 0:
+            gztime = data.get('gztime', '')
+
+            # 计算EST交易日
+            # 如果EST更新时间是凌晨（<6点），说明是前一日的EST
+            est_trade_date = ''
+            if gztime:
+                try:
+                    from datetime import datetime, timedelta
+                    time_part = gztime.split(' ')[1] if ' ' in gztime else '00:00'
+                    hour = int(time_part.split(':')[0])
+                    est_date = gztime.split(' ')[0]
+                    if hour < 6:  # 凌晨更新的EST是前一日的
+                        est_update_date = datetime.strptime(est_date, '%Y-%m-%d')
+                        est_trade_date = (est_update_date - timedelta(days=1)).strftime('%Y-%m-%d')
+                    else:
+                        est_trade_date = est_date
+                except:
+                    est_trade_date = gztime.split(' ')[0] if ' ' in gztime else gztime
+
             return fid, {
                 'nav': dwjz,
                 'est_nav': gsz,
                 'est_change': gszzl,
                 'name': data.get('name', ''),
-                'gztime': data.get('gztime', ''),
-                'est_nav_date': data.get('gztime', ''),
+                'gztime': gztime,
+                'est_nav_date': est_trade_date,
             }
     except Exception:
         pass
@@ -245,16 +268,17 @@ def _fetch_underlying_prices() -> dict:
                 fields = val_part.split(',')
 
                 if code.startswith('gb_'):
-                    # 美股ETF格式: 名称,当前价,涨跌幅,时间,涨跌额,开盘,最高,最低,昨收,...
-                    if len(fields) >= 9:
+                    # 美股ETF格式: 名称,当前价,涨跌幅,时间,涨跌额,开盘,最高,最低,...
+                    # fields[1] = 当前价格, fields[2] = 涨跌幅(%)
+                    if len(fields) >= 3:
                         try:
                             current = float(fields[1])
-                            prev_close = float(fields[8])
-                            if current > 0 and prev_close > 0:
+                            change_pct = float(fields[2])
+                            if current > 0:
                                 result[code] = {
                                     'current': current,
-                                    'prev_close': prev_close,
-                                    'change_pct': round((current - prev_close) / prev_close * 100, 2),
+                                    'prev_close': round(current / (1 + change_pct / 100), 2),
+                                    'change_pct': change_pct,
                                 }
                         except (ValueError, IndexError):
                             pass
@@ -330,7 +354,10 @@ def _fetch_underlying_prices() -> dict:
 
 
 def _estimate_nav(fund: dict, prices: dict) -> dict:
-    """为单只基金添加EST估算净值字段"""
+    """为单只基金添加EST估算净值字段
+
+    计算公式：EST = 前一日净值 × (1 + 底层资产涨跌幅 × 仓位因子)
+    """
     fund_id = fund.get('fund_id', '')
     mapping = _UNDERLYING_MAP.get(fund_id)
 
@@ -366,17 +393,14 @@ def _estimate_nav(fund: dict, prices: dict) -> dict:
     fund['underlying_name'] = mapping['name']
     fund['underlying_change'] = change_pct
 
-    # 对于美股类ETF，需要考虑汇率变动
-    if mapping['type'] == 'us_etf':
-        usdcny = prices.get('_usdcny', 7.25)
-        # 简化处理：假设昨收净值对应的汇率也是当前汇率（因为净值公布时汇率已确定）
-        # EST NAV = 昨收净值 * (1 + 底层资产涨跌幅%)
-        est_nav = round(nav * (1 + change_pct / 100), 4)
-    else:
-        # 商品期货类，直接用涨跌幅
-        est_nav = round(nav * (1 + change_pct / 100), 4)
+    # 使用仓位因子（优先使用基金独立的仓位因子）
+    position = mapping.get('position', _POSITION_FACTOR.get(mapping['type'], 1.0))
+
+    # EST NAV = 前一日净值 × (1 + 底层资产涨跌幅 × 仓位因子)
+    est_nav = round(nav * (1 + change_pct / 100 * position), 4)
 
     fund['est_nav'] = est_nav
+    fund['est_position'] = position  # 记录使用的仓位因子
 
     # 计算EST溢价率
     price = fund.get('price', 0)
@@ -389,7 +413,13 @@ def _estimate_nav(fund: dict, prices: dict) -> dict:
 
 
 def _calculate_ref_est(fund: dict, prices: dict) -> dict:
-    """计算参考EST净值 = 前一日净值 × (1 + 底层资产涨跌幅 × 仓位因子)"""
+    """计算参考EST净值 = 前一日净值 × (1 + 底层资产涨跌幅 × 仓位因子)
+
+    这是Palmmicro使用的计算方式：
+    - 使用基金的前一日净值作为基准
+    - 使用底层资产的涨跌幅
+    - 应用仓位因子（如0.90表示90%仓位）
+    """
     fund_id = fund.get('fund_id', '')
     mapping = _UNDERLYING_MAP.get(fund_id)
 
@@ -413,11 +443,15 @@ def _calculate_ref_est(fund: dict, prices: dict) -> dict:
         fund['ref_est_discount_rt'] = None
         return fund
 
-    position = _POSITION_FACTOR.get(mapping['type'], 1.0)
+    # 优先使用基金独立的仓位因子，否则使用类型默认值
+    position = mapping.get('position', _POSITION_FACTOR.get(mapping['type'], 1.0))
     change_pct = price_data['change_pct']
+
+    # Palmmicro的计算公式：参考EST = 前一日净值 × (1 + 底层资产涨跌幅 × 仓位因子)
     ref_est_nav = round(nav * (1 + change_pct / 100 * position), 4)
 
     fund['ref_est_nav'] = ref_est_nav
+    fund['ref_est_position'] = position  # 记录使用的仓位因子
 
     # 计算参考EST溢价率
     price = fund.get('price', 0)
@@ -917,8 +951,7 @@ class FundService:
                 if fid in est_data:
                     ed = est_data[fid]
                     fund['est_nav'] = round(ed['est_nav'], 4)
-                    fund['underlying_change'] = ed['est_change']
-                    fund['underlying_name'] = ed.get('name', '')
+                    # 注意：不覆盖underlying_name和underlying_change，保留底层资产计算的结果
                     fund['est_nav_date'] = ed.get('est_nav_date', '')
                     price = fund.get('price', 0)
                     if ed['est_nav'] > 0:
@@ -934,27 +967,21 @@ class FundService:
                 else:
                     fund['est_nav'] = None
                     fund['est_discount_rt'] = None
-                    fund['underlying_name'] = None
-                    fund['underlying_change'] = None
+                    # 注意：不覆盖underlying_name和underlying_change
                     fund['est_nav_date'] = None
         except Exception as e:
-            logger.warning(f"天天基金EST获取失败，回退到底层资产计算: {e}")
-            try:
-                underlying_prices = _fetch_underlying_prices()
-                for fund in funds:
-                    _estimate_nav(fund, underlying_prices)
-            except Exception as e2:
-                logger.warning(f"EST估算完全失败: {e2}")
+            logger.warning(f"天天基金EST获取失败: {e}")
 
-        # 确保所有基金都有这两个字段（防止异常路径遗漏）
-        for fund in funds:
-            fund.setdefault('price_fetch_time', price_fetch_time)
-            fund.setdefault('est_nav_date', None)
-
-        # 计算参考EST（基于底层资产实时价格 + 仓位因子）
+        # 获取底层资产价格并计算底层资产信息
         try:
             underlying_prices = _fetch_underlying_prices()
-            logger.info(f"参考EST: 获取到 {len(underlying_prices)} 个底层资产价格, keys={list(underlying_prices.keys())[:5]}")
+            logger.info(f"底层资产价格: 获取到 {len(underlying_prices)} 个")
+
+            # 为所有基金设置底层资产信息（underlying_name, underlying_change, est_position）
+            for fund in funds:
+                _estimate_nav(fund, underlying_prices)
+
+            # 计算参考EST（基于底层资产实时价格 + 仓位因子）
             ref_count = 0
             for fund in funds:
                 _calculate_ref_est(fund, underlying_prices)
@@ -962,9 +989,14 @@ class FundService:
                     ref_count += 1
             logger.info(f"参考EST: {ref_count}/{len(funds)} 只基金计算成功")
         except Exception as e:
-            logger.warning(f"参考EST计算失败: {e}")
+            logger.warning(f"底层资产计算失败: {e}")
             import traceback
             traceback.print_exc()
+
+        # 确保所有基金都有这两个字段（防止异常路径遗漏）
+        for fund in funds:
+            fund.setdefault('price_fetch_time', price_fetch_time)
+            fund.setdefault('est_nav_date', None)
             for fund in funds:
                 fund.setdefault('ref_est_nav', None)
                 fund.setdefault('ref_est_discount_rt', None)

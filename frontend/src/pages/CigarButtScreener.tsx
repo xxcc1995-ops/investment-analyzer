@@ -10,14 +10,10 @@ interface CigarButtStock {
   change_pct: number
   pe: number | null
   pb: number | null
+  roe: number | null
   market_cap: number
   dividend_yield: number
-  graham_score: number
-  buffett_score: number
-  schloss_score: number
-  score: number
-  criteria_met: number
-  match_level: 'excellent' | 'good' | 'fair' | 'poor'
+  criteria_met: string[]
 }
 
 interface Philosophy {
@@ -55,12 +51,12 @@ export default function CigarButtScreener() {
   const [updateTime, setUpdateTime] = useState('')
   const [total, setTotal] = useState(0)
 
-  // 筛选参数
-  const [master, setMaster] = useState<'combined' | 'graham' | 'buffett' | 'schloss'>('combined')
-  const [minScore, setMinScore] = useState(50)
-  const [minMarketCap, setMinMarketCap] = useState(5)
-  const [maxPE, setMaxPE] = useState(15)
-  const [maxPB, setMaxPB] = useState(1.5)
+  // 筛选参数 - 基于大师烟蒂逻辑的核心指标
+  const [maxPE, setMaxPE] = useState(10)
+  const [maxPB, setMaxPB] = useState(1.0)
+  const [minROE, setMinROE] = useState(8)
+  const [minDividend, setMinDividend] = useState(3)
+  const [minMarketCap, setMinMarketCap] = useState(10)
   const [topN, setTopN] = useState(50)
 
   // 投资哲学
@@ -72,11 +68,11 @@ export default function CigarButtScreener() {
     try {
       const res = await axios.get(`${API_BASE}/cigar-butt/screener`, {
         params: {
-          master,
-          min_score: minScore,
-          min_market_cap: minMarketCap,
           max_pe: maxPE,
           max_pb: maxPB,
+          min_roe: minROE,
+          min_dividend: minDividend,
+          min_market_cap: minMarketCap,
           top_n: topN,
         }
       })
@@ -88,7 +84,7 @@ export default function CigarButtScreener() {
     } finally {
       setLoading(false)
     }
-  }, [master, minScore, minMarketCap, maxPE, maxPB, topN])
+  }, [maxPE, maxPB, minROE, minDividend, minMarketCap, topN])
 
   // 加载投资哲学
   const loadPhilosophy = useCallback(async () => {
@@ -102,31 +98,18 @@ export default function CigarButtScreener() {
 
   useEffect(() => { loadPhilosophy() }, [loadPhilosophy])
 
-  const getScoreColor = (score: number) => {
-    if (score >= 80) return '#52c41a'
-    if (score >= 65) return '#1890ff'
-    if (score >= 50) return '#faad14'
+  const getROEColor = (roe: number | null) => {
+    if (!roe) return '#666'
+    if (roe >= 15) return '#52c41a'
+    if (roe >= 10) return '#1890ff'
+    if (roe >= 8) return '#faad14'
     return '#ff4d4f'
   }
 
-  const getMatchLevelText = (level: string) => {
-    switch (level) {
-      case 'excellent': return '优秀'
-      case 'good': return '良好'
-      case 'fair': return '一般'
-      case 'poor': return '较差'
-      default: return '-'
-    }
-  }
-
-  const getMatchLevelColor = (level: string) => {
-    switch (level) {
-      case 'excellent': return '#52c41a'
-      case 'good': return '#1890ff'
-      case 'fair': return '#faad14'
-      case 'poor': return '#ff4d4f'
-      default: return '#666'
-    }
+  const getDividendColor = (dividend: number) => {
+    if (dividend >= 5) return '#52c41a'
+    if (dividend >= 3) return '#1890ff'
+    return '#faad14'
   }
 
   return (
@@ -296,61 +279,6 @@ export default function CigarButtScreener() {
           }}>
             <div>
               <label style={{ display: 'block', fontSize: '12px', color: 'var(--text-muted)', marginBottom: '4px' }}>
-                筛选标准
-              </label>
-              <select
-                value={master}
-                onChange={e => setMaster(e.target.value as any)}
-                style={{
-                  padding: '6px 12px', border: '1px solid var(--border-primary)',
-                  borderRadius: '4px', background: 'var(--bg-primary)', color: 'var(--text-primary)',
-                }}
-              >
-                <option value="combined">综合标准</option>
-                <option value="graham">格雷厄姆</option>
-                <option value="buffett">巴菲特</option>
-                <option value="schloss">施洛斯</option>
-              </select>
-            </div>
-            <div>
-              <label style={{ display: 'block', fontSize: '12px', color: 'var(--text-muted)', marginBottom: '4px' }}>
-                最低评分
-              </label>
-              <select
-                value={minScore}
-                onChange={e => setMinScore(Number(e.target.value))}
-                style={{
-                  padding: '6px 12px', border: '1px solid var(--border-primary)',
-                  borderRadius: '4px', background: 'var(--bg-primary)', color: 'var(--text-primary)',
-                }}
-              >
-                <option value={40}>40分</option>
-                <option value={50}>50分</option>
-                <option value={60}>60分</option>
-                <option value={70}>70分</option>
-              </select>
-            </div>
-            <div>
-              <label style={{ display: 'block', fontSize: '12px', color: 'var(--text-muted)', marginBottom: '4px' }}>
-                最低市值(亿港元)
-              </label>
-              <select
-                value={minMarketCap}
-                onChange={e => setMinMarketCap(Number(e.target.value))}
-                style={{
-                  padding: '6px 12px', border: '1px solid var(--border-primary)',
-                  borderRadius: '4px', background: 'var(--bg-primary)', color: 'var(--text-primary)',
-                }}
-              >
-                <option value={2}>2亿</option>
-                <option value={5}>5亿</option>
-                <option value={10}>10亿</option>
-                <option value={20}>20亿</option>
-                <option value={50}>50亿</option>
-              </select>
-            </div>
-            <div>
-              <label style={{ display: 'block', fontSize: '12px', color: 'var(--text-muted)', marginBottom: '4px' }}>
                 最大PE
               </label>
               <select
@@ -361,10 +289,11 @@ export default function CigarButtScreener() {
                   borderRadius: '4px', background: 'var(--bg-primary)', color: 'var(--text-primary)',
                 }}
               >
+                <option value={5}>5</option>
                 <option value={8}>8</option>
-                <option value={10}>10</option>
+                <option value={10}>10（大师标准）</option>
+                <option value={12}>12</option>
                 <option value={15}>15</option>
-                <option value={20}>20</option>
               </select>
             </div>
             <div>
@@ -379,10 +308,68 @@ export default function CigarButtScreener() {
                   borderRadius: '4px', background: 'var(--bg-primary)', color: 'var(--text-primary)',
                 }}
               >
+                <option value={0.5}>0.5（深度折扣）</option>
+                <option value={0.7}>0.7</option>
                 <option value={0.8}>0.8</option>
-                <option value={1.0}>1.0</option>
+                <option value={1.0}>1.0（大师标准）</option>
                 <option value={1.2}>1.2</option>
-                <option value={1.5}>1.5</option>
+              </select>
+            </div>
+            <div>
+              <label style={{ display: 'block', fontSize: '12px', color: 'var(--text-muted)', marginBottom: '4px' }}>
+                最低ROE(%)
+              </label>
+              <select
+                value={minROE}
+                onChange={e => setMinROE(Number(e.target.value))}
+                style={{
+                  padding: '6px 12px', border: '1px solid var(--border-primary)',
+                  borderRadius: '4px', background: 'var(--bg-primary)', color: 'var(--text-primary)',
+                }}
+              >
+                <option value={5}>5%</option>
+                <option value={8}>8%</option>
+                <option value={10}>10%</option>
+                <option value={12}>12%</option>
+                <option value={15}>15%</option>
+              </select>
+            </div>
+            <div>
+              <label style={{ display: 'block', fontSize: '12px', color: 'var(--text-muted)', marginBottom: '4px' }}>
+                最低股息率(%)
+              </label>
+              <select
+                value={minDividend}
+                onChange={e => setMinDividend(Number(e.target.value))}
+                style={{
+                  padding: '6px 12px', border: '1px solid var(--border-primary)',
+                  borderRadius: '4px', background: 'var(--bg-primary)', color: 'var(--text-primary)',
+                }}
+              >
+                <option value={0}>不限</option>
+                <option value={1}>1%</option>
+                <option value={2}>2%</option>
+                <option value={3}>3%</option>
+                <option value={5}>5%</option>
+              </select>
+            </div>
+            <div>
+              <label style={{ display: 'block', fontSize: '12px', color: 'var(--text-muted)', marginBottom: '4px' }}>
+                最低市值(亿)
+              </label>
+              <select
+                value={minMarketCap}
+                onChange={e => setMinMarketCap(Number(e.target.value))}
+                style={{
+                  padding: '6px 12px', border: '1px solid var(--border-primary)',
+                  borderRadius: '4px', background: 'var(--bg-primary)', color: 'var(--text-primary)',
+                }}
+              >
+                <option value={5}>5亿</option>
+                <option value={10}>10亿</option>
+                <option value={20}>20亿</option>
+                <option value={50}>50亿</option>
+                <option value={100}>100亿</option>
               </select>
             </div>
             <div>
@@ -400,6 +387,7 @@ export default function CigarButtScreener() {
                 <option value={30}>前30只</option>
                 <option value={50}>前50只</option>
                 <option value={100}>前100只</option>
+                <option value={200}>前200只</option>
               </select>
             </div>
             <div style={{ display: 'flex', alignItems: 'flex-end' }}>
@@ -415,9 +403,25 @@ export default function CigarButtScreener() {
             </div>
           </div>
 
+          {/* 大师烟蒂标准说明 */}
+          <div className="arb-notes" style={{ marginBottom: '16px', padding: '12px' }}>
+            <h4 style={{ marginBottom: '8px', color: 'var(--accent-blue)' }}>大师烟蒂选股标准</h4>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '12px', fontSize: '13px' }}>
+              <div>
+                <strong>格雷厄姆：</strong>PE &lt; 10, PB &lt; 1, 连续分红, 流动比率 &gt; 2
+              </div>
+              <div>
+                <strong>巴菲特(早期)：</strong>PE &lt; 10, PB &lt; 1.2, 价格 &lt; 净营运资本2/3
+              </div>
+              <div>
+                <strong>施洛斯：</strong>PB &lt; 1(核心), PE &lt; 10, 负债少, 长期盈利
+              </div>
+            </div>
+          </div>
+
           {/* 数据信息 */}
           <div className="data-freshness" style={{ marginBottom: '16px' }}>
-            <span className="freshness-tag">筛选标准: {master === 'combined' ? '综合' : master === 'graham' ? '格雷厄姆' : master === 'buffett' ? '巴菲特' : '施洛斯'}</span>
+            <span className="freshness-tag">筛选条件: PE≤{maxPE} | PB≤{maxPB} | ROE≥{minROE}% | 股息≥{minDividend}%</span>
             <span className="freshness-tag">更新时间: {updateTime}</span>
             <span className="freshness-tag">符合条件: {total} 只</span>
           </div>
@@ -440,13 +444,10 @@ export default function CigarButtScreener() {
                     <th>涨跌幅</th>
                     <th>PE</th>
                     <th>PB</th>
+                    <th>ROE</th>
                     <th>市值(亿)</th>
                     <th>股息率</th>
-                    <th>格雷厄姆</th>
-                    <th>巴菲特</th>
-                    <th>施洛斯</th>
-                    <th>综合评分</th>
-                    <th>匹配度</th>
+                    <th>符合标准</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -473,48 +474,40 @@ export default function CigarButtScreener() {
                       }}>
                         {stock.pb?.toFixed(3) ?? '--'}
                       </td>
+                      <td style={{
+                        color: getROEColor(stock.roe),
+                        fontWeight: 600,
+                      }}>
+                        {stock.roe ? `${stock.roe.toFixed(1)}%` : '--'}
+                      </td>
                       <td>{stock.market_cap.toFixed(1)}</td>
                       <td style={{
-                        color: stock.dividend_yield >= 5 ? '#52c41a' : stock.dividend_yield >= 3 ? '#1890ff' : '#faad14',
+                        color: getDividendColor(stock.dividend_yield),
+                        fontWeight: 600,
                       }}>
                         {stock.dividend_yield > 0 ? `${stock.dividend_yield.toFixed(2)}%` : '--'}
                       </td>
-                      <td style={{ color: getScoreColor(stock.graham_score), fontWeight: 600 }}>
-                        {stock.graham_score}
-                      </td>
-                      <td style={{ color: getScoreColor(stock.buffett_score), fontWeight: 600 }}>
-                        {stock.buffett_score}
-                      </td>
-                      <td style={{ color: getScoreColor(stock.schloss_score), fontWeight: 600 }}>
-                        {stock.schloss_score}
-                      </td>
                       <td>
-                        <span style={{
-                          color: getScoreColor(stock.score),
-                          fontWeight: 700,
-                          fontSize: '15px',
-                        }}>
-                          {stock.score}
-                        </span>
-                      </td>
-                      <td>
-                        <span style={{
-                          display: 'inline-block',
-                          padding: '2px 8px',
-                          borderRadius: '4px',
-                          fontSize: '12px',
-                          fontWeight: 600,
-                          background: `${getMatchLevelColor(stock.match_level)}20`,
-                          color: getMatchLevelColor(stock.match_level),
-                        }}>
-                          {getMatchLevelText(stock.match_level)}
-                        </span>
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
+                          {stock.criteria_met.map((criteria, idx) => (
+                            <span key={idx} style={{
+                              display: 'inline-block',
+                              padding: '1px 6px',
+                              borderRadius: '3px',
+                              fontSize: '11px',
+                              background: 'rgba(88, 166, 255, 0.15)',
+                              color: '#58a6ff',
+                            }}>
+                              {criteria}
+                            </span>
+                          ))}
+                        </div>
                       </td>
                     </tr>
                   ))}
                   {stocks.length === 0 && (
                     <tr>
-                      <td colSpan={14} style={{ textAlign: 'center', padding: '40px', color: 'var(--text-muted)' }}>
+                      <td colSpan={11} style={{ textAlign: 'center', padding: '40px', color: 'var(--text-muted)' }}>
                         暂无符合条件的烟蒂股
                       </td>
                     </tr>
@@ -524,29 +517,28 @@ export default function CigarButtScreener() {
             </div>
           )}
 
-          {/* 评分说明 */}
+          {/* 筛选逻辑说明 */}
           <div className="arb-notes" style={{ marginTop: '16px' }}>
-            <h3>评分标准说明</h3>
-            <div className="arb-notes-grid">
-              <div className="arb-note-item">
-                <span className="arb-note-label">格雷厄姆</span>
-                <span className="arb-note-value">PB&lt;1为核心</span>
-                <span className="arb-note-desc">PE&lt;10(25分) + PB&lt;1(30分) + 股息(20分) + 市值(15分) + 盈利(10分)</span>
+            <h3>筛选逻辑说明</h3>
+            <div className="arb-notes-content">
+              <div className="arb-risk-section">
+                <h4>核心指标</h4>
+                <ul>
+                  <li><strong>PE（市盈率）</strong>：越低越好，大师标准 PE &lt; 10</li>
+                  <li><strong>PB（市净率）</strong>：越低越好，大师标准 PB &lt; 1（打7折买净资产）</li>
+                  <li><strong>ROE（净资产收益率）</strong>：越高越好，代表盈利能力</li>
+                  <li><strong>股息率</strong>：越高越好，代表分红能力和股东回报</li>
+                </ul>
               </div>
-              <div className="arb-note-item">
-                <span className="arb-note-label">巴菲特</span>
-                <span className="arb-note-value">净营运资本2/3</span>
-                <span className="arb-note-desc">PE&lt;10(25分) + PB&lt;1.2(25分) + 盈利(20分) + 股息(15分) + 市值(15分)</span>
-              </div>
-              <div className="arb-note-item">
-                <span className="arb-note-label">施洛斯</span>
-                <span className="arb-note-value">PB&lt;1绝对核心</span>
-                <span className="arb-note-desc">PB&lt;1(35分) + PE&lt;10(25分) + 股息(20分) + 市值(20分)</span>
-              </div>
-              <div className="arb-note-item">
-                <span className="arb-note-label">综合评分</span>
-                <span className="arb-note-value">加权平均</span>
-                <span className="arb-note-desc">格雷厄姆40% + 巴菲特30% + 施洛斯30%</span>
+              <div className="arb-risk-section">
+                <h4>符合标准标签说明</h4>
+                <ul>
+                  <li><strong>PE低估</strong>：PE ≤ 设定阈值</li>
+                  <li><strong>PB低估</strong>：PB ≤ 设定阈值</li>
+                  <li><strong>高ROE</strong>：ROE ≥ 设定阈值</li>
+                  <li><strong>高股息</strong>：股息率 ≥ 设定阈值</li>
+                  <li><strong>大市值</strong>：市值 ≥ 50亿</li>
+                </ul>
               </div>
             </div>
           </div>
