@@ -1,6 +1,6 @@
 import { useState, useCallback, useRef, useEffect, useMemo } from 'react'
 import axios from 'axios'
-import ReactECharts from 'echarts-for-react'
+import ReactECharts from '../lib/ECharts'
 
 const API_BASE = '/api'
 

@@ -1,7 +1,95 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useMemo } from 'react'
 import axios from 'axios'
 
 const API_BASE = '/api/polymarket'
+
+// Reused style constants
+const STYLE = {
+  actionBtn: {
+    padding: '2px 8px' as const,
+    borderRadius: 4,
+    background: '#58a6ff20',
+    color: '#58a6ff',
+    border: '1px solid #58a6ff40',
+    cursor: 'pointer' as const,
+    fontSize: 12,
+  },
+  card: {
+    background: 'var(--bg-secondary)',
+    borderRadius: 8,
+    padding: 16,
+    border: '1px solid var(--border-primary)',
+  },
+  input: {
+    width: '100%',
+    padding: '8px 12px',
+    borderRadius: 6,
+    background: 'var(--bg-secondary)',
+    color: 'var(--text-primary)',
+    border: '1px solid var(--border-primary)',
+  },
+  select: {
+    padding: '6px 10px',
+    borderRadius: 6,
+    background: 'var(--bg-secondary)',
+    color: 'var(--text-primary)',
+    border: '1px solid var(--border-primary)',
+  },
+  primaryBtn: {
+    padding: '6px 16px',
+    borderRadius: 6,
+    background: '#58a6ff',
+    color: '#fff',
+    border: 'none',
+    cursor: 'pointer' as const,
+    fontWeight: 600,
+  },
+  greenBtn: {
+    padding: '6px 16px',
+    borderRadius: 6,
+    background: '#3fb950',
+    color: '#fff',
+    border: 'none',
+    cursor: 'pointer' as const,
+    fontWeight: 600,
+  },
+  errorBox: {
+    color: '#f85149',
+    padding: 16,
+    background: '#f8514920',
+    borderRadius: 8,
+  },
+} as const
+
+// Utility functions (stable references, no component dependency)
+const formatPrice = (p: number) => `$${p.toFixed(2)}`
+const formatVolume = (v: number) => {
+  if (v >= 1000000) return `$${(v / 1000000).toFixed(1)}M`
+  if (v >= 1000) return `$${(v / 1000).toFixed(0)}K`
+  return `$${v.toFixed(0)}`
+}
+const formatLiq = (l: number) => {
+  if (l >= 1000000) return `$${(l / 1000000).toFixed(1)}M`
+  if (l >= 1000) return `$${(l / 1000).toFixed(0)}K`
+  return `$${l.toFixed(0)}`
+}
+const getTrendColor = (v: number) => {
+  if (v > 5) return '#3fb950'
+  if (v < -5) return '#f85149'
+  return '#8b949e'
+}
+const getRiskColor = (level: string) => {
+  switch (level) {
+    case 'negative_edge': return '#f85149'
+    case 'low': return '#d29922'
+    case 'medium': return '#58a6ff'
+    case 'high': return '#3fb950'
+    case 'very_high': return '#f0883e'
+    default: return '#8b949e'
+  }
+}
+
+type TabKey = 'markets' | 'arbitrage' | 'crossArb' | 'allocation' | 'value' | 'trending' | 'kelly' | 'detail'
 
 interface Market {
   id: string
@@ -131,11 +219,12 @@ interface CrossArbOpportunity {
 }
 
 export default function PolymarketPage() {
-  const [activeTab, setActiveTab] = useState<'markets' | 'arbitrage' | 'crossArb' | 'allocation' | 'value' | 'trending' | 'kelly' | 'detail'>('markets')
+  const [activeTab, setActiveTab] = useState<TabKey>('markets')
 
   // Markets
   const [markets, setMarkets] = useState<Market[]>([])
   const [marketsLoading, setMarketsLoading] = useState(false)
+  const [marketsError, setMarketsError] = useState<string | null>(null)
   const [marketsTotal, setMarketsTotal] = useState(0)
   const [marketOrder, setMarketOrder] = useState('volume')
   const [marketTag, setMarketTag] = useState('')
@@ -143,11 +232,13 @@ export default function PolymarketPage() {
   // Arbitrage
   const [arbOpps, setArbOpps] = useState<Market[]>([])
   const [arbLoading, setArbLoading] = useState(false)
+  const [arbError, setArbError] = useState<string | null>(null)
   const [minProfit, setMinProfit] = useState(0.5)
 
   // Cross-platform Arbitrage
   const [crossArbOpps, setCrossArbOpps] = useState<CrossArbOpportunity[]>([])
   const [crossArbLoading, setCrossArbLoading] = useState(false)
+  const [crossArbError, setCrossArbError] = useState<string | null>(null)
   const [crossArbMinProfit, setCrossArbMinProfit] = useState(0.5)
   const [crossArbBudget, setCrossArbBudget] = useState('100')
 
@@ -163,10 +254,12 @@ export default function PolymarketPage() {
   // Value
   const [valueData, setValueData] = useState<ValueMarkets | null>(null)
   const [valueLoading, setValueLoading] = useState(false)
+  const [valueError, setValueError] = useState<string | null>(null)
 
   // Trending
   const [trending, setTrending] = useState<Market[]>([])
   const [trendingLoading, setTrendingLoading] = useState(false)
+  const [trendingError, setTrendingError] = useState<string | null>(null)
 
   // Kelly
   const [kellyPrice, setKellyPrice] = useState('')
@@ -177,9 +270,11 @@ export default function PolymarketPage() {
   // Detail
   const [detailData, setDetailData] = useState<MarketAnalysis | null>(null)
   const [detailLoading, setDetailLoading] = useState(false)
+  const [detailError, setDetailError] = useState<string | null>(null)
 
   const loadMarkets = useCallback(async () => {
     setMarketsLoading(true)
+    setMarketsError(null)
     try {
       const params: Record<string, string | number> = { limit: 100, order: marketOrder }
       if (marketTag) params.tag = marketTag
@@ -188,6 +283,7 @@ export default function PolymarketPage() {
       setMarketsTotal(res.data.total || 0)
     } catch (e) {
       console.error('获取市场失败:', e)
+      setMarketsError('获取市场数据失败，请检查网络连接或稍后重试')
     } finally {
       setMarketsLoading(false)
     }
@@ -195,11 +291,13 @@ export default function PolymarketPage() {
 
   const loadArbitrage = useCallback(async () => {
     setArbLoading(true)
+    setArbError(null)
     try {
       const res = await axios.get(`${API_BASE}/arbitrage`, { params: { min_profit: minProfit } })
       setArbOpps(res.data.opportunities || [])
     } catch (e) {
       console.error('获取套利机会失败:', e)
+      setArbError('获取套利数据失败，请检查网络连接或稍后重试')
     } finally {
       setArbLoading(false)
     }
@@ -207,11 +305,13 @@ export default function PolymarketPage() {
 
   const loadValue = useCallback(async () => {
     setValueLoading(true)
+    setValueError(null)
     try {
       const res = await axios.get(`${API_BASE}/value`)
       setValueData(res.data)
     } catch (e) {
       console.error('获取价值发现失败:', e)
+      setValueError('获取价值发现数据失败，请检查网络连接或稍后重试')
     } finally {
       setValueLoading(false)
     }
@@ -219,11 +319,13 @@ export default function PolymarketPage() {
 
   const loadTrending = useCallback(async () => {
     setTrendingLoading(true)
+    setTrendingError(null)
     try {
       const res = await axios.get(`${API_BASE}/trending`)
       setTrending(res.data.markets || [])
     } catch (e) {
       console.error('获取趋势失败:', e)
+      setTrendingError('获取趋势数据失败，请检查网络连接或稍后重试')
     } finally {
       setTrendingLoading(false)
     }
@@ -231,12 +333,14 @@ export default function PolymarketPage() {
 
   const loadDetail = useCallback(async (marketId: string) => {
     setDetailLoading(true)
+    setDetailError(null)
     setActiveTab('detail')
     try {
       const res = await axios.get(`${API_BASE}/markets/${marketId}`)
       setDetailData(res.data)
     } catch (e) {
       console.error('获取市场详情失败:', e)
+      setDetailError('获取市场详情失败，请检查网络连接或稍后重试')
     } finally {
       setDetailLoading(false)
     }
@@ -245,6 +349,7 @@ export default function PolymarketPage() {
   // 跨平台套利扫描
   const loadCrossArbitrage = useCallback(async () => {
     setCrossArbLoading(true)
+    setCrossArbError(null)
     try {
       const res = await axios.get(`${API_BASE}/cross-arbitrage`, {
         params: {
@@ -255,6 +360,7 @@ export default function PolymarketPage() {
       setCrossArbOpps(res.data.opportunities || [])
     } catch (e) {
       console.error('获取跨平台套利机会失败:', e)
+      setCrossArbError('获取跨平台套利数据失败，请检查网络连接或稍后重试')
     } finally {
       setCrossArbLoading(false)
     }
@@ -310,35 +416,6 @@ export default function PolymarketPage() {
     if (activeTab === 'trending') loadTrending()
   }, [activeTab, loadMarkets, loadArbitrage, loadCrossArbitrage, loadValue, loadTrending])
 
-  const formatPrice = (p: number) => `$${p.toFixed(2)}`
-  const formatVolume = (v: number) => {
-    if (v >= 1000000) return `$${(v / 1000000).toFixed(1)}M`
-    if (v >= 1000) return `$${(v / 1000).toFixed(0)}K`
-    return `$${v.toFixed(0)}`
-  }
-  const formatLiq = (l: number) => {
-    if (l >= 1000000) return `$${(l / 1000000).toFixed(1)}M`
-    if (l >= 1000) return `$${(l / 1000).toFixed(0)}K`
-    return `$${l.toFixed(0)}`
-  }
-
-  const getTrendColor = (v: number) => {
-    if (v > 5) return '#3fb950'
-    if (v < -5) return '#f85149'
-    return '#8b949e'
-  }
-
-  const getRiskColor = (level: string) => {
-    switch (level) {
-      case 'negative_edge': return '#f85149'
-      case 'low': return '#d29922'
-      case 'medium': return '#58a6ff'
-      case 'high': return '#3fb950'
-      case 'very_high': return '#f0883e'
-      default: return '#8b949e'
-    }
-  }
-
   return (
     <div className="cb-page">
       <div className="stock-header">
@@ -363,7 +440,7 @@ export default function PolymarketPage() {
           { key: 'detail', label: '市场详情' },
         ].map(t => (
           <button key={t.key} className={`tab-btn ${activeTab === t.key ? 'active' : ''}`}
-            onClick={() => setActiveTab(t.key as any)}>{t.label}</button>
+            onClick={() => setActiveTab(t.key as TabKey)}>{t.label}</button>
         ))}
       </div>
 
@@ -372,13 +449,13 @@ export default function PolymarketPage() {
         <div>
           <div style={{ display: 'flex', gap: 12, marginBottom: 16, flexWrap: 'wrap', alignItems: 'center' }}>
             <select value={marketOrder} onChange={e => setMarketOrder(e.target.value)}
-              style={{ padding: '6px 10px', borderRadius: 6, background: 'var(--bg-secondary)', color: 'var(--text-primary)', border: '1px solid var(--border-primary)' }}>
+              style={STYLE.select}>
               <option value="volume">按成交量</option>
               <option value="liquidity">按流动性</option>
               <option value="startDate">按开始时间</option>
             </select>
             <select value={marketTag} onChange={e => setMarketTag(e.target.value)}
-              style={{ padding: '6px 10px', borderRadius: 6, background: 'var(--bg-secondary)', color: 'var(--text-primary)', border: '1px solid var(--border-primary)' }}>
+              style={STYLE.select}>
               <option value="">全部标签</option>
               <option value="Politics">政治</option>
               <option value="Crypto">加密货币</option>
@@ -388,7 +465,7 @@ export default function PolymarketPage() {
               <option value="Tech">科技</option>
             </select>
             <button onClick={loadMarkets}
-              style={{ padding: '6px 16px', borderRadius: 6, background: '#58a6ff', color: '#fff', border: 'none', cursor: 'pointer', fontWeight: 600 }}>
+              style={STYLE.primaryBtn}>
               刷新
             </button>
             <span style={{ color: 'var(--text-secondary)', fontSize: 12 }}>共 {marketsTotal} 个市场</span>
@@ -396,6 +473,8 @@ export default function PolymarketPage() {
 
           {marketsLoading ? (
             <div className="loading"><div className="spinner"></div>加载中...</div>
+          ) : marketsError ? (
+            <div style={STYLE.errorBox}>{marketsError}</div>
           ) : (
             <table className="arb-table">
               <thead>
@@ -433,7 +512,7 @@ export default function PolymarketPage() {
                     <td style={{ fontSize: 11 }}>{m.end_date ? new Date(m.end_date).toLocaleDateString() : '-'}</td>
                     <td>
                       <button onClick={() => loadDetail(m.id)}
-                        style={{ padding: '2px 8px', borderRadius: 4, background: '#58a6ff20', color: '#58a6ff', border: '1px solid #58a6ff40', cursor: 'pointer', fontSize: 12 }}>
+                        style={STYLE.actionBtn}>
                         分析
                       </button>
                     </td>
@@ -452,18 +531,22 @@ export default function PolymarketPage() {
       {activeTab === 'arbitrage' && (
         <div>
           <div className="arb-notes" style={{ marginBottom: 16 }}>
-            <div className="arb-note-item">
+            <div className="arb-note-item" style={{ gridColumn: 'span 2' }}>
               <div className="note-label">套利原理</div>
-              <div className="note-value" style={{ fontSize: 13 }}>
-                当同一市场 Yes + No 价格 &lt; $1.00 时，买入双方即可锁定利润。
-                例：Yes=$0.55, No=$0.40, 合计$0.95, 利润=$0.05 (5.26%)
+              <div className="note-value" style={{ fontSize: 13, lineHeight: 1.8 }}>
+                <p><strong>核心逻辑：</strong>预测市场的二元结果（YES/NO）在结算时，有且仅有一方兑付 $1.00，另一方归零。因此无论事件发生与否，同时持有 YES + NO 的总回款恒为 $1.00。</p>
+                <p><strong>套利条件：</strong>当同一市场的 YES 价格 + NO 价格 &lt; $1.00 时，同时买入双方即可锁定无风险利润。</p>
+                <p><strong>利润公式：</strong>利润 = $1.00 - (YES价格 + NO价格)，利润率 = 利润 / (YES价格 + NO价格) × 100%</p>
+                <p><strong>举例：</strong>Yes=$0.55, No=$0.40, 合计=$0.95 → 无论结果如何都回款 $1.00，净利润=$0.05 (5.26%)</p>
+                <p><strong>注意：</strong>需考虑交易手续费和滑点。Polymarket 手续费基本为 0%，但仍需注意链上 Gas 费和流动性不足导致的滑点。阈值设太低可能被手续费和滑点吃掉利润。</p>
+                <p><strong>Neg-risk 市场：</strong>多结果市场（如选举候选人）中，所有结果价格之和可能偏离 1.0，也可检测套利机会。</p>
               </div>
             </div>
             <div className="arb-note-item">
               <div className="note-label">最低利润</div>
               <div className="note-value">
                 <select value={minProfit} onChange={e => setMinProfit(Number(e.target.value))}
-                  style={{ padding: '4px 8px', borderRadius: 4, background: 'var(--bg-secondary)', color: 'var(--text-primary)', border: '1px solid var(--border-primary)' }}>
+                  style={STYLE.select}>
                   <option value={0.1}>0.1%</option>
                   <option value={0.5}>0.5%</option>
                   <option value={1}>1%</option>
@@ -476,7 +559,7 @@ export default function PolymarketPage() {
 
           <div style={{ marginBottom: 12 }}>
             <button onClick={loadArbitrage}
-              style={{ padding: '6px 16px', borderRadius: 6, background: '#3fb950', color: '#fff', border: 'none', cursor: 'pointer', fontWeight: 600 }}>
+              style={STYLE.greenBtn}>
               扫描套利机会
             </button>
             <span style={{ color: 'var(--text-secondary)', fontSize: 12, marginLeft: 12 }}>
@@ -510,7 +593,7 @@ export default function PolymarketPage() {
                     <td>{formatVolume(m.volume)}</td>
                     <td>
                       <button onClick={() => loadDetail(m.id)}
-                        style={{ padding: '2px 8px', borderRadius: 4, background: '#58a6ff20', color: '#58a6ff', border: '1px solid #58a6ff40', cursor: 'pointer', fontSize: 12 }}>
+                        style={STYLE.actionBtn}>
                         详情
                       </button>
                     </td>
@@ -531,19 +614,25 @@ export default function PolymarketPage() {
       {activeTab === 'crossArb' && (
         <div>
           <div className="arb-notes" style={{ marginBottom: 16 }}>
-            <div className="arb-note-item">
+            <div className="arb-note-item" style={{ gridColumn: 'span 2' }}>
               <div className="note-label">跨平台套利原理</div>
-              <div className="note-value" style={{ fontSize: 13 }}>
-                在 Polymarket 和 Opinion 两个平台寻找相同事件，当价格出现差异时套利。
-                例：Opinion的NO + Polymarket的YES &lt; 1.00，即可锁定利润。
-                <strong>手续费已扣除</strong>，显示的是保底净利润。
+              <div className="note-value" style={{ fontSize: 13, lineHeight: 1.8 }}>
+                <p><strong>核心逻辑：</strong>同一个现实事件（如"Trump是否当选"）在 Polymarket 和 Opinion 两个平台都有交易，但市场价格可能不同。利用价差可以实现跨平台无风险套利。</p>
+                <p><strong>两种策略：</strong></p>
+                <p>　• <strong>策略1：</strong>在 Opinion 买 YES + 在 Polymarket 买 NO → 事件发生时 Opinion 兑付 $1，事件不发生时 Polymarket 兑付 $1</p>
+                <p>　• <strong>策略2：</strong>在 Opinion 买 NO + 在 Polymarket 买 YES → 反向操作</p>
+                <p><strong>套利条件：</strong>两平台的对应方向价格之和 &lt; $1.00（扣除手续费后），即可锁定利润。</p>
+                <p><strong>利润公式：</strong>净利润 = $1.00 - (平台A价格 + 平台B价格) - 手续费</p>
+                <p><strong>手续费模型：</strong>Polymarket 手续费 ≈ 0%；Opinion 采用二次函数模型：费率 = 2% × (1 - 2×|价格-0.5|)²，价格越接近 50% 费率越高（最高 2%），越接近极端越低（接近 0%），最低 0.5U/笔。</p>
+                <p><strong>市场匹配：</strong>系统通过精确匹配 → 子串包含 → 关键词 70% 重叠三级模糊匹配，自动关联两个平台的同一事件。</p>
+                <p><strong>附带收益：</strong>同时在两个平台交易可积累交易量，有助于获取空投积分。</p>
               </div>
             </div>
             <div className="arb-note-item">
               <div className="note-label">最低利润</div>
               <div className="note-value">
                 <select value={crossArbMinProfit} onChange={e => setCrossArbMinProfit(Number(e.target.value))}
-                  style={{ padding: '4px 8px', borderRadius: 4, background: 'var(--bg-secondary)', color: 'var(--text-primary)', border: '1px solid var(--border-primary)' }}>
+                  style={STYLE.select}>
                   <option value={0.1}>0.1%</option>
                   <option value={0.5}>0.5%</option>
                   <option value={1}>1%</option>
@@ -564,7 +653,7 @@ export default function PolymarketPage() {
 
           <div style={{ marginBottom: 12 }}>
             <button onClick={loadCrossArbitrage}
-              style={{ padding: '6px 16px', borderRadius: 6, background: '#3fb950', color: '#fff', border: 'none', cursor: 'pointer', fontWeight: 600 }}>
+              style={STYLE.greenBtn}>
               扫描跨平台套利
             </button>
             <span style={{ color: 'var(--text-secondary)', fontSize: 12, marginLeft: 12 }}>
@@ -723,11 +812,18 @@ export default function PolymarketPage() {
         <div>
           <div className="arb-notes" style={{ marginBottom: 16 }}>
             <div className="arb-note-item" style={{ gridColumn: 'span 2' }}>
-              <div className="note-label">配资计算器</div>
-              <div className="note-value" style={{ fontSize: 13 }}>
-                输入两个平台的YES/NO价格和手续费率，计算最优资金分配方案。
-                让两边"赢的金额"完全相等，实现无风险套利。
-                手续费参考：Polymarket基本为0%，Opinion为0%~2%（价格越接近50%越高）。
+              <div className="note-label">配资计算器 — 最优资金分配</div>
+              <div className="note-value" style={{ fontSize: 13, lineHeight: 1.8 }}>
+                <p><strong>解决的问题：</strong>跨平台套利时，YES 和 NO 的价格不同，如何分配预算才能让两种结果下的回款相等，实现真正的"无论结果如何都赚同样多"？</p>
+                <p><strong>核心公式：</strong></p>
+                <p>　• 净回报率 = 1/价格 - 1 - 手续费率（即每投入 $1 在该方向上的净回报）</p>
+                <p>　• YES投入 = 预算 × NO净回报率 / (YES净回报率 + NO净回报率)</p>
+                <p>　• NO投入 = 预算 - YES投入</p>
+                <p><strong>结果计算：</strong></p>
+                <p>　• 事件发生（YES赢）：利润 = YES数量×$1 - 总投入 - 手续费</p>
+                <p>　• 事件不发生（NO赢）：利润 = NO数量×$1 - 总投入 - 手续费</p>
+                <p>　• 保底利润 = min(YES赢利润, NO赢利润)</p>
+                <p><strong>费率参考：</strong>Polymarket ≈ 0%；Opinion = 2%×(1-2×|价格-0.5|)²，最低 0.5U/笔</p>
               </div>
             </div>
           </div>
@@ -740,35 +836,35 @@ export default function PolymarketPage() {
               <label style={{ display: 'block', fontSize: 12, color: 'var(--text-secondary)', marginBottom: 4 }}>YES 价格</label>
               <input type="number" min="0.01" max="0.99" step="0.01" placeholder="如 0.05"
                 value={allocYesPrice} onChange={e => setAllocYesPrice(e.target.value)}
-                style={{ width: '100%', padding: '8px 12px', borderRadius: 6, background: 'var(--bg-secondary)', color: 'var(--text-primary)', border: '1px solid var(--border-primary)' }} />
+                style={STYLE.input} />
             </div>
             <div>
               <label style={{ display: 'block', fontSize: 12, color: 'var(--text-secondary)', marginBottom: 4 }}>NO 价格</label>
               <input type="number" min="0.01" max="0.99" step="0.01" placeholder="如 0.90"
                 value={allocNoPrice} onChange={e => setAllocNoPrice(e.target.value)}
-                style={{ width: '100%', padding: '8px 12px', borderRadius: 6, background: 'var(--bg-secondary)', color: 'var(--text-primary)', border: '1px solid var(--border-primary)' }} />
+                style={STYLE.input} />
             </div>
             <div>
               <label style={{ display: 'block', fontSize: 12, color: 'var(--text-secondary)', marginBottom: 4 }}>总预算 (U)</label>
               <input type="number" min="10" step="10" placeholder="100"
                 value={allocBudget} onChange={e => setAllocBudget(e.target.value)}
-                style={{ width: '100%', padding: '8px 12px', borderRadius: 6, background: 'var(--bg-secondary)', color: 'var(--text-primary)', border: '1px solid var(--border-primary)' }} />
+                style={STYLE.input} />
             </div>
             <div>
               <label style={{ display: 'block', fontSize: 12, color: 'var(--text-secondary)', marginBottom: 4 }}>YES 平台费率 (%)</label>
               <input type="number" min="0" max="5" step="0.1" placeholder="0"
                 value={allocYesFee} onChange={e => setAllocYesFee(e.target.value)}
-                style={{ width: '100%', padding: '8px 12px', borderRadius: 6, background: 'var(--bg-secondary)', color: 'var(--text-primary)', border: '1px solid var(--border-primary)' }} />
+                style={STYLE.input} />
             </div>
             <div>
               <label style={{ display: 'block', fontSize: 12, color: 'var(--text-secondary)', marginBottom: 4 }}>NO 平台费率 (%)</label>
               <input type="number" min="0" max="5" step="0.1" placeholder="0"
                 value={allocNoFee} onChange={e => setAllocNoFee(e.target.value)}
-                style={{ width: '100%', padding: '8px 12px', borderRadius: 6, background: 'var(--bg-secondary)', color: 'var(--text-primary)', border: '1px solid var(--border-primary)' }} />
+                style={STYLE.input} />
             </div>
             <div style={{ display: 'flex', alignItems: 'flex-end' }}>
               <button onClick={calcAllocation}
-                style={{ padding: '8px 24px', borderRadius: 6, background: '#58a6ff', color: '#fff', border: 'none', cursor: 'pointer', fontWeight: 600, width: '100%' }}>
+                style={{ ...STYLE.primaryBtn, padding: '8px 24px', width: '100%' }}>
                 计算配资
               </button>
             </div>
@@ -781,40 +877,28 @@ export default function PolymarketPage() {
                 display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))',
                 gap: 12, marginBottom: 16,
               }}>
-                <div style={{
-                  background: 'var(--bg-secondary)', borderRadius: 8, padding: 16,
-                  border: '1px solid var(--border-primary)',
-                }}>
+                <div style={STYLE.card}>
                   <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 4 }}>YES 投入</div>
                   <div style={{ fontSize: 22, fontWeight: 700, color: '#3fb950' }}>
                     ${allocResult.yes_amount.toFixed(2)}
                   </div>
                   <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>{allocResult.yes_ratio.toFixed(1)}% 的资金</div>
                 </div>
-                <div style={{
-                  background: 'var(--bg-secondary)', borderRadius: 8, padding: 16,
-                  border: '1px solid var(--border-primary)',
-                }}>
+                <div style={STYLE.card}>
                   <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 4 }}>NO 投入</div>
                   <div style={{ fontSize: 22, fontWeight: 700, color: '#f85149' }}>
                     ${allocResult.no_amount.toFixed(2)}
                   </div>
                   <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>{allocResult.no_ratio.toFixed(1)}% 的资金</div>
                 </div>
-                <div style={{
-                  background: 'var(--bg-secondary)', borderRadius: 8, padding: 16,
-                  border: '1px solid var(--border-primary)',
-                }}>
+                <div style={STYLE.card}>
                   <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 4 }}>事件发生利润</div>
                   <div style={{ fontSize: 22, fontWeight: 700, color: allocResult.profit_if_yes > 0 ? '#3fb950' : '#f85149' }}>
                     ${allocResult.profit_if_yes.toFixed(2)}
                   </div>
                   <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>YES赢</div>
                 </div>
-                <div style={{
-                  background: 'var(--bg-secondary)', borderRadius: 8, padding: 16,
-                  border: '1px solid var(--border-primary)',
-                }}>
+                <div style={STYLE.card}>
                   <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 4 }}>事件不发生利润</div>
                   <div style={{ fontSize: 22, fontWeight: 700, color: allocResult.profit_if_no > 0 ? '#3fb950' : '#f85149' }}>
                     ${allocResult.profit_if_no.toFixed(2)}
@@ -833,10 +917,7 @@ export default function PolymarketPage() {
                     {allocResult.profit_rate.toFixed(2)}%
                   </div>
                 </div>
-                <div style={{
-                  background: 'var(--bg-secondary)', borderRadius: 8, padding: 16,
-                  border: '1px solid var(--border-primary)',
-                }}>
+                <div style={STYLE.card}>
                   <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 4 }}>总手续费</div>
                   <div style={{ fontSize: 22, fontWeight: 700, color: '#d29922' }}>
                     ${allocResult.total_fee.toFixed(2)}
@@ -862,7 +943,7 @@ export default function PolymarketPage() {
           )}
 
           {allocResult?.error && (
-            <div style={{ color: '#f85149', padding: 16, background: '#f8514920', borderRadius: 8 }}>
+            <div style={STYLE.errorBox}>
               {allocResult.error}
             </div>
           )}
@@ -872,6 +953,20 @@ export default function PolymarketPage() {
       {/* Value Tab */}
       {activeTab === 'value' && (
         <div>
+          <div className="arb-notes" style={{ marginBottom: 16 }}>
+            <div className="arb-note-item" style={{ gridColumn: 'span 2' }}>
+              <div className="note-label">价值发现逻辑</div>
+              <div className="note-value" style={{ fontSize: 13, lineHeight: 1.8 }}>
+                <p><strong>核心思路：</strong>从不同维度筛选可能被市场错误定价的合约，寻找"低买高卖"的机会。</p>
+                <p><strong>四类筛选：</strong></p>
+                <p>　• <strong>低价YES（&lt;15%）：</strong>市场认为几乎不会发生，但如果你有信息认为概率被低估，潜在回报可达数倍（买入价 $0.05，结算兑付 $1 = 20倍回报）</p>
+                <p>　• <strong>低价NO（&lt;15%）：</strong>市场认为几乎确定发生，反向思考——如果你认为事件不会发生，低价NO是高赔率机会</p>
+                <p>　• <strong>接近确定（&gt;90%）：</strong>高确定性事件，适合低风险"捡钱"——YES价格 $0.95 买入，结算赚 $0.05（5.3%），但需注意事件不发生的尾部风险</p>
+                <p>　• <strong>高成交量+低价格：</strong>异常信号——大量资金涌入低价合约，可能有人知道某些信息，值得关注但需独立验证</p>
+              </div>
+            </div>
+          </div>
+
           {valueLoading ? (
             <div className="loading"><div className="spinner"></div>分析中...</div>
           ) : valueData && (
@@ -901,7 +996,7 @@ export default function PolymarketPage() {
                         <td>{formatVolume(m.volume)}</td>
                         <td>
                           <button onClick={() => loadDetail(m.id)}
-                            style={{ padding: '2px 8px', borderRadius: 4, background: '#58a6ff20', color: '#58a6ff', border: '1px solid #58a6ff40', cursor: 'pointer', fontSize: 12 }}>
+                            style={STYLE.actionBtn}>
                             分析
                           </button>
                         </td>
@@ -936,7 +1031,7 @@ export default function PolymarketPage() {
                         <td>{formatVolume(m.volume)}</td>
                         <td>
                           <button onClick={() => loadDetail(m.id)}
-                            style={{ padding: '2px 8px', borderRadius: 4, background: '#58a6ff20', color: '#58a6ff', border: '1px solid #58a6ff40', cursor: 'pointer', fontSize: 12 }}>
+                            style={STYLE.actionBtn}>
                             分析
                           </button>
                         </td>
@@ -971,7 +1066,7 @@ export default function PolymarketPage() {
                         <td>{formatVolume(m.volume)}</td>
                         <td>
                           <button onClick={() => loadDetail(m.id)}
-                            style={{ padding: '2px 8px', borderRadius: 4, background: '#58a6ff20', color: '#58a6ff', border: '1px solid #58a6ff40', cursor: 'pointer', fontSize: 12 }}>
+                            style={STYLE.actionBtn}>
                             分析
                           </button>
                         </td>
@@ -1006,7 +1101,7 @@ export default function PolymarketPage() {
                         <td>{formatVolume(m.volume)}</td>
                         <td>
                           <button onClick={() => loadDetail(m.id)}
-                            style={{ padding: '2px 8px', borderRadius: 4, background: '#58a6ff20', color: '#58a6ff', border: '1px solid #58a6ff40', cursor: 'pointer', fontSize: 12 }}>
+                            style={STYLE.actionBtn}>
                             分析
                           </button>
                         </td>
@@ -1027,11 +1122,13 @@ export default function PolymarketPage() {
       {activeTab === 'trending' && (
         <div>
           <div className="arb-notes" style={{ marginBottom: 16 }}>
-            <div className="arb-note-item">
-              <div className="note-label">策略思路</div>
-              <div className="note-value" style={{ fontSize: 13 }}>
-                价格7天内变动超过5%的市场可能有新的信息流入，值得关注。
-                价格上涨说明市场认为Yes概率增加，反之亦然。
+            <div className="arb-note-item" style={{ gridColumn: 'span 2' }}>
+              <div className="note-label">趋势追踪逻辑</div>
+              <div className="note-value" style={{ fontSize: 13, lineHeight: 1.8 }}>
+                <p><strong>核心思路：</strong>价格是信息的反映。7天内价格变动超过5%的市场，通常意味着有新的重要信息流入（如政策变化、事件进展、大资金入场）。</p>
+                <p><strong>上涨信号：</strong>YES价格上涨 → 市场认为事件更可能发生 → 可能有内幕信息或共识形成</p>
+                <p><strong>下跌信号：</strong>YES价格下跌 → 市场认为事件更不可能发生 → 关注是否有反向机会</p>
+                <p><strong>使用建议：</strong>结合成交量判断——高成交量+大幅变动 = 强信号；低成交量+大幅变动 = 可能是少数大户操作，需谨慎。</p>
               </div>
             </div>
           </div>
@@ -1066,7 +1163,7 @@ export default function PolymarketPage() {
                     <td>{formatVolume(m.volume)}</td>
                     <td>
                       <button onClick={() => loadDetail(m.id)}
-                        style={{ padding: '2px 8px', borderRadius: 4, background: '#58a6ff20', color: '#58a6ff', border: '1px solid #58a6ff40', cursor: 'pointer', fontSize: 12 }}>
+                        style={STYLE.actionBtn}>
                         分析
                       </button>
                     </td>
@@ -1086,10 +1183,15 @@ export default function PolymarketPage() {
         <div>
           <div className="arb-notes" style={{ marginBottom: 16 }}>
             <div className="arb-note-item" style={{ gridColumn: 'span 2' }}>
-              <div className="note-label">Kelly仓位计算</div>
-              <div className="note-value" style={{ fontSize: 13 }}>
-                Kelly公式帮你根据"优势"计算最优下注比例。输入市场价格和你估计的真实概率，
-                系统会告诉你应该下注多少。默认使用1/4 Kelly（更保守）。
+              <div className="note-label">Kelly仓位计算 — 最优下注比例</div>
+              <div className="note-value" style={{ fontSize: 13, lineHeight: 1.8 }}>
+                <p><strong>解决问题：</strong>当你认为市场价格低估了某事件的真实概率时，应该下注多少？下太少浪费机会，下太多可能爆仓。</p>
+                <p><strong>Kelly公式：</strong>f* = (b×p - q) / b</p>
+                <p>　• p = 你估计的真实概率，q = 1-p，b = 赔率 = (1/市场价格 - 1)</p>
+                <p>　• f* = 最优下注比例（占总资金的百分比）</p>
+                <p><strong>举例：</strong>市场价 $0.40（隐含概率 40%），你认为真实概率 55%，赔率 b = 1.5 → Kelly = (1.5×0.55-0.45)/1.5 = 25%</p>
+                <p><strong>Fractional Kelly：</strong>默认使用 1/4 Kelly，牺牲部分期望收益换取更低的波动和回撤，更适合实际操作。</p>
+                <p><strong>风险提醒：</strong>Kelly公式假设你的概率估计是准确的。如果过度自信（高估真实概率），公式会建议过度下注。建议结合多种信息源验证你的判断。</p>
               </div>
             </div>
           </div>
@@ -1102,23 +1204,23 @@ export default function PolymarketPage() {
               <label style={{ display: 'block', fontSize: 12, color: 'var(--text-secondary)', marginBottom: 4 }}>市场价格 (0.01-0.99)</label>
               <input type="number" min="0.01" max="0.99" step="0.01" placeholder="如 0.40"
                 value={kellyPrice} onChange={e => setKellyPrice(e.target.value)}
-                style={{ width: '100%', padding: '8px 12px', borderRadius: 6, background: 'var(--bg-secondary)', color: 'var(--text-primary)', border: '1px solid var(--border-primary)' }} />
+                style={STYLE.input} />
             </div>
             <div>
               <label style={{ display: 'block', fontSize: 12, color: 'var(--text-secondary)', marginBottom: 4 }}>你估计的概率 (0.01-0.99)</label>
               <input type="number" min="0.01" max="0.99" step="0.01" placeholder="如 0.55"
                 value={kellyProb} onChange={e => setKellyProb(e.target.value)}
-                style={{ width: '100%', padding: '8px 12px', borderRadius: 6, background: 'var(--bg-secondary)', color: 'var(--text-primary)', border: '1px solid var(--border-primary)' }} />
+                style={STYLE.input} />
             </div>
             <div>
               <label style={{ display: 'block', fontSize: 12, color: 'var(--text-secondary)', marginBottom: 4 }}>总资金 ($)</label>
               <input type="number" min="1" step="100" placeholder="1000"
                 value={kellyBankroll} onChange={e => setKellyBankroll(e.target.value)}
-                style={{ width: '100%', padding: '8px 12px', borderRadius: 6, background: 'var(--bg-secondary)', color: 'var(--text-primary)', border: '1px solid var(--border-primary)' }} />
+                style={STYLE.input} />
             </div>
             <div style={{ display: 'flex', alignItems: 'flex-end' }}>
               <button onClick={calcKelly}
-                style={{ padding: '8px 24px', borderRadius: 6, background: '#58a6ff', color: '#fff', border: 'none', cursor: 'pointer', fontWeight: 600, width: '100%' }}>
+                style={{ ...STYLE.primaryBtn, padding: '8px 24px', width: '100%' }}>
                 计算
               </button>
             </div>
@@ -1129,57 +1231,39 @@ export default function PolymarketPage() {
               display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
               gap: 12, marginBottom: 16,
             }}>
-              <div style={{
-                background: 'var(--bg-secondary)', borderRadius: 8, padding: 16,
-                border: '1px solid var(--border-primary)',
-              }}>
+              <div style={STYLE.card}>
                 <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 4 }}>优势 (Edge)</div>
                 <div style={{ fontSize: 20, fontWeight: 700, color: kellyResult.edge > 0 ? '#3fb950' : '#f85149' }}>
                   {kellyResult.edge_pct > 0 ? '+' : ''}{kellyResult.edge_pct.toFixed(2)}%
                 </div>
               </div>
-              <div style={{
-                background: 'var(--bg-secondary)', borderRadius: 8, padding: 16,
-                border: '1px solid var(--border-primary)',
-              }}>
+              <div style={STYLE.card}>
                 <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 4 }}>期望值 (EV)</div>
                 <div style={{ fontSize: 20, fontWeight: 700, color: kellyResult.ev_pct > 0 ? '#3fb950' : '#f85149' }}>
                   {kellyResult.ev_pct > 0 ? '+' : ''}{kellyResult.ev_pct.toFixed(2)}%
                 </div>
               </div>
-              <div style={{
-                background: 'var(--bg-secondary)', borderRadius: 8, padding: 16,
-                border: '1px solid var(--border-primary)',
-              }}>
+              <div style={STYLE.card}>
                 <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 4 }}>Kelly比例</div>
                 <div style={{ fontSize: 20, fontWeight: 700, color: '#58a6ff' }}>
                   {kellyResult.kelly_fractional_pct.toFixed(2)}%
                 </div>
                 <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>Full Kelly: {kellyResult.kelly_full_pct.toFixed(2)}%</div>
               </div>
-              <div style={{
-                background: 'var(--bg-secondary)', borderRadius: 8, padding: 16,
-                border: '1px solid var(--border-primary)',
-              }}>
+              <div style={STYLE.card}>
                 <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 4 }}>建议仓位</div>
                 <div style={{ fontSize: 20, fontWeight: 700, color: '#3fb950' }}>
                   ${kellyResult.position_fractional.toFixed(2)}
                 </div>
                 <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>资金: ${kellyResult.bankroll}</div>
               </div>
-              <div style={{
-                background: 'var(--bg-secondary)', borderRadius: 8, padding: 16,
-                border: '1px solid var(--border-primary)',
-              }}>
+              <div style={STYLE.card}>
                 <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 4 }}>潜在利润</div>
                 <div style={{ fontSize: 20, fontWeight: 700, color: '#f0883e' }}>
                   ${kellyResult.potential_profit.toFixed(2)}
                 </div>
               </div>
-              <div style={{
-                background: 'var(--bg-secondary)', borderRadius: 8, padding: 16,
-                border: '1px solid var(--border-primary)',
-              }}>
+              <div style={STYLE.card}>
                 <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 4 }}>风险评级</div>
                 <div style={{ fontSize: 16, fontWeight: 700, color: getRiskColor(kellyResult.risk_level) }}>
                   {kellyResult.risk_msg}
@@ -1189,7 +1273,7 @@ export default function PolymarketPage() {
           )}
 
           {kellyResult?.error && (
-            <div style={{ color: '#f85149', padding: 16, background: '#f8514920', borderRadius: 8 }}>
+            <div style={STYLE.errorBox}>
               {kellyResult.error}
             </div>
           )}

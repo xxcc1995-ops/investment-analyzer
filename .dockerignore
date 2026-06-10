@@ -1,0 +1,59 @@
+# Git
+.git
+.gitignore
+
+# Python
+backend/venv/
+backend/__pycache__/
+backend/**/__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
+
+# Node
+frontend/node_modules/
+frontend/dist/
+
+# 日志
+logs/
+*.log
+backend/backend.log
+frontend/frontend.log
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Docker自身
+docker-compose.yml
+Dockerfile
+.dockerignore
+
+# 环境变量（敏感信息，不打入镜像）
+.env
+.env.*
+!.env.example
+
+# 系统文件
+.DS_Store
+Thumbs.db
+
+# 临时文件
+*.tmp
+*.bak
+national_team_debug.json
+
+# 文档（不打入镜像）
+docs/
+README.md
+CLAUDE.md
+
+# Windows脚本
+start.bat
+start.vbs
+stop.bat

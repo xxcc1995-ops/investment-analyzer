@@ -1,0 +1,59 @@
+version: "3.8"
+
+services:
+  # ===== 后端服务 =====
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: invest-backend
+    restart: unless-stopped
+    ports:
+      - "8002:8002"
+    env_file:
+      - .env
+    environment:
+      - TZ=Asia/Shanghai
+    volumes:
+      # 挂载日志目录
+      - ./logs/backend:/app/logs
+      # 挂载PDF输出目录
+      - ./backend/pdf:/app/pdf
+      # 挂载数据目录（如需持久化）
+      - ./backend/data:/app/data
+    networks:
+      - invest-network
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8002/')"]
+      interval: 30s
+      timeout: 10s
+      start_period: 15s
+      retries: 3
+
+  # ===== 前端服务 =====
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: invest-frontend
+    restart: unless-stopped
+    ports:
+      - "5173:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+    environment:
+      - TZ=Asia/Shanghai
+    networks:
+      - invest-network
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost/"]
+      interval: 30s
+      timeout: 5s
+      start_period: 10s
+      retries: 3
+
+# ===== 网络配置 =====
+networks:
+  invest-network:
+    driver: bridge

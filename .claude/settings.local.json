@@ -1,4 +1,18 @@
 {
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "cd \"F:/opus/investment-analyzer-improved(1)/investment-analyzer-improved\" && git pull 2>&1 || true",
+            "timeout": 30,
+            "statusMessage": "Pulling latest code from GitHub..."
+          }
+        ]
+      }
+    ]
+  },
   "permissions": {
     "allow": [
       "Skill(update-config)",

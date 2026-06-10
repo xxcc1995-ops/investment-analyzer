@@ -737,11 +737,13 @@ class DataService:
 
     @staticmethod
     def get_dividend_stocks() -> list:
-        """获取高股息股票数据 - 用于王文和散户乙筛选器"""
+        """获取高股息股票数据 - 用于王文和散户乙筛选器（并行优化版）"""
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+        import time as _time
+
         try:
             # 使用东方财富API获取A股股票数据
             # 先获取沪深300成分股 + 中证红利成分股
-            stocks = []
 
             # 预设的高股息蓝筹股列表（银行、能源、公用事业等）
             blue_chip_codes = [
@@ -770,16 +772,26 @@ class DataService:
             ]
 
             # 去重
-            unique_codes = list(set(blue_chip_codes))
+            unique_codes = list(set(blue_chip_codes))[:50]
 
-            # 批量获取数据
-            for code in unique_codes[:50]:  # 限制数量避免请求过多
-                try:
-                    stock_data = DataService._get_stock_dividend_data(code)
-                    if stock_data and stock_data.get("dividend_yield") and stock_data["dividend_yield"] > 0:
-                        stocks.append(stock_data)
-                except Exception:
-                    continue
+            # 并行获取数据 - 每只股票有3个HTTP请求(行情+财务+分红)，并行后大幅提速
+            stocks = []
+            start_time = _time.time()
+
+            with ThreadPoolExecutor(max_workers=15) as executor:
+                futures = {executor.submit(DataService._get_stock_dividend_data, code): code for code in unique_codes}
+                for future in as_completed(futures):
+                    code = futures[future]
+                    try:
+                        stock_data = future.result()
+                        if stock_data and stock_data.get("dividend_yield") and stock_data["dividend_yield"] > 0:
+                            stocks.append(stock_data)
+                    except Exception as e:
+                        logger.warning(f"获取{code}数据异常: {e}")
+                        continue
+
+            elapsed = _time.time() - start_time
+            logger.info(f"并行获取{len(unique_codes)}只股票数据耗时: {elapsed:.1f}s, 有效数据: {len(stocks)}只")
 
             # 按股息率排序
             stocks.sort(key=lambda x: x.get("dividend_yield", 0), reverse=True)

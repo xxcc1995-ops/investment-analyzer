@@ -347,9 +347,12 @@ def find_value_markets() -> Dict:
 
 def find_trending_markets() -> List[Dict]:
     """
-    趋势追踪 - 找到价格快速变动的市场
+    趋势追踪 - 找到价格快速变动的市场（并行优化版）
     通过对比短期和长期价格历史来检测
     """
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+    import time as _time
+
     cache_key = "trending"
     cached = _get_cached(cache_key)
     if cached:
@@ -358,18 +361,45 @@ def find_trending_markets() -> List[Dict]:
     # Get high-volume markets
     markets = get_active_markets(limit=100, order='volume')
 
+    top_markets = markets[:30]  # Check top 30 by volume
+    start_time = _time.time()
+
+    # 并行获取价格历史（核心优化：30个串行请求 -> 并行）
+    price_histories = {}  # market_id -> history
+
+    def _fetch_history(market):
+        market_id = market.get('id', '')
+        if not market_id:
+            return market_id, []
+        try:
+            return market_id, get_price_history(market_id, interval='1d', fidelity=7)
+        except Exception:
+            return market_id, []
+
+    with ThreadPoolExecutor(max_workers=10) as executor:
+        futures = {executor.submit(_fetch_history, m): m for m in top_markets}
+        for future in as_completed(futures):
+            try:
+                market_id, history = future.result()
+                if market_id:
+                    price_histories[market_id] = history
+            except Exception:
+                pass
+
+    elapsed = _time.time() - start_time
+    print(f"[Polymarket] 并行获取{len(top_markets)}个市场价格历史耗时: {elapsed:.1f}s")
+
+    # 计算趋势
     trending = []
-    for m in markets[:30]:  # Check top 30 by volume
+    for m in top_markets:
         market_id = m.get('id', '')
         if not market_id:
             continue
 
-        # Get recent price history
-        history = get_price_history(market_id, interval='1d', fidelity=7)
+        history = price_histories.get(market_id, [])
         if not history or len(history) < 2:
             continue
 
-        # Calculate price change
         first_price = history[0].get('price', 0)
         last_price = history[-1].get('price', 0)
         if first_price > 0:

@@ -993,13 +993,12 @@ class FundService:
             import traceback
             traceback.print_exc()
 
-        # 确保所有基金都有这两个字段（防止异常路径遗漏）
+        # 确保所有基金都有这些字段（防止异常路径遗漏）
         for fund in funds:
             fund.setdefault('price_fetch_time', price_fetch_time)
             fund.setdefault('est_nav_date', None)
-            for fund in funds:
-                fund.setdefault('ref_est_nav', None)
-                fund.setdefault('ref_est_discount_rt', None)
+            fund.setdefault('ref_est_nav', None)
+            fund.setdefault('ref_est_discount_rt', None)
 
         # 筛选: 成交额 ≥ 300万
         if min_turnover > 0:

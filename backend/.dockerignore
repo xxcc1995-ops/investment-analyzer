@@ -1,0 +1,11 @@
+venv
+__pycache__
+**/__pycache__
+*.pyc
+*.pyo
+*.log
+backend.log
+pdf/
+national_team_debug.json
+.vscode
+.DS_Store
