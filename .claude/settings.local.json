@@ -44,7 +44,27 @@
       "Bash(git add *)",
       "Bash(git commit -m 'feat: 新增Polymarket跨平台套利模块（Polymarket vs Opinion） *)",
       "Bash(git push *)",
-      "Bash(git commit -m 'feat: 基金套利模块增强 - 新增参考EST净值和时间显示 *)"
+      "Bash(git commit -m 'feat: 基金套利模块增强 - 新增参考EST净值和时间显示 *)",
+      "Bash(explorer \"C:\\\\Users\\\\XINYUA~1\\\\AppData\\\\Local\\\\Temp\\\\UZI-Skill\")",
+      "Bash(start \"C:\\\\Users\\\\XINYUA~1\\\\AppData\\\\Local\\\\Temp\\\\UZI-Skill\")",
+      "Bash(findstr \":8002 \")",
+      "Bash(findstr \"LISTENING\")",
+      "Bash(findstr \":5173 \")",
+      "Bash(venv/Scripts/python.exe -m uvicorn app.main:app --reload --port 8002)",
+      "Bash(npx vite *)",
+      "Bash(pip --version)",
+      "Bash(python -m venv venv)",
+      "Bash(venv/Scripts/pip.exe install *)",
+      "Bash(npm install *)",
+      "Bash(start *)",
+      "Bash(python -c \"from app.api.fund_est_detail import router; print\\('fund_est_detail module imported successfully'\\)\")",
+      "Bash(python -c \"from app.main import app; print\\('main.py imported successfully'\\)\")",
+      "WebFetch(domain:fund.eastmoney.com)",
+      "WebFetch(domain:fundf10.eastmoney.com)",
+      "Bash(grep -oP '<tr><td>\\\\d+</td><td class=.toc.><a href=.//quote.eastmoney.com/unify/r/\\\\d+\\\\.\\\\w+.')",
+      "Bash(cat)",
+      "Read(//tmp/**)",
+      "Bash(python *)"
     ]
   }
 }

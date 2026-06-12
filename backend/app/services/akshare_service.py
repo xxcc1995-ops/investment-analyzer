@@ -9,7 +9,7 @@ from typing import List, Dict, Optional, Any
 
 logger = logging.getLogger(__name__)
 
-from app.core.cache import get_cache as _get_cached, set_cache as _set_cache
+from app.core.cache import get_cache as _get_cached, set_cache as _set_cache, TTL_WEEKLY, TTL_DAILY
 from app.core.utils import safe_float as _safe_float
 
 
@@ -21,7 +21,7 @@ class AKShareService:
     def get_gdp_data(self) -> Optional[List[Dict]]:
         """获取中国GDP数据"""
         cache_key = "macro_china_gdp"
-        cached = _get_cached(cache_key)
+        cached = _get_cached(cache_key, TTL_WEEKLY)
         if cached:
             return cached
         try:
@@ -51,7 +51,7 @@ class AKShareService:
     def get_cpi_data(self) -> Optional[List[Dict]]:
         """获取中国CPI数据（全国/城市/农村当月同比）"""
         cache_key = "macro_china_cpi"
-        cached = _get_cached(cache_key)
+        cached = _get_cached(cache_key, TTL_WEEKLY)
         if cached:
             return cached
         try:
@@ -79,7 +79,7 @@ class AKShareService:
     def get_pmi_data(self) -> Optional[List[Dict]]:
         """获取中国PMI数据"""
         cache_key = "macro_china_pmi"
-        cached = _get_cached(cache_key)
+        cached = _get_cached(cache_key, TTL_WEEKLY)
         if cached:
             return cached
         try:
@@ -105,7 +105,7 @@ class AKShareService:
     def get_money_supply(self) -> Optional[List[Dict]]:
         """获取货币供应量数据(M0/M1/M2)"""
         cache_key = "macro_china_money"
-        cached = _get_cached(cache_key)
+        cached = _get_cached(cache_key, TTL_WEEKLY)
         if cached:
             return cached
         try:
@@ -133,7 +133,7 @@ class AKShareService:
     def get_social_financing(self) -> Optional[List[Dict]]:
         """获取社会融资规模数据"""
         cache_key = "macro_china_shrz"
-        cached = _get_cached(cache_key)
+        cached = _get_cached(cache_key, TTL_WEEKLY)
         if cached:
             return cached
         try:
@@ -157,7 +157,7 @@ class AKShareService:
     def get_lpr_data(self) -> Optional[List[Dict]]:
         """获取LPR利率数据（仅返回有效LPR数据，过滤2019年前的NaN）"""
         cache_key = "macro_china_lpr"
-        cached = _get_cached(cache_key)
+        cached = _get_cached(cache_key, TTL_WEEKLY)
         if cached:
             return cached
         try:
@@ -499,7 +499,7 @@ class AKShareService:
     def get_industry_rank(self) -> Optional[List[Dict]]:
         """获取行业板块排名（同花顺）"""
         cache_key = "industry_rank"
-        cached = _get_cached(cache_key)
+        cached = _get_cached(cache_key, TTL_DAILY)
         if cached:
             return cached
         try:
@@ -531,7 +531,7 @@ class AKShareService:
     def get_sector_fund_flow(self) -> Optional[List[Dict]]:
         """获取行业资金流向"""
         cache_key = "sector_fund_flow"
-        cached = _get_cached(cache_key)
+        cached = _get_cached(cache_key, TTL_DAILY)
         if cached:
             return cached
         try:
@@ -556,7 +556,7 @@ class AKShareService:
     def get_north_flow(self) -> Optional[List[Dict]]:
         """获取北向资金数据"""
         cache_key = "north_flow"
-        cached = _get_cached(cache_key)
+        cached = _get_cached(cache_key, TTL_DAILY)
         if cached:
             return cached
         try:

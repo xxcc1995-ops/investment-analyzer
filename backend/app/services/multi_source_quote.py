@@ -67,13 +67,16 @@ class MultiSourceQuoteService:
         }
 
     def _is_source_healthy(self, source_name: str) -> bool:
-        """检查数据源是否健康（带缓存）"""
+        """检查数据源是否健康（带冷却恢复）"""
         now = time.time()
         last_check = self._last_check.get(source_name, 0)
 
-        # 如果距离上次检查超过间隔，重新检查
-        if now - last_check > self._health_check_interval:
-            return self._health_status.get(source_name, True)
+        # 如果数据源不健康，检查冷却期是否已过
+        if not self._health_status.get(source_name, True):
+            if now - last_check > self._health_check_interval:
+                # 冷却期结束，允许重试（乐观重置为健康）
+                logger.info(f"数据源 {source_name} 冷却期({self._health_check_interval}s)结束，允许重试")
+                self._health_status[source_name] = True
 
         return self._health_status.get(source_name, True)
 
@@ -125,7 +128,7 @@ class MultiSourceQuoteService:
                     errors.append(f"{source_name}: 返回空数据")
 
             except Exception as e:
-                self._mark_source_healthy(source_name)
+                self._mark_source_unhealthy(source_name, str(e))
                 errors.append(f"{source_name}: {str(e)}")
                 logger.warning(f"数据源 {source_name} 获取行情异常: {e}")
                 continue

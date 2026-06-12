@@ -1,9 +1,15 @@
-"""港股烟蒂股筛选 - 基于格雷厄姆、巴菲特、施洛斯大师标准"""
+"""港股烟蒂股筛选 - 基于格雷厄姆、巴菲特、施洛斯大师标准
 
+TODO: HK_STOCKS_PB和HK_STOCKS_ROE是硬编码的静态数据，会随时间过期。
+应改为从实时API获取（如腾讯财经已返回部分数据，或通过东方财富/akshare获取）。
+"""
+
+import logging
 from fastapi import APIRouter
 from datetime import datetime
 import requests
 
+logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
@@ -152,6 +158,8 @@ HK_STOCKS_ROE = {
 
 
 def get_hk_stocks_data() -> list:
+    # TODO: PB/ROE数据是硬编码的静态快照，应从实时API获取
+    logger.warning("使用硬编码的PB/ROE数据，可能已过期。建议改用实时API获取。")
     stocks = []
     for code in HK_STOCKS_LIST:
         data = get_hk_stock_realtime(code)

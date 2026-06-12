@@ -3,8 +3,13 @@
 import requests
 import time
 import os
+import logging
 from typing import Optional, List, Dict
 from datetime import datetime, timedelta
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
+
+logger = logging.getLogger(__name__)
 
 # ============================================================
 # Polymarket API Config
@@ -27,12 +32,26 @@ def _get_proxies():
         return {'http': PROXY, 'https': PROXY}
     return None
 
+
+# 共享HTTP会话（带连接池和重试）
+_session = requests.Session()
+_adapter = HTTPAdapter(
+    pool_connections=10,
+    pool_maxsize=20,
+    max_retries=Retry(total=3, backoff_factor=1, status_forcelist=[429, 500, 502, 503, 504]),
+)
+_session.mount("https://", _adapter)
+_session.mount("http://", _adapter)
+_session.headers.update(HEADERS)
+if PROXY:
+    _session.proxies = _get_proxies()
+
 # ============================================================
 # Cache
 # ============================================================
 
-from app.core.cache import get_cache as _get_cached, set_cache as _set_cached
-_CACHE_TTL = 300
+from app.core.cache import get_cache as _get_cached, set_cache as _set_cached, TTL_DAILY
+_CACHE_TTL = TTL_DAILY
 
 
 # ============================================================
@@ -60,7 +79,7 @@ def get_active_markets(limit: int = 100, offset: int = 0,
         params['tag'] = tag
 
     try:
-        r = requests.get(f"{GAMMA_API}/markets", params=params,
+        r = _session.get(f"{GAMMA_API}/markets", params=params,
                          headers=HEADERS, timeout=15, proxies=_get_proxies())
         r.raise_for_status()
         markets = r.json()
@@ -86,7 +105,7 @@ def get_market_detail(market_id: str) -> Optional[Dict]:
         return cached
 
     try:
-        r = requests.get(f"{GAMMA_API}/markets/{market_id}",
+        r = _session.get(f"{GAMMA_API}/markets/{market_id}",
                          headers=HEADERS, timeout=15, proxies=_get_proxies())
         r.raise_for_status()
         market = r.json()
@@ -114,7 +133,7 @@ def get_price_history(market_id: str, interval: str = '1d',
     }
 
     try:
-        r = requests.get(f"{GAMMA_API}/prices-history", params=params,
+        r = _session.get(f"{GAMMA_API}/prices-history", params=params,
                          headers=HEADERS, timeout=15, proxies=_get_proxies())
         r.raise_for_status()
         data = r.json()
@@ -150,7 +169,7 @@ def get_order_book(token_id: str) -> Optional[Dict]:
         return cached
 
     try:
-        r = requests.get(f"{CLOB_API}/book",
+        r = _session.get(f"{CLOB_API}/book",
                          params={'token_id': token_id},
                          headers=HEADERS, timeout=10, proxies=_get_proxies())
         r.raise_for_status()

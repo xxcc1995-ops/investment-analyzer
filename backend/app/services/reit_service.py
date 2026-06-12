@@ -1,11 +1,18 @@
 """
 REIT数据服务 - 获取中国公募REITs数据
 数据源：新浪财经API
+
+TODO: FUNDAMENTALS使用行业平均值而非每只REIT的实际数据。
+应改为从基金公司披露或CSRC获取每只REIT的实际NAV/分红/出租率数据。
 """
+
+import logging
 import requests
 import re
 from datetime import datetime
 from typing import List, Dict, Optional
+
+logger = logging.getLogger(__name__)
 
 
 class REITService:
@@ -60,6 +67,9 @@ class REITService:
         """
         获取所有REIT数据并应用筛选
         """
+        # TODO: FUNDAMENTALS使用行业平均值，应改为每只REIT的实际数据
+        logger.warning("REIT基本面数据使用行业平均值，非实际数据。建议从定期报告获取。")
+
         if filters is None:
             filters = {}
 

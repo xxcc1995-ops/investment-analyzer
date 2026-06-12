@@ -8,7 +8,7 @@ from datetime import datetime
 
 logger = logging.getLogger(__name__)
 
-from app.core.cache import get_cache as _get_cache, set_cache as _set_cache
+from app.core.cache import get_cache as _get_cache, set_cache as _set_cache, clear_cache as _clear_cache
 from app.core.utils import safe_float as _safe_float
 
 
@@ -226,5 +226,5 @@ class CBService:
 
     @staticmethod
     def refresh_data() -> dict:
-        _cache.clear()
+        _clear_cache("cb_")
         return CBService.get_double_low_list()

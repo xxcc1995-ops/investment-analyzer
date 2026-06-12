@@ -10,6 +10,8 @@ from typing import Optional, List, Dict
 from datetime import datetime
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from cryptography.hazmat.backends import default_backend
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 
 logger = logging.getLogger(__name__)
 
@@ -22,6 +24,19 @@ _LOGIN_STATE_FILE = os.path.join(os.path.dirname(__file__), '..', '..', '.jisilu
 
 
 from app.core.cache import get_cache as _get_cache, set_cache as _set_cache, clear_cache as _clear_cache
+
+# 共享HTTP会话（带连接池和重试）- 用于非集思录API调用
+_session = requests.Session()
+_adapter = HTTPAdapter(
+    pool_connections=10,
+    pool_maxsize=20,
+    max_retries=Retry(total=3, backoff_factor=1, status_forcelist=[429, 500, 502, 503, 504]),
+)
+_session.mount("https://", _adapter)
+_session.mount("http://", _adapter)
+_session.headers.update({
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+})
 
 
 def _save_login_state(cookies: dict):
@@ -179,7 +194,7 @@ def _fetch_single_est_nav(fid: str) -> tuple:
     try:
         import json
         url = f"https://fundgz.1234567.com.cn/js/{fid}.js"
-        resp = requests.get(url, timeout=5)
+        resp = _session.get(url, timeout=5)
         text = resp.text
         if 'fundcode' not in text:
             return fid, None
@@ -253,7 +268,7 @@ def _fetch_underlying_prices() -> dict:
         if sina_codes:
             url = f"https://hq.sinajs.cn/list={','.join(sina_codes)}"
             headers = {'Referer': 'https://finance.sina.com.cn'}
-            resp = requests.get(url, headers=headers, timeout=10)
+            resp = _session.get(url, headers=headers, timeout=10)
             resp.encoding = 'gbk'
             text = resp.text
 
@@ -301,7 +316,7 @@ def _fetch_underlying_prices() -> dict:
         if a_index_codes:
             url = f"https://hq.sinajs.cn/list={','.join(a_index_codes)}"
             headers = {'Referer': 'https://finance.sina.com.cn'}
-            resp = requests.get(url, headers=headers, timeout=10)
+            resp = _session.get(url, headers=headers, timeout=10)
             resp.encoding = 'gbk'
             text = resp.text
 
@@ -330,7 +345,7 @@ def _fetch_underlying_prices() -> dict:
 
         # 获取汇率
         try:
-            fx_resp = requests.get(
+            fx_resp = _session.get(
                 "https://hq.sinajs.cn/list=fx_susdcny",
                 headers={'Referer': 'https://finance.sina.com.cn'},
                 timeout=10,
@@ -697,7 +712,7 @@ class FundService:
                 'Referer': 'https://quote.eastmoney.com/',
             }
 
-            resp = requests.get(url, headers=headers, params=params, timeout=15)
+            resp = _session.get(url, headers=headers, params=params, timeout=15)
             data = resp.json()
             rows = data.get('data', {}).get('diff', [])
 
@@ -993,13 +1008,12 @@ class FundService:
             import traceback
             traceback.print_exc()
 
-        # 确保所有基金都有这两个字段（防止异常路径遗漏）
+        # 确保所有基金都有这些字段（防止异常路径遗漏）
         for fund in funds:
             fund.setdefault('price_fetch_time', price_fetch_time)
             fund.setdefault('est_nav_date', None)
-            for fund in funds:
-                fund.setdefault('ref_est_nav', None)
-                fund.setdefault('ref_est_discount_rt', None)
+            fund.setdefault('ref_est_nav', None)
+            fund.setdefault('ref_est_discount_rt', None)
 
         # 筛选: 成交额 ≥ 300万
         if min_turnover > 0:
@@ -1058,7 +1072,7 @@ class FundService:
                 'Referer': 'https://quote.eastmoney.com/',
             }
 
-            resp = requests.get(url, headers=headers, params=params, timeout=10)
+            resp = _session.get(url, headers=headers, params=params, timeout=10)
             data = resp.json()
 
             if data.get('data'):

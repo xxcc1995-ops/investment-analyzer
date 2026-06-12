@@ -5,6 +5,10 @@ from dataclasses import dataclass, field
 from typing import Optional
 from datetime import datetime
 
+import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
+
 
 @dataclass
 class QuoteData:
@@ -66,6 +70,40 @@ class QuoteData:
 
 class BaseQuoteSource(ABC):
     """行情数据源基类"""
+
+    def _create_session(
+        self,
+        pool_connections: int = 5,
+        pool_maxsize: int = 10,
+        retries: int = 2,
+        backoff_factor: float = 0.3,
+    ) -> requests.Session:
+        """创建带连接池和重试的HTTP会话
+
+        Args:
+            pool_connections: 连接池连接数
+            pool_maxsize: 连接池最大连接数
+            retries: 重试次数
+            backoff_factor: 重试退避因子
+
+        Returns:
+            配置好的requests.Session
+        """
+        session = requests.Session()
+        retry = Retry(
+            total=retries,
+            backoff_factor=backoff_factor,
+            status_forcelist=[500, 502, 503, 504],
+            allowed_methods=["GET"],
+        )
+        adapter = HTTPAdapter(
+            pool_connections=pool_connections,
+            pool_maxsize=pool_maxsize,
+            max_retries=retry,
+        )
+        session.mount("https://", adapter)
+        session.mount("http://", adapter)
+        return session
 
     @property
     @abstractmethod

@@ -21,6 +21,7 @@ const XueqiuGurus = lazy(() => import('./pages/XueqiuGurus'))
 const NationalTeamMonitor = lazy(() => import('./pages/NationalTeamMonitor'))
 const RightSideTrading = lazy(() => import('./pages/RightSideTrading'))
 const FundEstPage = lazy(() => import('./pages/FundEstPage'))
+const FundEstDetailPage = lazy(() => import('./pages/FundEstDetailPage'))
 
 const API_BASE = '/api'
 
@@ -186,7 +187,7 @@ function App() {
   const [cbLoggedIn, setCbLoggedIn] = useState(false)
 
   // 基金套利状态
-  const [mainView, setMainView] = useState<'stock' | 'arbitrage' | 'option' | 'cb' | 'hki' | 'indexVal' | 'usMarket' | 'dividend' | 'cigarButt' | 'valueInvesting' | 'reit' | 'crypto' | 'macro' | 'futures' | 'jcScreener' | 'polymarket' | 'exportChampions' | 'optionsRotation' | 'gridTrading' | 'xueqiuGurus' | 'nationalTeam' | 'rightSide' | 'fundEst'>('stock')
+  const [mainView, setMainView] = useState<'stock' | 'arbitrage' | 'option' | 'cb' | 'hki' | 'indexVal' | 'usMarket' | 'dividend' | 'cigarButt' | 'valueInvesting' | 'reit' | 'crypto' | 'macro' | 'futures' | 'jcScreener' | 'polymarket' | 'exportChampions' | 'optionsRotation' | 'gridTrading' | 'xueqiuGurus' | 'nationalTeam' | 'rightSide' | 'fundEst' | 'fundEstDetail'>('stock')
   const [arbFunds, setArbFunds] = useState<FundArbitrage[]>([])
   const [arbLoading, setArbLoading] = useState(false)
   const [arbFetchTime, setArbFetchTime] = useState('')
@@ -804,6 +805,8 @@ function App() {
             onClick={() => setMainView('rightSide')}>右侧交易</div>
           <div className={`list-tab ${mainView === 'fundEst' ? 'active' : ''}`}
             onClick={() => setMainView('fundEst')}>基金EST</div>
+          <div className={`list-tab ${mainView === 'fundEstDetail' ? 'active' : ''}`}
+            onClick={() => setMainView('fundEstDetail')}>QDII估算</div>
         </div>
 
         {mainView === 'stock' && (
@@ -1021,6 +1024,8 @@ function App() {
           <RightSideTrading />
         ) : mainView === 'fundEst' ? (
           <FundEstPage />
+        ) : mainView === 'fundEstDetail' ? (
+          <FundEstDetailPage />
         ) : mainView === 'option' ? (
           /* 期权收益计算器 */
           <div className="option-page">

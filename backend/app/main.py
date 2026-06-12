@@ -1,9 +1,12 @@
 from dotenv import load_dotenv
 load_dotenv()
 
+import logging
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from app.api import stocks, funds, cb, scraper, bonds, index_valuation, openbb, dividend, cigar_butt, cross_analysis, value_investing, reit, crypto, macro, futures, jc_screener, polymarket, export_champions, options, grid, xueqiu, national_team, right_side, fund_est
+from app.api import stocks, funds, cb, scraper, bonds, index_valuation, openbb, dividend, cigar_butt, cross_analysis, value_investing, reit, crypto, macro, futures, jc_screener, polymarket, export_champions, options, grid, xueqiu, national_team, right_side, fund_est, fund_est_detail, fund_holdings
+
+logger = logging.getLogger(__name__)
 
 app = FastAPI(title="新源的Invest工具", version="1.0.0")
 
@@ -39,6 +42,8 @@ app.include_router(xueqiu.router, prefix="/api/xueqiu", tags=["雪球大V"])
 app.include_router(national_team.router, prefix="/api/national-team", tags=["国家队监控"])
 app.include_router(right_side.router, prefix="/api/right-side", tags=["右侧交易"])
 app.include_router(fund_est.router, prefix="/api/fund-est", tags=["基金EST净值"])
+app.include_router(fund_est_detail.router, prefix="/api/fund-est-detail", tags=["基金EST净值详情"])
+app.include_router(fund_holdings.router, prefix="/api/fund-holdings", tags=["基金持仓"])
 
 
 @app.on_event("startup")
@@ -46,6 +51,29 @@ async def restore_jisilu_login():
     """启动时自动恢复集思录登录态"""
     from app.services.fund_service import FundService
     FundService.restore_login()
+
+
+@app.on_event("startup")
+async def warm_cache():
+    """启动时异步预热缓存（宏观数据）"""
+    import threading
+    from app.services.akshare_service import AKShareService
+
+    def _warm():
+        try:
+            svc = AKShareService()
+            logger.info("开始预热缓存...")
+            svc.get_gdp_data()
+            svc.get_cpi_data()
+            svc.get_pmi_data()
+            svc.get_lpr_data()
+            svc.get_money_supply()
+            logger.info("缓存预热完成")
+        except Exception as e:
+            logger.warning(f"缓存预热失败: {e}")
+
+    # 在后台线程中运行，不阻塞启动
+    threading.Thread(target=_warm, daemon=True).start()
 
 
 @app.get("/")

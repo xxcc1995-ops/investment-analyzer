@@ -4,11 +4,26 @@ import requests
 import logging
 from datetime import datetime, timedelta
 from typing import Optional
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 
 from app.core.cache import get_cache as _get_cached, set_cache as _set_cache
 from app.core.utils import safe_float as _safe_float, safe_float_or_zero
 
 logger = logging.getLogger(__name__)
+
+# 共享HTTP会话（带连接池和重试）
+_session = requests.Session()
+_adapter = HTTPAdapter(
+    pool_connections=10,
+    pool_maxsize=20,
+    max_retries=Retry(total=3, backoff_factor=1, status_forcelist=[429, 500, 502, 503, 504]),
+)
+_session.mount("https://", _adapter)
+_session.mount("http://", _adapter)
+_session.headers.update({
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+})
 
 # 国家队关键词 - 中央汇金、证金公司、社保基金、养老保险基金、梧桐树投资
 NATIONAL_TEAM_KEYWORDS = [
@@ -114,7 +129,7 @@ def get_shareholdings(end_date: str = None) -> dict:
         }
 
         try:
-            r = requests.get(url, params=params, headers=headers, timeout=15)
+            r = _session.get(url, params=params, headers=headers, timeout=15)
             data = r.json()
 
             if not data.get('success'):
@@ -230,7 +245,7 @@ def _get_etf_hist_latest(code: str) -> dict:
         url = 'https://money.finance.sina.com.cn/quotes_service/api/json_v2.php/CN_MarketData.getKLineData'
         params = {'symbol': f'{prefix}{code}', 'scale': '240', 'ma': 'no', 'datalen': 5}
         headers = {'User-Agent': 'Mozilla/5.0', 'Referer': 'https://finance.sina.com.cn'}
-        r = requests.get(url, params=params, headers=headers, timeout=10)
+        r = _session.get(url, params=params, headers=headers, timeout=10)
         data = r.json()
         if not data:
             return {}
@@ -362,7 +377,7 @@ def get_volume_alerts(threshold: float = 2.0) -> dict:
                 symbol = f'sz{code}'
 
             url = f'https://hq.sinajs.cn/list={symbol}'
-            r = requests.get(url, headers=headers, timeout=5)
+            r = _session.get(url, headers=headers, timeout=5)
             r.encoding = 'gbk'
 
             data = r.text.split('"')[1].split(',')

@@ -30,9 +30,9 @@ class SinaSource(BaseQuoteSource):
         return "新浪"
 
     def connect(self) -> bool:
-        """创建HTTP会话"""
+        """创建HTTP会话（带连接池和重试）"""
         try:
-            self._session = requests.Session()
+            self._session = self._create_session(pool_connections=5, pool_maxsize=10, retries=2)
             self._session.headers.update(self.HEADERS)
             # 测试连接
             resp = self._session.get(

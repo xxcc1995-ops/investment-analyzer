@@ -51,10 +51,11 @@ class ArbitrageOpportunity:
     # 平台A（如Opinion）买YES
     platform_a: str
     platform_a_yes_price: float
-    platform_a_fee_rate: float = 0
     # 平台B（如Polymarket）买NO
     platform_b: str
     platform_b_no_price: float
+    # 手续费率
+    platform_a_fee_rate: float = 0
     platform_b_fee_rate: float = 0
     # 或者反过来
     alt_platform_a_no_price: float = 0

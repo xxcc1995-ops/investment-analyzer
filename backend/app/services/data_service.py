@@ -6,12 +6,27 @@ import logging
 from typing import Optional
 from datetime import datetime
 from urllib.parse import quote
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 
-from app.core.cache import cached
+from app.core.cache import cached, TTL_STATIC, TTL_WEEKLY, get_realtime_ttl
 from app.core.utils import safe_float as _safe_float
 from app.services.multi_source_quote import multi_source_service
 
 logger = logging.getLogger(__name__)
+
+# 共享HTTP会话（带连接池和重试）
+_session = requests.Session()
+_adapter = HTTPAdapter(
+    pool_connections=10,
+    pool_maxsize=20,
+    max_retries=Retry(total=3, backoff_factor=1, status_forcelist=[429, 500, 502, 503, 504]),
+)
+_session.mount("https://", _adapter)
+_session.mount("http://", _adapter)
+_session.headers.update({
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+})
 
 
 class DataService:
@@ -115,7 +130,7 @@ class DataService:
             # 新浪实时行情
             url = f"https://hq.sinajs.cn/list={symbol}"
             headers = {"Referer": "https://finance.sina.com.cn"}
-            r = requests.get(url, headers=headers, timeout=10)
+            r = _session.get(url, headers=headers, timeout=10)
             r.encoding = 'gbk'
 
             # 解析数据
@@ -188,7 +203,7 @@ class DataService:
                 "source": "HSF10",
                 "client": "PC"
             }
-            r = requests.get(url, params=params, timeout=15)
+            r = _session.get(url, params=params, timeout=15)
             data = r.json()
 
             if data.get("result") and data["result"].get("data"):
@@ -271,7 +286,7 @@ class DataService:
                 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
                 'Referer': 'https://stockapp.finance.qq.com/'
             }
-            r = requests.get(url, headers=headers, timeout=10)
+            r = _session.get(url, headers=headers, timeout=10)
             r.encoding = 'gbk'
 
             text = r.text
@@ -475,7 +490,7 @@ class DataService:
                 'User-Agent': 'Mozilla/5.0',
                 'Referer': 'https://stockapp.finance.qq.com/'
             }
-            r = requests.get(url, headers=headers, timeout=5)
+            r = _session.get(url, headers=headers, timeout=5)
             r.encoding = 'gbk'
             # 解析汇率数据
             data = r.text.split('"')[1].split('~')
@@ -622,7 +637,7 @@ class DataService:
                 "client": "PC"
             }
 
-            r = requests.get(url, params=params, timeout=15)
+            r = _session.get(url, params=params, timeout=15)
             data = r.json()
 
             if not data.get("result") or not data["result"].get("data"):
@@ -675,7 +690,7 @@ class DataService:
             return {"code": stock_code, "error": "获取财务数据失败，请稍后重试", "reports": []}
 
     @staticmethod
-    @cached(ttl_seconds=300, key_prefix="search_stock")
+    @cached(ttl_seconds=TTL_WEEKLY, key_prefix="search_stock")
     def search_stock(keyword: str) -> list:
         """搜索股票（A股 + 港股）- 使用腾讯财经搜索API"""
         try:
@@ -684,7 +699,7 @@ class DataService:
                 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
                 'Referer': 'https://stockapp.finance.qq.com/'
             }
-            r = requests.get(url, headers=headers, timeout=10)
+            r = _session.get(url, headers=headers, timeout=10)
             r.encoding = 'utf-8'
 
             text = r.text
@@ -843,7 +858,7 @@ class DataService:
             return None
 
     @staticmethod
-    @cached(ttl_seconds=300, key_prefix="dividend_history")
+    @cached(ttl_seconds=TTL_STATIC, key_prefix="dividend_history", persist=True)
     def get_dividend_history(stock_code: str) -> dict:
         """获取历史分红明细（用于攒股收息计算）"""
         if DataService._is_hk_code(stock_code):
@@ -866,7 +881,7 @@ class DataService:
                 "client": "PC"
             }
 
-            r = requests.get(url, params=params, timeout=15)
+            r = _session.get(url, params=params, timeout=15)
             data = r.json()
 
             if not data.get("result") or not data["result"].get("data"):
@@ -980,7 +995,7 @@ class DataService:
                 "client": "PC"
             }
 
-            r = requests.get(url, params=params, timeout=15)
+            r = _session.get(url, params=params, timeout=15)
             data = r.json()
 
             if not data.get("result") or not data["result"].get("data"):
@@ -1046,7 +1061,7 @@ class DataService:
             return 0, 0, 0
 
     @staticmethod
-    @cached(ttl_seconds=300, key_prefix="valuation_history")
+    @cached(ttl_seconds=TTL_STATIC, key_prefix="valuation_history", persist=True)
     def get_valuation_history(stock_code: str) -> dict:
         """获取个股历史PE(TTM)/PB/股息率估值数据和统计指标"""
         if DataService._is_hk_code(stock_code):
@@ -1176,7 +1191,7 @@ class DataService:
             url = 'https://money.finance.sina.com.cn/quotes_service/api/json_v2.php/CN_MarketData.getKLineData'
             params = {'symbol': symbol, 'scale': '240', 'ma': 'no', 'datalen': '1500'}
             headers = {'User-Agent': 'Mozilla/5.0', 'Referer': 'https://finance.sina.com.cn'}
-            r = requests.get(url, params=params, headers=headers, timeout=15)
+            r = _session.get(url, params=params, headers=headers, timeout=15)
             data = r.json()
 
             result = []
@@ -1366,7 +1381,7 @@ class DataService:
                 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
                 'Referer': 'https://stockapp.finance.qq.com/'
             }
-            r = requests.get(url, params=params, headers=headers, timeout=15)
+            r = _session.get(url, params=params, headers=headers, timeout=15)
             data = r.json()
 
             key = f'hk{stock_code}'
