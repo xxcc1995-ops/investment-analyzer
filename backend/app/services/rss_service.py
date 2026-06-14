@@ -105,20 +105,26 @@ def _extract_stock_code(title: str) -> str:
 # ==================== 价值投资模块 ====================
 
 def get_value_investing_news() -> Dict[str, Any]:
-    """获取价值投资信息：财经快讯 + 研报 + 热门板块"""
-    # 并行获取多个 RSS 源
-    with ThreadPoolExecutor(max_workers=3) as executor:
+    """获取价值投资信息：财经快讯 + 研报 + 热门板块（多源容错）"""
+    # 并行获取多个数据源（RSS + 直接API fallback）
+    with ThreadPoolExecutor(max_workers=5) as executor:
+        # RSS 源
         f_cls = executor.submit(_fetch_rsshub_feed, "/cls/telegraph")
         f_wscn = executor.submit(_fetch_rsshub_feed, "/wallstreetcn/news/global")
         f_report = executor.submit(_fetch_rsshub_feed, "/eastmoney/report/strategy")
+        # 直接 API fallback
+        f_em_news = executor.submit(_fetch_eastmoney_news)
+        f_em_reports = executor.submit(_fetch_eastmoney_reports)
         try:
             cls_items = f_cls.result(timeout=15)
             wscn_items = f_wscn.result(timeout=15)
             report_items = f_report.result(timeout=15)
+            em_news = f_em_news.result(timeout=15)
+            em_reports = f_em_reports.result(timeout=15)
         except Exception:
-            cls_items, wscn_items, report_items = [], [], []
+            cls_items, wscn_items, report_items, em_news, em_reports = [], [], [], [], []
 
-    # 合并快讯 → announcements
+    # 合并快讯 → announcements（RSS优先，直接API补充）
     announcements = []
     for item in cls_items[:10]:
         announcements.append({
@@ -134,8 +140,17 @@ def get_value_investing_news() -> Dict[str, Any]:
             "date": item["published"] or datetime.now().strftime("%Y-%m-%d"),
             "type": "快讯",
         })
+    # 如果RSS源都失败，用东方财富直接API补充
+    if not announcements and em_news:
+        for item in em_news[:15]:
+            announcements.append({
+                "title": item["title"],
+                "code": _extract_stock_code(item["title"]),
+                "date": item.get("date", datetime.now().strftime("%Y-%m-%d")),
+                "type": item.get("type", "快讯"),
+            })
 
-    # 研报（东方财富策略研报）
+    # 研报（RSS优先，直接API补充）
     analyst_reports = []
     for item in report_items[:10]:
         analyst_reports.append({
@@ -144,6 +159,14 @@ def get_value_investing_news() -> Dict[str, Any]:
             "score": 0,
             "recommend_count": 0,
         })
+    if not analyst_reports and em_reports:
+        for item in em_reports[:10]:
+            analyst_reports.append({
+                "name": item["title"],
+                "institution": item.get("institution", "东方财富"),
+                "score": 0,
+                "recommend_count": 0,
+            })
 
     # 热门板块（从东方财富获取结构化数据）
     concept_boards = _fetch_eastmoney_hot_sectors()
@@ -154,6 +177,67 @@ def get_value_investing_news() -> Dict[str, Any]:
         "concept_boards": concept_boards[:10],
         "update_time": datetime.now().isoformat(),
     }
+
+
+def _fetch_eastmoney_news() -> List[Dict[str, Any]]:
+    """从东方财富直接API获取财经快讯（RSSHub fallback）"""
+    try:
+        url = "https://np-listapi.eastmoney.com/comm/web/getNewsByColumns"
+        params = {
+            "columns": "102",  # 财经快讯
+            "pageSize": "15",
+            "pageIndex": "0",
+            "needContent": "0",
+        }
+        r = _session.get(url, params=params, timeout=10)
+        data = r.json()
+        items = []
+        for item in (data.get("data") or {}).get("list") or []:
+            items.append({
+                "title": item.get("title", ""),
+                "date": item.get("showTime", datetime.now().strftime("%Y-%m-%d")),
+                "type": "快讯",
+            })
+        return items
+    except Exception as e:
+        logger.debug(f"东方财富快讯API失败: {e}")
+        return []
+
+
+def _fetch_eastmoney_reports() -> List[Dict[str, Any]]:
+    """从东方财富直接API获取策略研报（RSSHub fallback）"""
+    try:
+        url = "https://reportapi.eastmoney.com/report/list"
+        params = {
+            "industryCode": "*",
+            "pageSize": "10",
+            "industry": "策略",
+            "rating": "",
+            "ratingChange": "",
+            "beginTime": "",
+            "endTime": "",
+            "pageNo": "1",
+            "fields": "",
+            "qType": "0",
+            "orgCode": "",
+            "rcode": "",
+            "p": "1",
+            "pageNum": "1",
+            "pageNumber": "1",
+        }
+        r = _session.get(url, params=params, timeout=10)
+        data = r.json()
+        items = []
+        for item in data.get("data", [])[:10]:
+            items.append({
+                "title": item.get("title", ""),
+                "institution": item.get("orgSName", "东方财富"),
+                "date": item.get("publishDate", ""),
+            })
+        return items
+    except Exception as e:
+        logger.debug(f"东方财富研报API失败: {e}")
+        return []
 
 
 def _fetch_eastmoney_hot_sectors() -> List[Dict[str, Any]]:

@@ -1,4 +1,4 @@
-import { useState, useMemo, type ReactNode } from 'react'
+import { useState, type ReactNode } from 'react'
 import { Layout, ConfigProvider, theme } from 'antd'
 import AppSidebar from './AppSidebar'
 import TopBar from './TopBar'
@@ -19,9 +19,6 @@ interface BondYield {
 }
 
 interface AppShellProps {
-  // 导航
-  activeKey: string
-  onNavigate: (key: string) => void
   // 搜索
   searchKeyword: string
   onSearchChange: (value: string) => void
@@ -115,8 +112,6 @@ const layoutInnerStyle = { height: 'calc(100vh - 56px)' } as const
 const contentStyle = { overflow: 'auto', padding: 20, background: '#0d1117' } as const
 
 export default function AppShell({
-  activeKey,
-  onNavigate,
   searchKeyword,
   onSearchChange,
   searchResults,
@@ -150,8 +145,6 @@ export default function AppShell({
         />
         <Layout style={layoutInnerStyle}>
           <AppSidebar
-            activeKey={activeKey}
-            onNavigate={onNavigate}
             collapsed={collapsed}
             onCollapse={setCollapsed}
           />

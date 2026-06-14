@@ -941,3 +941,133 @@ def get_trade_journal(
         },
         "update_time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
     }
+
+
+# ============================================================
+# 专家级：自动告警系统
+# ============================================================
+
+def check_trading_alerts() -> dict:
+    """
+    自动告警系统 — 检查所有持仓的告警条件
+
+    告警类型：
+    1. 止损预警 — 价格接近止损位
+    2. 做T仓超限 — 做T仓占比过高
+    3. 连续亏损 — 连续亏损达到阈值
+    4. 手续费过高 — 累计手续费占比过大
+    5. 今日交易频次 — 接近或达到每日上限
+    6. 负成本达成 — 做T回收超过投入
+    """
+    positions = _load_positions()
+    trades = _load_trades()
+    today = datetime.now().strftime("%Y-%m-%d")
+
+    alerts = []
+
+    for key, pos in positions.items():
+        code = pos["code"]
+        name = pos.get("name", code)
+        market = pos["market"]
+        total_shares = pos["total_shares"]
+        t_shares = pos["t_shares"]
+        avg_cost = pos["avg_cost"]
+        t_trades = pos.get("t_trades", [])
+
+        # 1. 做T仓超限告警
+        t_ratio = t_shares / total_shares * 100 if total_shares > 0 else 0
+        if t_ratio > 40:
+            alerts.append({
+                "type": "t_ratio_high",
+                "severity": "high",
+                "code": code,
+                "name": name,
+                "message": f"做T仓占比{t_ratio:.1f}%超过40%安全线，风险过高",
+                "action": "建议卖出部分做T仓，降低风险敞口",
+            })
+        elif t_ratio > 30:
+            alerts.append({
+                "type": "t_ratio_warning",
+                "severity": "medium",
+                "code": code,
+                "name": name,
+                "message": f"做T仓占比{t_ratio:.1f}%接近安全线",
+                "action": "注意控制做T仓规模",
+            })
+
+        # 2. 今日交易频次告警
+        today_trades = [t for t in t_trades if t.get("time", "").startswith(today)]
+        if len(today_trades) >= MAX_DAILY_TRADES:
+            alerts.append({
+                "type": "daily_limit",
+                "severity": "high",
+                "code": code,
+                "name": name,
+                "message": f"今日已交易{len(today_trades)}次，达到每日上限{MAX_DAILY_TRADES}次",
+                "action": "停止交易，等待下一个交易日",
+            })
+        elif len(today_trades) >= MAX_DAILY_TRADES - 1:
+            alerts.append({
+                "type": "daily_warning",
+                "severity": "medium",
+                "code": code,
+                "name": name,
+                "message": f"今日已交易{len(today_trades)}次，接近每日上限",
+                "action": "谨慎操作，避免频繁交易",
+            })
+
+        # 3. 连续亏损告警
+        sell_trades = [t for t in t_trades if t["action"] == "sell_t"]
+        if len(sell_trades) >= 3:
+            recent_sells = sorted(sell_trades, key=lambda t: t["time"])[-3:]
+            consecutive_losses = all((t.get("pnl") or 0) < 0 for t in recent_sells)
+            if consecutive_losses:
+                alerts.append({
+                    "type": "consecutive_losses",
+                    "severity": "high",
+                    "code": code,
+                    "name": name,
+                    "message": "连续3笔做T亏损，策略可能失效",
+                    "action": "暂停做T，重新评估市场环境和策略",
+                })
+
+        # 4. 手续费占比告警
+        total_fee = sum(t.get("fee", 0) for t in t_trades)
+        total_amount = sum(t.get("amount", 0) for t in t_trades)
+        if total_amount > 0:
+            fee_ratio = total_fee / total_amount * 100
+            if fee_ratio > 1.0:
+                alerts.append({
+                    "type": "fee_high",
+                    "severity": "medium",
+                    "code": code,
+                    "name": name,
+                    "message": f"累计手续费占比{fee_ratio:.2f}%，侵蚀利润",
+                    "action": "考虑降低交易频率或加大单笔交易量",
+                })
+
+        # 5. 负成本达成祝贺
+        cost_analysis = calc_cost_analysis(pos)
+        if cost_analysis.get("is_negative"):
+            alerts.append({
+                "type": "negative_cost",
+                "severity": "info",
+                "code": code,
+                "name": name,
+                "message": "恭喜！已实现负成本持股",
+                "action": "继续持有，做T收益为纯利润",
+            })
+
+    # 按严重程度排序
+    severity_order = {"high": 0, "medium": 1, "info": 2}
+    alerts.sort(key=lambda a: severity_order.get(a["severity"], 3))
+
+    return {
+        "alerts": alerts,
+        "total": len(alerts),
+        "high_count": len([a for a in alerts if a["severity"] == "high"]),
+        "medium_count": len([a for a in alerts if a["severity"] == "medium"]),
+        "info_count": len([a for a in alerts if a["severity"] == "info"]),
+        "has_critical": any(a["severity"] == "high" for a in alerts),
+        "update_time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+    }

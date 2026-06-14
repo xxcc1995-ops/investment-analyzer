@@ -119,7 +119,7 @@ interface PyramidOrder {
 // ============================================================
 
 export default function TTrading() {
-  const [activeTab, setActiveTab] = useState<'signals' | 'position' | 'cost' | 'backtest' | 'risk' | 'analytics' | 'journal' | 'philosophy'>('signals')
+  const [activeTab, setActiveTab] = useState<'signals' | 'position' | 'cost' | 'backtest' | 'risk' | 'analytics' | 'journal' | 'compare' | 'calculator' | 'philosophy'>('signals')
 
   // Signals state
   const [signals, setSignals] = useState<TSignalItem[]>([])
@@ -154,6 +154,16 @@ export default function TTrading() {
   const [journal, setJournal] = useState<any>(null)
   const [journalLoading, setJournalLoading] = useState(false)
   const [journalFilter, setJournalFilter] = useState<'all' | 'win' | 'lose'>('all')
+
+  // Strategy comparison state
+  const [compareData, setCompareData] = useState<any>(null)
+  const [compareLoading, setCompareLoading] = useState(false)
+  const [compareForm, setCompareForm] = useState({ code: '', market: 'A' })
+
+  // Risk calculator state
+  const [calcData, setCalcData] = useState<any>(null)
+  const [calcLoading, setCalcLoading] = useState(false)
+  const [calcForm, setCalcForm] = useState({ code: '', market: 'A', account_balance: '1000000', risk_pct: '2' })
 
   // 交易拦截器
   const { intercept, checkpointOpen, checkpointMeta, handlePass, handleCancel } = useTradingInterceptor()
@@ -243,6 +253,7 @@ export default function TTrading() {
     if (activeTab === 'risk') loadRisk()
     if (activeTab === 'analytics') loadAnalytics()
     if (activeTab === 'journal') loadJournal()
+    if (activeTab === 'compare') { /* user triggers manually */ }
   }, [activeTab, loadSignals, loadPositions, loadPhilosophy, loadRisk])
 
   const loadAnalytics = useCallback(async () => {
@@ -270,6 +281,40 @@ export default function TTrading() {
       setJournalLoading(false)
     }
   }, [journalFilter])
+
+  const loadCompare = useCallback(async () => {
+    if (!compareForm.code.trim()) { alert('请输入股票代码'); return }
+    setCompareLoading(true)
+    try {
+      const res = await axios.get(`${API_BASE}/compare-strategies/${compareForm.code}`, {
+        params: { market: compareForm.market },
+      })
+      setCompareData(res.data)
+    } catch (e) {
+      console.error('策略对比失败:', e)
+    } finally {
+      setCompareLoading(false)
+    }
+  }, [compareForm])
+
+  const loadCalc = useCallback(async () => {
+    if (!calcForm.code.trim()) { alert('请输入股票代码'); return }
+    setCalcLoading(true)
+    try {
+      const res = await axios.get(`${API_BASE}/risk-calculator/${calcForm.code}`, {
+        params: {
+          market: calcForm.market,
+          account_balance: parseFloat(calcForm.account_balance),
+          risk_per_trade_pct: parseFloat(calcForm.risk_pct),
+        },
+      })
+      setCalcData(res.data)
+    } catch (e) {
+      console.error('风险计算失败:', e)
+    } finally {
+      setCalcLoading(false)
+    }
+  }, [calcForm])
 
   // ============================================================
   // Handlers
@@ -443,6 +488,8 @@ export default function TTrading() {
           { key: 'risk', label: '风险监控' },
           { key: 'analytics', label: '📊 盈亏分析' },
           { key: 'journal', label: '📋 交易日志' },
+          { key: 'compare', label: '⚖️ 策略对比' },
+          { key: 'calculator', label: '🧮 风险计算器' },
           { key: 'philosophy', label: '做T方法论' },
         ]}
         style={{ marginBottom: 16 }}
@@ -664,6 +711,35 @@ export default function TTrading() {
                                 <div key={i} style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 2 }}>{r}</div>
                               ))}
                             </div>
+
+                            {/* Risk Management (if available) */}
+                            {sig.indicators.risk_management && (
+                              <div style={{ marginTop: 12, padding: 12, background: 'var(--bg-primary)', borderRadius: 6, border: '1px solid var(--border-primary)' }}>
+                                <div style={{ fontSize: 12, fontWeight: 600, color: '#d29922', marginBottom: 8 }}>🎯 风险管理建议</div>
+                                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 8 }}>
+                                  <div>
+                                    <div style={{ fontSize: 11, color: 'var(--text-secondary)' }}>止损价</div>
+                                    <div style={{ fontSize: 14, fontWeight: 700, color: '#f85149' }}>¥{sig.indicators.risk_management.stop_loss?.price}</div>
+                                    <div style={{ fontSize: 10, color: 'var(--text-secondary)' }}>-{sig.indicators.risk_management.stop_loss?.pct}%</div>
+                                  </div>
+                                  <div>
+                                    <div style={{ fontSize: 11, color: 'var(--text-secondary)' }}>建议仓位</div>
+                                    <div style={{ fontSize: 14, fontWeight: 700, color: '#58a6ff' }}>{sig.indicators.risk_management.position?.suggested_shares}股</div>
+                                    <div style={{ fontSize: 10, color: 'var(--text-secondary)' }}>¥{sig.indicators.risk_management.position?.suggested_value?.toLocaleString()}</div>
+                                  </div>
+                                  <div>
+                                    <div style={{ fontSize: 11, color: 'var(--text-secondary)' }}>2R目标</div>
+                                    <div style={{ fontSize: 14, fontWeight: 700, color: '#3fb950' }}>¥{sig.indicators.risk_management.targets?.target_2r}</div>
+                                    <div style={{ fontSize: 10, color: 'var(--text-secondary)' }}>+{sig.indicators.risk_management.targets?.reward_2r_pct}%</div>
+                                  </div>
+                                  <div>
+                                    <div style={{ fontSize: 11, color: 'var(--text-secondary)' }}>凯利仓位</div>
+                                    <div style={{ fontSize: 14, fontWeight: 700, color: '#d29922' }}>{sig.indicators.risk_management.kelly?.optimal_pct}%</div>
+                                    <div style={{ fontSize: 10, color: 'var(--text-secondary)' }}>胜率{sig.indicators.risk_management.kelly?.win_rate}%</div>
+                                  </div>
+                                </div>
+                              </div>
+                            )}
                           </td>
                         </tr>
                       )}
@@ -1384,7 +1460,202 @@ export default function TTrading() {
         </div>
       )}
 
-      {/* ==================== Tab 9: 做T方法论 ==================== */}
+      {/* ==================== Tab 9: 策略对比 ==================== */}
+      {activeTab === 'compare' && (
+        <div>
+          <div style={{ background: 'var(--bg-secondary)', borderRadius: 8, padding: 16, marginBottom: 16, border: '1px solid var(--border-primary)' }}>
+            <h4 style={{ margin: '0 0 12px', color: 'var(--text-primary)' }}>⚖️ 做T策略对比</h4>
+            <p style={{ margin: '0 0 12px', fontSize: 13, color: 'var(--text-secondary)' }}>
+              对比保守/标准/激进三种做T风格，找到最适合你的策略。
+            </p>
+            <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'center' }}>
+              <input placeholder="股票代码" value={compareForm.code} onChange={e => setCompareForm({...compareForm, code: e.target.value})}
+                style={{ padding: '6px 10px', borderRadius: 6, background: 'var(--bg-primary)', color: 'var(--text-primary)', border: '1px solid var(--border-primary)', width: 120 }} />
+              <select value={compareForm.market} onChange={e => setCompareForm({...compareForm, market: e.target.value})}
+                style={{ padding: '6px 10px', borderRadius: 6, background: 'var(--bg-primary)', color: 'var(--text-primary)', border: '1px solid var(--border-primary)' }}>
+                <option value="A">A股</option>
+                <option value="HK">港股</option>
+                <option value="US">美股</option>
+              </select>
+              <button onClick={loadCompare} disabled={compareLoading}
+                style={{ padding: '6px 16px', borderRadius: 6, background: '#58a6ff', color: '#fff', border: 'none', cursor: 'pointer', fontWeight: 600 }}>
+                {compareLoading ? '分析中...' : '开始对比'}
+              </button>
+            </div>
+          </div>
+
+          {compareLoading && <LoadingSpinner text="运行三种策略对比..." />}
+
+          {compareData && compareData.strategies && (
+            <div>
+              {/* Recommendation */}
+              <div style={{
+                background: 'rgba(88,166,255,0.08)', borderRadius: 8, padding: 16, marginBottom: 16,
+                borderLeft: '3px solid #58a6ff',
+              }}>
+                <div style={{ fontSize: 14, fontWeight: 600, color: '#58a6ff', marginBottom: 4 }}>💡 推荐</div>
+                <div style={{ fontSize: 13, color: 'var(--text-secondary)' }}>{compareData.recommendation}</div>
+              </div>
+
+              {/* Strategy Cards */}
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12, marginBottom: 16 }}>
+                {compareData.strategies.map((s: any, i: number) => {
+                  const colors = ['#d29922', '#58a6ff', '#3fb950']
+                  const icons = ['🛡️', '⚖️', '⚡']
+                  return (
+                    <div key={i} style={{
+                      background: 'var(--bg-secondary)', borderRadius: 8, padding: 16,
+                      border: `2px solid ${colors[i]}30`,
+                    }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
+                        <span style={{ fontSize: 24 }}>{icons[i]}</span>
+                        <div>
+                          <div style={{ fontSize: 15, fontWeight: 700, color: colors[i] }}>{s.name}</div>
+                          <div style={{ fontSize: 11, color: 'var(--text-secondary)' }}>{s.desc}</div>
+                        </div>
+                      </div>
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+                        <div>
+                          <div style={{ fontSize: 11, color: 'var(--text-secondary)' }}>交易次数</div>
+                          <div style={{ fontSize: 16, fontWeight: 700 }}>{s.total_trades}</div>
+                        </div>
+                        <div>
+                          <div style={{ fontSize: 11, color: 'var(--text-secondary)' }}>胜率</div>
+                          <div style={{ fontSize: 16, fontWeight: 700, color: s.win_rate > 50 ? '#3fb950' : '#f85149' }}>{s.win_rate}%</div>
+                        </div>
+                        <div>
+                          <div style={{ fontSize: 11, color: 'var(--text-secondary)' }}>总盈亏</div>
+                          <div style={{ fontSize: 16, fontWeight: 700, color: s.total_pnl >= 0 ? '#3fb950' : '#f85149' }}>¥{s.total_pnl.toLocaleString()}</div>
+                        </div>
+                        <div>
+                          <div style={{ fontSize: 11, color: 'var(--text-secondary)' }}>盈亏比</div>
+                          <div style={{ fontSize: 16, fontWeight: 700 }}>{s.profit_factor}</div>
+                        </div>
+                        <div>
+                          <div style={{ fontSize: 11, color: 'var(--text-secondary)' }}>最大回撤</div>
+                          <div style={{ fontSize: 16, fontWeight: 700, color: '#f85149' }}>¥{s.max_drawdown.toLocaleString()}</div>
+                        </div>
+                        <div>
+                          <div style={{ fontSize: 11, color: 'var(--text-secondary)' }}>月均交易</div>
+                          <div style={{ fontSize: 16, fontWeight: 700 }}>{s.avg_trades_per_month}笔</div>
+                        </div>
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+
+              <div style={{ fontSize: 12, color: 'var(--text-secondary)', textAlign: 'center' }}>
+                回测区间: {compareData.backtest_period}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ==================== Tab 10: 风险计算器 ==================== */}
+      {activeTab === 'calculator' && (
+        <div>
+          <div style={{ background: 'var(--bg-secondary)', borderRadius: 8, padding: 16, marginBottom: 16, border: '1px solid var(--border-primary)' }}>
+            <h4 style={{ margin: '0 0 12px', color: 'var(--text-primary)' }}>🧮 风险计算器</h4>
+            <p style={{ margin: '0 0 12px', fontSize: 13, color: 'var(--text-secondary)' }}>
+              基于凯利公式和ATR自动计算最优仓位，控制单笔风险。
+            </p>
+            <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'center' }}>
+              <input placeholder="股票代码" value={calcForm.code} onChange={e => setCalcForm({...calcForm, code: e.target.value})}
+                style={{ padding: '6px 10px', borderRadius: 6, background: 'var(--bg-primary)', color: 'var(--text-primary)', border: '1px solid var(--border-primary)', width: 100 }} />
+              <select value={calcForm.market} onChange={e => setCalcForm({...calcForm, market: e.target.value})}
+                style={{ padding: '6px 10px', borderRadius: 6, background: 'var(--bg-primary)', color: 'var(--text-primary)', border: '1px solid var(--border-primary)' }}>
+                <option value="A">A股</option>
+                <option value="HK">港股</option>
+                <option value="US">美股</option>
+              </select>
+              <input placeholder="账户资金" type="number" value={calcForm.account_balance} onChange={e => setCalcForm({...calcForm, account_balance: e.target.value})}
+                style={{ padding: '6px 10px', borderRadius: 6, background: 'var(--bg-primary)', color: 'var(--text-primary)', border: '1px solid var(--border-primary)', width: 120 }} />
+              <input placeholder="风险比例%" type="number" step="0.5" value={calcForm.risk_pct} onChange={e => setCalcForm({...calcForm, risk_pct: e.target.value})}
+                style={{ padding: '6px 10px', borderRadius: 6, background: 'var(--bg-primary)', color: 'var(--text-primary)', border: '1px solid var(--border-primary)', width: 80 }} />
+              <button onClick={loadCalc} disabled={calcLoading}
+                style={{ padding: '6px 16px', borderRadius: 6, background: '#58a6ff', color: '#fff', border: 'none', cursor: 'pointer', fontWeight: 600 }}>
+                {calcLoading ? '计算中...' : '计算仓位'}
+              </button>
+            </div>
+          </div>
+
+          {calcLoading && <LoadingSpinner text="计算最优仓位..." />}
+
+          {calcData && !calcData.error && (
+            <div>
+              {/* 风险等级 */}
+              <div style={{
+                background: 'var(--bg-secondary)', borderRadius: 8, padding: 16, marginBottom: 16,
+                border: `2px solid ${calcData.risk_color === 'green' ? '#3fb950' : calcData.risk_color === 'yellow' ? '#d29922' : '#f85149'}`,
+                textAlign: 'center',
+              }}>
+                <div style={{ fontSize: 13, color: 'var(--text-secondary)', marginBottom: 4 }}>风险等级</div>
+                <div style={{
+                  fontSize: 28, fontWeight: 800,
+                  color: calcData.risk_color === 'green' ? '#3fb950' : calcData.risk_color === 'yellow' ? '#d29922' : '#f85149',
+                }}>
+                  {calcData.risk_level}
+                </div>
+                <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginTop: 4 }}>
+                  止损距离: {calcData.stop_loss.pct}% · ATR: {calcData.atr_pct}%
+                </div>
+              </div>
+
+              {/* 核心指标 */}
+              <StatCardGroup columns={4} style={{ marginBottom: 16 }}>
+                <StatCard label="建议仓位" value={`${calcData.position.suggested_shares}股`} color="#58a6ff" />
+                <StatCard label="仓位金额" value={`¥${calcData.position.suggested_value.toLocaleString()}`} color="#58a6ff" />
+                <StatCard label="仓位占比" value={`${calcData.position.suggested_pct}%`} />
+                <StatCard label="最大亏损" value={`¥${calcData.position.max_loss.toLocaleString()}`} color="#f85149" />
+              </StatCardGroup>
+
+              {/* 止损止盈 */}
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 12, marginBottom: 16 }}>
+                <div style={{ background: 'var(--bg-secondary)', borderRadius: 8, padding: 14, textAlign: 'center', border: '1px solid var(--border-primary)' }}>
+                  <div style={{ fontSize: 11, color: 'var(--text-secondary)' }}>止损价</div>
+                  <div style={{ fontSize: 18, fontWeight: 700, color: '#f85149' }}>¥{calcData.stop_loss.price}</div>
+                  <div style={{ fontSize: 11, color: 'var(--text-secondary)' }}>-{calcData.stop_loss.pct}%</div>
+                </div>
+                <div style={{ background: 'var(--bg-secondary)', borderRadius: 8, padding: 14, textAlign: 'center', border: '1px solid var(--border-primary)' }}>
+                  <div style={{ fontSize: 11, color: 'var(--text-secondary)' }}>1R目标</div>
+                  <div style={{ fontSize: 18, fontWeight: 700, color: '#3fb950' }}>¥{calcData.targets.target_1r}</div>
+                  <div style={{ fontSize: 11, color: 'var(--text-secondary)' }}>+{calcData.targets.reward_1r_pct}%</div>
+                </div>
+                <div style={{ background: 'var(--bg-secondary)', borderRadius: 8, padding: 14, textAlign: 'center', border: '1px solid var(--border-primary)' }}>
+                  <div style={{ fontSize: 11, color: 'var(--text-secondary)' }}>2R目标</div>
+                  <div style={{ fontSize: 18, fontWeight: 700, color: '#3fb950' }}>¥{calcData.targets.target_2r}</div>
+                  <div style={{ fontSize: 11, color: 'var(--text-secondary)' }}>+{calcData.targets.reward_2r_pct}%</div>
+                </div>
+                <div style={{ background: 'var(--bg-secondary)', borderRadius: 8, padding: 14, textAlign: 'center', border: '1px solid var(--border-primary)' }}>
+                  <div style={{ fontSize: 11, color: 'var(--text-secondary)' }}>3R目标</div>
+                  <div style={{ fontSize: 18, fontWeight: 700, color: '#3fb950' }}>¥{calcData.targets.target_3r}</div>
+                  <div style={{ fontSize: 11, color: 'var(--text-secondary)' }}>+{calcData.targets.reward_3r_pct}%</div>
+                </div>
+              </div>
+
+              {/* 凯利公式 */}
+              <div style={{ background: 'var(--bg-secondary)', borderRadius: 8, padding: 16, marginBottom: 16, border: '1px solid var(--border-primary)' }}>
+                <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 8 }}>📊 凯利公式分析</div>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12, marginBottom: 8 }}>
+                  <div><span style={{ color: 'var(--text-secondary)', fontSize: 12 }}>历史胜率: </span><span style={{ fontWeight: 700 }}>{calcData.kelly.win_rate}%</span></div>
+                  <div><span style={{ color: 'var(--text-secondary)', fontSize: 12 }}>盈亏比: </span><span style={{ fontWeight: 700 }}>{calcData.kelly.profit_ratio}</span></div>
+                  <div><span style={{ color: 'var(--text-secondary)', fontSize: 12 }}>最优仓位: </span><span style={{ fontWeight: 700, color: '#58a6ff' }}>{calcData.kelly.optimal_pct}%</span></div>
+                </div>
+                <div style={{ fontSize: 12, color: '#58a6ff' }}>💡 {calcData.kelly.recommendation}</div>
+              </div>
+
+              {/* 输入参数 */}
+              <div style={{ fontSize: 12, color: 'var(--text-secondary)', textAlign: 'center' }}>
+                账户资金: ¥{calcData.account_balance.toLocaleString()} · 当前价: ¥{calcData.current_price} · ATR: ¥{calcData.atr}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ==================== Tab 11: 做T方法论 ==================== */}
       {activeTab === 'philosophy' && philosophy && (
         <div>
           <div className="arb-notes" style={{ marginBottom: 16 }}>

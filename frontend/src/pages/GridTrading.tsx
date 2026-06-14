@@ -174,6 +174,22 @@ export default function GridTrading() {
   const [stressResult, setStressResult] = useState<any>(null)
   const [stressLoading, setStressLoading] = useState(false)
 
+  // Adaptive suggestion state
+  const [suggestion, setSuggestion] = useState<any>(null)
+  const [suggestionLoading, setSuggestionLoading] = useState(false)
+
+  // Comparison state
+  const [comparison, setComparison] = useState<any>(null)
+  const [comparisonLoading, setComparisonLoading] = useState(false)
+
+  // Health monitor state
+  const [health, setHealth] = useState<any>(null)
+  const [healthLoading, setHealthLoading] = useState(false)
+
+  // Health history state
+  const [healthHistory, setHealthHistory] = useState<any>(null)
+  const [healthHistoryLoading, setHealthHistoryLoading] = useState(false)
+
   // 货币符号辅助函数
   const getCurrency = (market?: string) => market === 'A' ? '¥' : 'HK$'
 
@@ -296,8 +312,62 @@ export default function GridTrading() {
     } catch (e: any) { alert(e?.response?.data?.detail || '添加失败') }
   }
 
+  const loadSuggestion = useCallback(async () => {
+    if (!stockCode) return
+    setSuggestionLoading(true)
+    try {
+      const res = await axios.get(`${API_BASE}/grid/suggest`, { params: { stock_code: stockCode, capital: parseFloat(capital) } })
+      setSuggestion(res.data)
+    } catch (e) { console.error(e) }
+    setSuggestionLoading(false)
+  }, [stockCode, capital])
+
+  const loadComparison = useCallback(async () => {
+    if (!stockCode) return
+    setComparisonLoading(true)
+    try {
+      const res = await axios.get(`${API_BASE}/grid/compare`, { params: { stock_code: stockCode, capital: parseFloat(capital), hist_days: parseInt(histDays) } })
+      setComparison(res.data)
+    } catch (e) { console.error(e) }
+    setComparisonLoading(false)
+  }, [stockCode, capital, histDays])
+
+  const loadHealth = useCallback(async () => {
+    if (!stockCode) return
+    setHealthLoading(true)
+    try {
+      const res = await axios.get(`${API_BASE}/grid/health`, { params: { stock_code: stockCode, capital: parseFloat(capital) } })
+      setHealth(res.data)
+    } catch (e) { console.error(e) }
+    setHealthLoading(false)
+  }, [stockCode, capital])
+
+  const loadHealthHistory = useCallback(async () => {
+    if (!stockCode) return
+    setHealthHistoryLoading(true)
+    try {
+      const res = await axios.get(`${API_BASE}/grid/health/history`, { params: { stock_code: stockCode } })
+      setHealthHistory(res.data)
+    } catch (e) { console.error(e) }
+    setHealthHistoryLoading(false)
+  }, [stockCode])
+
+  const saveHealthSnapshot = async () => {
+    if (!stockCode) return
+    try {
+      await axios.post(`${API_BASE}/grid/health/snapshot`, null, { params: { stock_code: stockCode } })
+      alert('已保存健康快照')
+      loadHealthHistory()
+    } catch (e) { console.error(e) }
+  }
+
   useEffect(() => {
-    if (activeTab === 'analysis' || activeTab === 'simulation' || activeTab === 'status') loadAnalysis()
+    if (activeTab === 'analysis' || activeTab === 'simulation' || activeTab === 'status') {
+      loadAnalysis()
+      if (!suggestion) loadSuggestion()
+      if (!comparison) loadComparison()
+      if (!health) loadHealth()
+    }
     if (activeTab === 'optimize') loadOptimize()
     if (activeTab === 'portfolio') loadPortfolio()
     if (activeTab === 'stress') loadStressTest()
@@ -602,6 +672,197 @@ export default function GridTrading() {
                   {analysis.breakeven.is_profitable ? '✓ 网格宽度足够覆盖交易成本' : '✗ 网格宽度过窄，利润被手续费侵蚀！请加大网格宽度'}
                 </p>
               </PageSection>
+
+              {/* 自适应建议 */}
+              {suggestion && !suggestion.error && (
+                <PageSection title="🎯 智能建议">
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 12 }}>
+                    <div style={{ background: 'var(--bg-secondary)', borderRadius: 8, padding: 14, border: '1px solid var(--border-primary)' }}>
+                      <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 4 }}>网格适合度</div>
+                      <div style={{ fontSize: 24, fontWeight: 700, color: suggestion.suitability_score >= 55 ? '#52c41a' : '#ff4d4f' }}>
+                        {suggestion.suitability_score}分
+                      </div>
+                      <div style={{ fontSize: 12, color: suggestion.suitability_score >= 55 ? '#52c41a' : '#ff4d4f' }}>
+                        {suggestion.suitability_label}
+                      </div>
+                    </div>
+                    <div style={{ background: 'var(--bg-secondary)', borderRadius: 8, padding: 14, border: '1px solid var(--border-primary)' }}>
+                      <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 4 }}>推荐参数</div>
+                      <div style={{ fontSize: 13 }}>
+                        宽度: <span style={{ fontWeight: 700 }}>{suggestion.recommended_params.grid_width_pct}%</span>
+                        · 格数: <span style={{ fontWeight: 700 }}>{suggestion.recommended_params.num_grids}</span>
+                        · 仓位: <span style={{ fontWeight: 700 }}>{suggestion.recommended_params.sizing === 'pyramid' ? '金字塔' : '等额'}</span>
+                      </div>
+                      <div style={{ fontSize: 11, color: 'var(--text-secondary)', marginTop: 4 }}>
+                        置信度: {suggestion.recommended_params.confidence} · ATR分位: {suggestion.atr_rank}%
+                      </div>
+                    </div>
+                  </div>
+                  {suggestion.reasons && suggestion.reasons.length > 0 && (
+                    <div style={{ fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.8 }}>
+                      {suggestion.reasons.map((r: string, i: number) => <div key={i}>💡 {r}</div>)}
+                    </div>
+                  )}
+                </PageSection>
+              )}
+
+              {/* 网格健康监控 */}
+              {health && !health.error && (
+                <PageSection title="💓 网格健康监控">
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 2fr', gap: 12, marginBottom: 12 }}>
+                    <div style={{
+                      background: 'var(--bg-secondary)', borderRadius: 8, padding: 14, textAlign: 'center',
+                      border: `2px solid ${health.health_score >= 70 ? '#52c41a' : health.health_score >= 50 ? '#faad14' : '#ff4d4f'}`,
+                    }}>
+                      <div style={{ fontSize: 12, color: 'var(--text-secondary)' }}>健康评分</div>
+                      <div style={{
+                        fontSize: 36, fontWeight: 800,
+                        color: health.health_score >= 70 ? '#52c41a' : health.health_score >= 50 ? '#faad14' : '#ff4d4f',
+                      }}>{health.health_score}</div>
+                      <div style={{ fontSize: 12, color: health.health_score >= 70 ? '#52c41a' : '#faad14' }}>{health.health_label}</div>
+                    </div>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+                      <div style={{ background: 'var(--bg-secondary)', borderRadius: 6, padding: 10 }}>
+                        <div style={{ fontSize: 11, color: 'var(--text-secondary)' }}>触发频率</div>
+                        <div style={{ fontSize: 16, fontWeight: 700 }}>{health.metrics.touch_rate}%</div>
+                      </div>
+                      <div style={{ background: 'var(--bg-secondary)', borderRadius: 6, padding: 10 }}>
+                        <div style={{ fontSize: 11, color: 'var(--text-secondary)' }}>波动趋势</div>
+                        <div style={{ fontSize: 16, fontWeight: 700, color: health.metrics.vol_trend === 'contracting' ? '#ff4d4f' : '#52c41a' }}>{health.metrics.vol_trend_label}</div>
+                      </div>
+                      <div style={{ background: 'var(--bg-secondary)', borderRadius: 6, padding: 10 }}>
+                        <div style={{ fontSize: 11, color: 'var(--text-secondary)' }}>价格趋势</div>
+                        <div style={{ fontSize: 16, fontWeight: 700, color: health.metrics.price_trend === 'down' ? '#ff4d4f' : '#52c41a' }}>{health.metrics.price_trend_label}</div>
+                      </div>
+                      <div style={{ background: 'var(--bg-secondary)', borderRadius: 6, padding: 10 }}>
+                        <div style={{ fontSize: 11, color: 'var(--text-secondary)' }}>ATR%</div>
+                        <div style={{ fontSize: 16, fontWeight: 700 }}>{health.metrics.atr_pct}%</div>
+                      </div>
+                    </div>
+                  </div>
+                  {health.warnings.length > 0 && (
+                    <div style={{ marginBottom: 8 }}>
+                      {health.warnings.map((w: string, i: number) => (
+                        <div key={i} style={{ fontSize: 12, color: '#faad14', padding: '2px 0' }}>⚠️ {w}</div>
+                      ))}
+                    </div>
+                  )}
+                  <div style={{ padding: '8px 12px', background: 'rgba(88,166,255,0.08)', borderRadius: 6, borderLeft: '3px solid #58a6ff', fontSize: 13, color: '#58a6ff' }}>
+                    💡 <strong>{health.action}</strong>：{health.action_detail}
+                  </div>
+                  <div style={{ marginTop: 8, display: 'flex', gap: 8 }}>
+                    <button onClick={saveHealthSnapshot} style={{
+                      padding: '4px 12px', borderRadius: 4, background: '#d4a76a', color: '#fff', border: 'none', cursor: 'pointer', fontSize: 12,
+                    }}>📸 保存快照</button>
+                    <button onClick={loadHealthHistory} style={{
+                      padding: '4px 12px', borderRadius: 4, background: '#374151', color: '#fff', border: 'none', cursor: 'pointer', fontSize: 12,
+                    }}>📊 查看历史</button>
+                  </div>
+                </PageSection>
+              )}
+
+              {/* 健康历史趋势 */}
+              {healthHistory && !healthHistory.error && healthHistory.records && healthHistory.records.length > 0 && (
+                <PageSection title="📈 健康趋势">
+                  <div style={{ marginBottom: 8, fontSize: 13, color: 'var(--text-secondary)' }}>
+                    趋势: <span style={{ fontWeight: 700, color: healthHistory.trend === 'improving' ? '#52c41a' : healthHistory.trend === 'declining' ? '#ff4d4f' : '#faad14' }}>{healthHistory.trend_label}</span>
+                    · 共{healthHistory.total_records}条记录
+                  </div>
+                  <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+                    {healthHistory.records.slice(-14).map((r: any, i: number) => (
+                      <div key={i} style={{
+                        width: 40, height: 40, borderRadius: 4, display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        background: r.health_score >= 70 ? '#52c41a30' : r.health_score >= 50 ? '#faad1430' : '#ff4d4f30',
+                        color: r.health_score >= 70 ? '#52c41a' : r.health_score >= 50 ? '#faad14' : '#ff4d4f',
+                        fontSize: 11, fontWeight: 700,
+                      }}>
+                        {r.health_score}
+                      </div>
+                    ))}
+                  </div>
+                  <div style={{ fontSize: 10, color: 'var(--text-secondary)', marginTop: 4 }}>
+                    最近14天健康评分（绿=健康，黄=注意，红=警告）
+                  </div>
+                </PageSection>
+              )}
+                <PageSection title="💓 网格健康监控">
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 2fr', gap: 12, marginBottom: 12 }}>
+                    <div style={{
+                      background: 'var(--bg-secondary)', borderRadius: 8, padding: 14, textAlign: 'center',
+                      border: `2px solid ${health.health_score >= 70 ? '#52c41a' : health.health_score >= 50 ? '#faad14' : '#ff4d4f'}`,
+                    }}>
+                      <div style={{ fontSize: 12, color: 'var(--text-secondary)' }}>健康评分</div>
+                      <div style={{
+                        fontSize: 36, fontWeight: 800,
+                        color: health.health_score >= 70 ? '#52c41a' : health.health_score >= 50 ? '#faad14' : '#ff4d4f',
+                      }}>{health.health_score}</div>
+                      <div style={{ fontSize: 12, color: health.health_score >= 70 ? '#52c41a' : '#faad14' }}>{health.health_label}</div>
+                    </div>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+                      <div style={{ background: 'var(--bg-secondary)', borderRadius: 6, padding: 10 }}>
+                        <div style={{ fontSize: 11, color: 'var(--text-secondary)' }}>触发频率</div>
+                        <div style={{ fontSize: 16, fontWeight: 700 }}>{health.metrics.touch_rate}%</div>
+                      </div>
+                      <div style={{ background: 'var(--bg-secondary)', borderRadius: 6, padding: 10 }}>
+                        <div style={{ fontSize: 11, color: 'var(--text-secondary)' }}>波动趋势</div>
+                        <div style={{ fontSize: 16, fontWeight: 700, color: health.metrics.vol_trend === 'contracting' ? '#ff4d4f' : '#52c41a' }}>{health.metrics.vol_trend_label}</div>
+                      </div>
+                      <div style={{ background: 'var(--bg-secondary)', borderRadius: 6, padding: 10 }}>
+                        <div style={{ fontSize: 11, color: 'var(--text-secondary)' }}>价格趋势</div>
+                        <div style={{ fontSize: 16, fontWeight: 700, color: health.metrics.price_trend === 'down' ? '#ff4d4f' : '#52c41a' }}>{health.metrics.price_trend_label}</div>
+                      </div>
+                      <div style={{ background: 'var(--bg-secondary)', borderRadius: 6, padding: 10 }}>
+                        <div style={{ fontSize: 11, color: 'var(--text-secondary)' }}>ATR%</div>
+                        <div style={{ fontSize: 16, fontWeight: 700 }}>{health.metrics.atr_pct}%</div>
+                      </div>
+                    </div>
+                  </div>
+                  {health.warnings.length > 0 && (
+                    <div style={{ marginBottom: 8 }}>
+                      {health.warnings.map((w: string, i: number) => (
+                        <div key={i} style={{ fontSize: 12, color: '#faad14', padding: '2px 0' }}>⚠️ {w}</div>
+                      ))}
+                    </div>
+                  )}
+                  <div style={{ padding: '8px 12px', background: 'rgba(88,166,255,0.08)', borderRadius: 6, borderLeft: '3px solid #58a6ff', fontSize: 13, color: '#58a6ff' }}>
+                    💡 <strong>{health.action}</strong>：{health.action_detail}
+                  </div>
+                </PageSection>
+              )}
+
+              {/* 网格 vs 买入持有 */}
+              {comparison && !comparison.error && (
+                <PageSection title="⚖️ 网格 vs 买入持有">
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12, marginBottom: 12 }}>
+                    <div style={{ background: 'var(--bg-secondary)', borderRadius: 8, padding: 14, textAlign: 'center', border: '1px solid var(--border-primary)' }}>
+                      <div style={{ fontSize: 12, color: 'var(--text-secondary)' }}>网格策略</div>
+                      <div style={{ fontSize: 20, fontWeight: 700, color: comparison.grid_strategy.return_pct >= 0 ? '#52c41a' : '#ff4d4f' }}>
+                        {comparison.grid_strategy.return_pct}%
+                      </div>
+                      <div style={{ fontSize: 11, color: 'var(--text-secondary)' }}>
+                        胜率{comparison.grid_strategy.win_rate}% · {comparison.grid_strategy.total_trades}笔
+                      </div>
+                    </div>
+                    <div style={{ background: 'var(--bg-secondary)', borderRadius: 8, padding: 14, textAlign: 'center', border: comparison.comparison.winner === 'grid' ? '2px solid #52c41a' : '1px solid var(--border-primary)' }}>
+                      <div style={{ fontSize: 12, color: 'var(--text-secondary)' }}>市场环境</div>
+                      <div style={{ fontSize: 16, fontWeight: 700, color: '#d4a76a' }}>{comparison.comparison.market_env}</div>
+                      <div style={{ fontSize: 11, color: 'var(--text-secondary)' }}>价格变化{comparison.comparison.price_change_pct}%</div>
+                    </div>
+                    <div style={{ background: 'var(--bg-secondary)', borderRadius: 8, padding: 14, textAlign: 'center', border: '1px solid var(--border-primary)' }}>
+                      <div style={{ fontSize: 12, color: 'var(--text-secondary)' }}>买入持有</div>
+                      <div style={{ fontSize: 20, fontWeight: 700, color: comparison.buy_and_hold.return_pct >= 0 ? '#52c41a' : '#ff4d4f' }}>
+                        {comparison.buy_and_hold.return_pct}%
+                      </div>
+                      <div style={{ fontSize: 11, color: 'var(--text-secondary)' }}>
+                        最大回撤{comparison.buy_and_hold.max_drawdown_pct}%
+                      </div>
+                    </div>
+                  </div>
+                  <div style={{ padding: '8px 12px', background: 'rgba(88,166,255,0.08)', borderRadius: 6, borderLeft: '3px solid #58a6ff', fontSize: 13, color: '#58a6ff' }}>
+                    💡 {comparison.insight}
+                  </div>
+                </PageSection>
+              )}
             </>
           )}
           {analysis?.error && <p style={{ color: '#ff4d4f' }}>{analysis.error}</p>}

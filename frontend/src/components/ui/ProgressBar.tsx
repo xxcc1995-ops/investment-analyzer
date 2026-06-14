@@ -1,4 +1,4 @@
-import { type CSSProperties } from 'react'
+import { memo, useMemo, type CSSProperties } from 'react'
 
 interface ProgressBarProps {
   value: number
@@ -14,18 +14,18 @@ interface ProgressBarProps {
 /**
  * 进度条 - 替代各页面中重复的手动 CSS 进度条
  */
-export default function ProgressBar({
+const ProgressBar = memo(function ProgressBar({
   value, max = 100, color, showLabel = true, label, height = 6, style, className
 }: ProgressBarProps) {
   const pct = Math.min(100, Math.max(0, (value / max) * 100))
 
-  const getAutoColor = (): string => {
+  const fillColor = useMemo(() => {
     if (color) return color
     if (pct >= 80) return 'var(--accent-green)'
     if (pct >= 50) return 'var(--accent-blue)'
     if (pct >= 30) return 'var(--accent-orange)'
     return 'var(--accent-red)'
-  }
+  }, [color, pct])
 
   return (
     <div className={`ui-progress ${className || ''}`} style={style}>
@@ -38,9 +38,11 @@ export default function ProgressBar({
       <div className="ui-progress__track" style={{ height }}>
         <div
           className="ui-progress__fill"
-          style={{ width: `${pct}%`, backgroundColor: getAutoColor() }}
+          style={{ width: `${pct}%`, backgroundColor: fillColor }}
         />
       </div>
     </div>
   )
-}
+})
+
+export default ProgressBar

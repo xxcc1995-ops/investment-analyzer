@@ -1987,3 +1987,918 @@ def get_decision_stats() -> dict:
         "calibration": cal_stats,
         "base_rates": base_rates,
     }
+
+
+# ============================================================
+# 前额叶练习 — 投资理性训练场
+# ============================================================
+
+TRAINING_LOG_FILE = os.path.join(LOG_DIR, "training_log.json")
+
+
+def _load_training_log() -> list:
+    if os.path.exists(TRAINING_LOG_FILE):
+        try:
+            with open(TRAINING_LOG_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except (json.JSONDecodeError, IOError):
+            pass
+    return []
+
+
+def _save_training_log(records: list):
+    os.makedirs(LOG_DIR, exist_ok=True)
+    with open(TRAINING_LOG_FILE, "w", encoding="utf-8") as f:
+        json.dump(records, f, ensure_ascii=False, indent=2)
+
+
+# 练习题库
+TRAINING_EXERCISES = {
+    "delay_discounting": {
+        "name": "延迟满足",
+        "icon": "⏳",
+        "color": "#3b82f6",
+        "desc": "抵制即时诱惑，选择长期收益。训练你等待更好结果的能力。",
+        "investment_tip": "追涨杀跌的本质：用确定的小收益，换取不确定的大收益。",
+        "duration": "2分钟",
+        "questions": [
+            {
+                "id": "dd_01",
+                "scenario": "你有以下两个选择：",
+                "option_a": "今天确定拿到 ¥5,000",
+                "option_b": "一个月后确定拿到 ¥5,500",
+                "correct": "B",
+                "explanation": "一个月多赚¥500，年化收益约120%。理性选择B。但很多人会选A，因为大脑过度折扣未来收益。",
+                "difficulty": 1,
+            },
+            {
+                "id": "dd_02",
+                "scenario": "你持有的股票今天涨了5%：",
+                "option_a": "今天卖出，确定赚 ¥8,000",
+                "option_b": "继续持有，一年后预期收益 ¥15,000（但可能亏损）",
+                "correct": "depends",
+                "explanation": "这取决于你的投资逻辑是否还成立。如果基本面没变，选B；如果只是反弹，选A。关键是：你的决定基于分析还是恐惧？",
+                "difficulty": 2,
+            },
+            {
+                "id": "dd_03",
+                "scenario": "你发现了一个投资机会：",
+                "option_a": "现在买入，但可能错过更好的价格",
+                "option_b": "等一个月，可能价格更低也可能更高",
+                "correct": "depends",
+                "explanation": "没有标准答案。但问自己：如果这个机会一周后还在，你还会这么着急吗？时间压力是最大的噪声来源。",
+                "difficulty": 2,
+            },
+            {
+                "id": "dd_04",
+                "scenario": "你的投资组合本月亏损了8%：",
+                "option_a": "现在止损，锁定亏损",
+                "option_b": "持有不动，等待反弹",
+                "correct": "depends",
+                "explanation": "取决于你的投资逻辑是否还成立。问自己：如果今天第一次看到这只股票，没有任何持仓，你会建仓吗？",
+                "difficulty": 3,
+            },
+            {
+                "id": "dd_05",
+                "scenario": "朋友告诉你一个\"确定赚钱\"的机会：",
+                "option_a": "马上跟投 ¥50,000",
+                "option_b": "花一周时间研究后再决定",
+                "correct": "B",
+                "explanation": "真正的机会不会因为多想一周就消失。如果对方催你\"赶紧\"，那大概率是陷阱。",
+                "difficulty": 1,
+            },
+        ],
+    },
+    "sunk_cost": {
+        "name": "沉没成本抵抗",
+        "icon": "🕳️",
+        "color": "#ef4444",
+        "desc": "忽略已投入成本，只看未来。训练你理性止损的能力。",
+        "investment_tip": "\"已经亏了所以不能卖\"——这是最昂贵的认知陷阱。",
+        "duration": "2分钟",
+        "questions": [
+            {
+                "id": "sc_01",
+                "scenario": "你花¥200买了一张电影票，看了30分钟发现电影很烂。你会：",
+                "option_a": "继续看完，毕竟花了钱",
+                "option_b": "离开，把时间花在更有价值的事上",
+                "correct": "B",
+                "explanation": "¥200已经花出去了（沉没成本），无论你是否看完都不会回来。理性决策只看未来：剩下的90分钟做什么更有价值？",
+                "difficulty": 1,
+            },
+            {
+                "id": "sc_02",
+                "scenario": "你以¥50买入一只股票，现在跌到¥35。你分析后认为基本面已经恶化。你会：",
+                "option_a": "卖出止损，亏损¥15/股",
+                "option_b": "继续持有，等回本再卖",
+                "correct": "A",
+                "explanation": "正确的做法：如果今天第一次看到这只股票，没有任何持仓，你会建仓吗？如果不会，就应该卖出。过去的买入价不影响未来的走势。",
+                "difficulty": 2,
+            },
+            {
+                "id": "sc_03",
+                "scenario": "你已经花了3个月研究一家公司，写了详细的分析报告。但新数据显示公司可能造假。你会：",
+                "option_a": "修改报告，降低目标价",
+                "option_b": "放弃这个标的，承认3个月白费了",
+                "correct": "B",
+                "explanation": "3个月的时间已经沉没。继续研究一个可能造假的公司，只会浪费更多时间。承认错误是理性的表现，不是软弱。",
+                "difficulty": 3,
+            },
+            {
+                "id": "sc_04",
+                "scenario": "你重仓一只股票，已经亏了40%。朋友建议你\"摊低成本\"。你会：",
+                "option_a": "加仓摊低成本",
+                "option_b": "先分析基本面是否还支持持有",
+                "correct": "B",
+                "explanation": "\"摊低成本\"是沉没成本谬误的典型表现。正确的做法：忽略你的成本价，只分析当前价格是否值得买入。",
+                "difficulty": 2,
+            },
+            {
+                "id": "sc_05",
+                "scenario": "你花了一年时间学习量化交易，但发现自己更适合价值投资。你会：",
+                "option_a": "继续量化交易，毕竟学了一年",
+                "option_b": "转向价值投资，承认量化不适合自己",
+                "correct": "B",
+                "explanation": "一年的学习时间已经沉没。继续做不适合自己的事，只会浪费更多时间。及时转向是智慧，不是放弃。",
+                "difficulty": 2,
+            },
+        ],
+    },
+    "emotion_labeling": {
+        "name": "情绪标签",
+        "icon": "🏷️",
+        "color": "#8b5cf6",
+        "desc": "用精确词汇描述情绪，降低情绪对决策的影响。",
+        "investment_tip": "命名情绪=削弱情绪。当你能说出\"我现在感到贪婪\"时，贪婪就失去了一半力量。",
+        "duration": "2分钟",
+        "questions": [
+            {
+                "id": "el_01",
+                "scenario": "你看到朋友在群里晒出某只股票赚了50%的截图。",
+                "emotions": ["嫉妒", "贪婪", "焦虑", "平静"],
+                "correct": ["嫉妒", "贪婪"],
+                "explanation": "看到别人赚钱时，嫉妒和贪婪是最常见的反应。识别它们：\"我在嫉妒\"→这种感觉会减弱→更理性的决策。",
+                "difficulty": 1,
+            },
+            {
+                "id": "el_02",
+                "scenario": "你持有的股票今天暴跌8%。",
+                "emotions": ["恐惧", "愤怒", "后悔", "平静"],
+                "correct": ["恐惧", "后悔"],
+                "explanation": "暴跌时恐惧和后悔是正常反应。关键：不要在恐惧中做决定。先命名情绪，等它减弱后再分析。",
+                "difficulty": 1,
+            },
+            {
+                "id": "el_03",
+                "scenario": "你刚卖出的股票，第二天涨了15%。",
+                "emotions": ["后悔", "愤怒", "嫉妒", "平静"],
+                "correct": ["后悔"],
+                "explanation": "卖飞是最痛苦的经历之一。但问自己：如果当时的信息不变，你会做同样的决定吗？如果会，那就没有遗憾。",
+                "difficulty": 2,
+            },
+            {
+                "id": "el_04",
+                "scenario": "市场连续大涨三天，你空仓。",
+                "emotions": ["焦虑", "贪婪", "恐惧", "平静"],
+                "correct": ["焦虑", "贪婪"],
+                "explanation": "空仓看涨是最焦虑的状态。但问自己：现在的价格还值得买入吗？如果答案是\"不确定\"，那空仓就是正确的。",
+                "difficulty": 2,
+            },
+            {
+                "id": "el_05",
+                "scenario": "你研究了很久的股票，终于等到回调到你的买入价。",
+                "emotions": ["兴奋", "贪婪", "恐惧", "平静"],
+                "correct": ["兴奋", "贪婪"],
+                "explanation": "等待已久的买入机会出现时，兴奋和贪婪会蒙蔽判断。先深呼吸，确认你的分析逻辑还成立。",
+                "difficulty": 2,
+            },
+        ],
+    },
+    "base_rate": {
+        "name": "基准率校准",
+        "icon": "📊",
+        "color": "#10b981",
+        "desc": "用统计数据而非个案做判断。训练你的概率直觉。",
+        "investment_tip": "你看到的成功案例，只是冰山一角。失败的人你看不到。",
+        "duration": "3分钟",
+        "questions": [
+            {
+                "id": "br_01",
+                "question": "A股上市公司中，连续5年ROE>15%的公司占比大约是多少？",
+                "answer": 8,
+                "unit": "%",
+                "tolerance": 5,
+                "explanation": "真正优质的公司是少数。连续5年高ROE的公司约5-10%。大多数人高估了这个比例，因为只关注了好公司。",
+                "difficulty": 2,
+            },
+            {
+                "id": "br_02",
+                "question": "主动管理型股票基金中，长期跑赢沪深300指数的比例大约是多少？",
+                "answer": 30,
+                "unit": "%",
+                "tolerance": 15,
+                "explanation": "约70%的主动基金长期跑输指数。选择指数基金是更理性的选择。",
+                "difficulty": 2,
+            },
+            {
+                "id": "br_03",
+                "question": "一只股票今天涨停（+10%），明天继续涨停的概率大约是多少？",
+                "answer": 8,
+                "unit": "%",
+                "tolerance": 5,
+                "explanation": "涨停后次日继续涨停的概率约5-10%，远低于人们的直觉。追涨停的期望收益是负的。",
+                "difficulty": 2,
+            },
+            {
+                "id": "br_04",
+                "question": "连续3天上涨的股票，第4天继续上涨的概率大约是多少？",
+                "answer": 48,
+                "unit": "%",
+                "tolerance": 10,
+                "explanation": "短期走势接近随机游走。连续3天上涨后第4天上涨概率约48%，几乎等于抛硬币。",
+                "difficulty": 2,
+            },
+            {
+                "id": "br_05",
+                "question": "A股新股上市首日的平均涨幅大约是多少？",
+                "answer": 44,
+                "unit": "%",
+                "tolerance": 20,
+                "explanation": "注册制前新股首日涨幅约44%（涨停限制），但注册制后波动更大。打新收益正在下降。",
+                "difficulty": 3,
+            },
+            {
+                "id": "br_06",
+                "question": "散户投资者中，长期盈利的比例大约是多少？",
+                "answer": 10,
+                "unit": "%",
+                "tolerance": 10,
+                "explanation": "约90%的散户长期亏损。如果你能长期不亏，就已经超过了大多数人。",
+                "difficulty": 2,
+            },
+        ],
+    },
+    "inversion": {
+        "name": "反转思维",
+        "icon": "🔄",
+        "color": "#f59e0b",
+        "desc": "主动寻找反面证据。训练你质疑自己的能力。",
+        "investment_tip": "不要问\"我对不对\"，要问\"我可能在哪里错了\"。",
+        "duration": "3分钟",
+        "questions": [
+            {
+                "id": "inv_01",
+                "thesis": "贵州茅台是A股最好的投资标的",
+                "task": "请写出3个反对这个观点的理由",
+                "hints": [
+                    "估值过高：当前PE是否处于历史高位？",
+                    "增长放缓：白酒行业增速是否在下降？",
+                    "政策风险：反腐、限酒令等政策影响",
+                    "集中度风险：过度依赖单一品牌",
+                    "机会成本：同样资金是否有更好的选择？",
+                ],
+                "difficulty": 1,
+            },
+            {
+                "id": "inv_02",
+                "thesis": "现在是买入股票的好时机",
+                "task": "请写出3个反对这个观点的理由",
+                "hints": [
+                    "经济下行：GDP增速放缓，企业盈利承压",
+                    "估值偏高：当前PE是否高于历史均值？",
+                    "外部风险：地缘政治、贸易摩擦等不确定性",
+                    "流动性收紧：央行是否在收紧货币政策？",
+                    "情绪过热：市场情绪是否过于乐观？",
+                ],
+                "difficulty": 2,
+            },
+            {
+                "id": "inv_03",
+                "thesis": "这只股票一定会涨",
+                "task": "请写出3个反对这个观点的理由",
+                "hints": [
+                    "没有100%的事情：投资中没有确定性",
+                    "信息不对称：你知道的，机构早就知道了",
+                    "黑天鹅事件：无法预测的突发事件",
+                    "估值陷阱：便宜可能有便宜的道理",
+                    "趋势反转：技术指标可能已经见顶",
+                ],
+                "difficulty": 1,
+            },
+            {
+                "id": "inv_04",
+                "thesis": "分散投资是最好的策略",
+                "task": "请写出3个反对这个观点的理由",
+                "hints": [
+                    "过度分散：持有太多标的无法深入研究",
+                    "收益稀释：分散也分散了收益",
+                    "虚假安全感：分散不等于安全",
+                    "管理成本：太多标的增加管理难度",
+                    "能力圈：应该集中在自己理解的领域",
+                ],
+                "difficulty": 3,
+            },
+        ],
+    },
+    "anchoring": {
+        "name": "锚定抵抗",
+        "icon": "⚓",
+        "color": "#ec4899",
+        "desc": "忽略无关数字，独立判断。训练你不被成本价绑架。",
+        "investment_tip": "你的买入价不应该影响你的卖出决策。成本价是沉没成本。",
+        "duration": "2分钟",
+        "questions": [
+            {
+                "id": "an_01",
+                "scenario": "请估计：长城的长度是多少公里？",
+                "anchor": "（提示：有人说1000公里）",
+                "answer": 21196,
+                "unit": "公里",
+                "tolerance": 0.5,
+                "explanation": "长城总长约21,196公里。锚点1000公里会让人低估。在投资中，别人的\"目标价\"就是你的锚点。",
+                "difficulty": 1,
+            },
+            {
+                "id": "an_02",
+                "scenario": "你以¥100买入一只股票，现在涨到¥150。你认为合理估值是多少？",
+                "anchor": "（你的成本价是¥100）",
+                "answer": 150,
+                "unit": "元",
+                "tolerance": 0.3,
+                "explanation": "正确答案：与你的成本价无关。如果基本面支撑¥150，就持有；如果只值¥120，就卖出。成本价是锚点，不是参考。",
+                "difficulty": 2,
+            },
+            {
+                "id": "an_03",
+                "scenario": "一只股票从¥200跌到¥80。你认为它值多少？",
+                "anchor": "（历史高点是¥200）",
+                "answer": 80,
+                "unit": "元",
+                "tolerance": 0.5,
+                "explanation": "历史高点是锚点。正确做法：忽略¥200，分析当前¥80是否合理。便宜不等于值得买。",
+                "difficulty": 2,
+            },
+            {
+                "id": "an_04",
+                "scenario": "分析师给出目标价¥300，当前价格¥250。你认为：",
+                "anchor": "（分析师目标价¥300）",
+                "options": ["应该买入，有20%上涨空间", "需要独立分析，目标价只是参考", "应该卖出，分析师通常高估"],
+                "correct": 1,
+                "explanation": "分析师目标价是锚点。正确做法：独立分析，不要被别人的价格锚定。",
+                "difficulty": 2,
+            },
+        ],
+    },
+
+    # ============================================================
+    # 新增4个练习：针对最致命的人性弱点
+    # ============================================================
+
+    "loss_aversion": {
+        "name": "损失厌恶",
+        "icon": "💔",
+        "color": "#ef4444",
+        "desc": "亏损的痛苦是盈利快乐的2倍。训练你理性面对损失。",
+        "investment_tip": "损失厌恶是投资最大的敌人。它让你：持有亏损股太久，卖出盈利股太早。",
+        "duration": "3分钟",
+        "questions": [
+            {
+                "id": "la_01",
+                "scenario": "你持有两只股票：A亏了30%，B赚了30%。你需要卖出一只。你会：",
+                "option_a": "卖出A（亏的），锁定亏损",
+                "option_b": "卖出B（赚的），锁定盈利",
+                "correct": "depends",
+                "explanation": "正确答案：看未来的预期，不看过去的盈亏。问自己：如果今天第一次看到这两只股票，没有任何持仓，你会买哪只？卖出你不看好的那只。",
+                "difficulty": 2,
+            },
+            {
+                "id": "la_02",
+                "scenario": "你投资了¥100,000，现在价值¥70,000（亏了30%）。你有两个选择：",
+                "option_a": "卖出，确定亏损¥30,000",
+                "option_b": "继续持有，有50%概率回本，50%概率继续亏到¥50,000",
+                "correct": "A",
+                "explanation": "期望值计算：B的期望值 = 50%×¥100,000 + 50%×¥50,000 = ¥75,000。看起来B更好？但这是错误的。确定的¥70,000 > 不确定的¥75,000，因为你的风险承受能力有限。而且，如果基本面变了，继续持有只是在赌博。",
+                "difficulty": 3,
+            },
+            {
+                "id": "la_03",
+                "scenario": "你卖出一只股票后，它涨了20%。你的反应是：",
+                "option_a": "后悔，下次要持有更久",
+                "option_b": "接受，我的决策基于当时的信息",
+                "correct": "B",
+                "explanation": "卖飞是正常的。如果你的决策过程是正确的，结果不好只是运气。不要因为一次卖飞就改变你的策略。",
+                "difficulty": 2,
+            },
+            {
+                "id": "la_04",
+                "scenario": "你的投资组合本月跌了10%。你会：",
+                "option_a": "检查持仓逻辑是否还成立，不成立就卖出",
+                "option_b": "不看账户，等涨回来再说",
+                "correct": "A",
+                "explanation": "不看账户是逃避，不是理性。正确的做法：检查每只股票的买入逻辑是否还成立。如果逻辑变了，就应该卖出，不管盈亏。",
+                "difficulty": 2,
+            },
+            {
+                "id": "la_05",
+                "scenario": "你有两只股票：A是你研究了很久才买的，B是朋友推荐你随便买的。现在A亏了，B赚了。你需要钱，卖一只：",
+                "option_a": "卖出A（亏的），因为亏了所以不想卖",
+                "option_b": "分析两只股票的未来预期，卖出不看好的那只",
+                "correct": "B",
+                "explanation": "你对A的感情（研究了很久）和对A的亏损（不想认输）都在影响你的判断。正确做法：忽略过去，只看未来。",
+                "difficulty": 3,
+            },
+        ],
+    },
+
+    "herd_resistance": {
+        "name": "从众抵抗",
+        "icon": "🐑",
+        "color": "#f59e0b",
+        "desc": "从众让我们活下来，但让我们亏钱。训练你独立思考。",
+        "investment_tip": "当所有人都在买的时候，正是最危险的时候。巴菲特：别人贪婪时恐惧。",
+        "duration": "3分钟",
+        "questions": [
+            {
+                "id": "hr_01",
+                "scenario": "群里所有人都在讨论一只股票，说\"这次不一样\"。你的反应是：",
+                "option_a": "研究一下，如果确实好就买",
+                "option_b": "先问自己：如果没有人讨论这只股票，我会关注它吗？",
+                "correct": "B",
+                "explanation": "从众是最大的投资陷阱。当所有人都在讨论时，往往已经到了顶部。先独立思考，再看别人的观点。",
+                "difficulty": 2,
+            },
+            {
+                "id": "hr_02",
+                "scenario": "市场暴跌，朋友圈都在晒亏损。你会：",
+                "option_a": "也卖出，避免更大的亏损",
+                "option_b": "检查自己的持仓逻辑，如果没变就持有",
+                "correct": "B",
+                "explanation": "恐慌是会传染的。别人的恐惧不应该影响你的判断。如果基本面没变，暴跌反而是买入机会。",
+                "difficulty": 2,
+            },
+            {
+                "id": "hr_03",
+                "scenario": "一个投资大V推荐了一只股票，粉丝都在跟买。你会：",
+                "option_a": "跟买，大V肯定比我懂",
+                "option_b": "独立分析，大V也会错，而且他的资金量和风险承受力和我不同",
+                "correct": "B",
+                "explanation": "诉诸权威是常见的逻辑谬误。大V的推荐可能基于不同的投资期限、风险承受力和资金量。你需要独立判断。",
+                "difficulty": 2,
+            },
+            {
+                "id": "hr_04",
+                "scenario": "你发现一个投资机会，但身边的人都不看好。你会：",
+                "option_a": "放弃，大家都说不好肯定有问题",
+                "option_b": "坚持自己的分析，但认真听取反对意见",
+                "correct": "B",
+                "explanation": "独立思考不等于固执己见。你应该认真听取反对意见，但最终决策基于自己的分析，而不是别人的看法。",
+                "difficulty": 3,
+            },
+            {
+                "id": "hr_05",
+                "scenario": "论坛上有人说\"这次不一样，永远涨\"。你的反应是：",
+                "option_a": "相信，因为这次确实有新因素",
+                "option_b": "警惕，\"这次不一样\"是投资中最贵的五个字",
+                "correct": "B",
+                "explanation": "\"这次不一样\"是泡沫的典型特征。历史上每次泡沫都有人说这句话。保持警惕，回归基本面。",
+                "difficulty": 1,
+            },
+        ],
+    },
+
+    "narrative_detection": {
+        "name": "叙事谬误",
+        "icon": "📖",
+        "color": "#8b5cf6",
+        "desc": "我们用故事理解世界，但故事会骗人。训练你区分叙事和证据。",
+        "investment_tip": "好故事≠好投资。最危险的投资，往往有最动人的故事。",
+        "duration": "3分钟",
+        "questions": [
+            {
+                "id": "nd_01",
+                "scenario": "一家公司说\"我们要改变世界，让每个人都能...\"。你会：",
+                "option_a": "被愿景打动，买入股票",
+                "option_b": "忽略故事，看财务数据",
+                "correct": "B",
+                "explanation": "改变世界的故事很动人，但不等于能赚钱。很多改变世界的公司（如早期互联网公司）让投资者亏了很多钱。看数据，不看故事。",
+                "difficulty": 2,
+            },
+            {
+                "id": "nd_02",
+                "scenario": "分析师写了一份50页的研报，逻辑清晰，故事动人。你会：",
+                "option_a": "被说服，买入",
+                "option_b": "检查数据是否支持结论，有没有反面证据",
+                "correct": "B",
+                "explanation": "研报的目的是让你买入（分析师靠这个赚钱）。再动人的故事，如果数据不支持，就是空话。永远检查数据。",
+                "difficulty": 2,
+            },
+            {
+                "id": "nd_03",
+                "scenario": "你看到一个\"普通人靠投资逆袭人生\"的故事。你的反应是：",
+                "option_a": "受到激励，也想尝试同样的策略",
+                "option_b": "意识到这是幸存者偏差，亏光的人你看不到",
+                "correct": "B",
+                "explanation": "幸存者偏差：你只看到成功的人，看不到失败的人。100个人用同样的策略，1个人成功了被报道，99个人失败了没人知道。",
+                "difficulty": 2,
+            },
+            {
+                "id": "nd_04",
+                "scenario": "一家公司的CEO在发布会上激情演讲，股价大涨。你会：",
+                "option_a": "买入，CEO这么有激情公司肯定好",
+                "option_b": "冷静分析，演讲能力≠经营能力",
+                "correct": "B",
+                "explanation": "CEO的演讲能力与公司价值无关。很多会讲故事的CEO（如马斯克）确实很成功，但也有很多会讲故事的CEO（如安然的CEO）让投资者血本无归。",
+                "difficulty": 2,
+            },
+            {
+                "id": "nd_05",
+                "scenario": "你看到一条新闻：\"某行业将迎来爆发式增长\"。你会：",
+                "option_a": "买入该行业的股票",
+                "option_b": "问自己：这个\"爆发\"已经在价格里了吗？",
+                "correct": "B",
+                "explanation": "如果新闻已经报道了，市场大概率已经反映了。\"买入消息，卖出事实\"。看估值，不看新闻。",
+                "difficulty": 2,
+            },
+        ],
+    },
+
+    "control_illusion": {
+        "name": "控制错觉",
+        "icon": "🎮",
+        "color": "#10b981",
+        "desc": "我们以为能控制市场，其实大部分是运气。训练你区分技能和运气。",
+        "investment_tip": "赚钱时觉得自己是天才，亏钱时觉得是运气差——这是最危险的错觉。",
+        "duration": "3分钟",
+        "questions": [
+            {
+                "id": "ci_01",
+                "scenario": "你连续3次选股都赚钱了。你的想法是：",
+                "option_a": "我选股能力很强，可以加大仓位",
+                "option_b": "可能是运气，需要更多样本才能判断",
+                "correct": "B",
+                "explanation": "3次样本太小。1000个人抛硬币，总有人连续3次正面。你需要至少30-50次交易才能判断是技能还是运气。",
+                "difficulty": 2,
+            },
+            {
+                "id": "ci_02",
+                "scenario": "你用技术指标分析后买入，股票涨了。你会：",
+                "option_a": "技术指标真准，继续用",
+                "option_b": "一次成功不能证明指标有效，需要回测",
+                "correct": "B",
+                "explanation": "确认偏差：你只记得成功的案例，忘记了失败的案例。技术指标的有效性需要用大量数据回测，不能靠个案判断。",
+                "difficulty": 2,
+            },
+            {
+                "id": "ci_03",
+                "scenario": "你每天花4小时研究市场。你认为：",
+                "option_a": "花的时间越多，收益应该越好",
+                "option_b": "研究时间与收益没有必然关系",
+                "correct": "B",
+                "explanation": "过度交易是散户亏损的主要原因之一。花更多时间不等于赚更多钱。有时候，什么都不做才是最好的策略。",
+                "difficulty": 3,
+            },
+            {
+                "id": "ci_04",
+                "scenario": "你制定了一套复杂的交易规则。你会：",
+                "option_a": "严格执行，规则能保证盈利",
+                "option_b": "定期评估规则是否有效，市场会变",
+                "correct": "B",
+                "explanation": "没有永远有效的规则。市场在变，你的规则也需要变。过度相信规则是控制错觉的一种形式。",
+                "difficulty": 3,
+            },
+            {
+                "id": "ci_05",
+                "scenario": "你看到一个量化策略，回测收益很高。你会：",
+                "option_a": "马上用真金白银实盘",
+                "option_b": "先用小资金测试，回测不等于实盘",
+                "correct": "B",
+                "explanation": "回测有很多陷阱：过拟合、未来函数、幸存者偏差。回测收益高不等于实盘收益高。先小资金测试。",
+                "difficulty": 2,
+            },
+        ],
+    },
+}
+
+
+def get_training_exercises() -> list:
+    """返回所有练习的概览信息"""
+    exercises = []
+    for key, config in TRAINING_EXERCISES.items():
+        exercises.append({
+            "id": key,
+            "name": config["name"],
+            "icon": config["icon"],
+            "color": config["color"],
+            "desc": config["desc"],
+            "investment_tip": config["investment_tip"],
+            "duration": config["duration"],
+            "question_count": len(config["questions"]),
+        })
+    return exercises
+
+
+def get_training_question(exercise_type: str, difficulty: int = None) -> dict:
+    """获取一道练习题"""
+    if exercise_type not in TRAINING_EXERCISES:
+        return {"error": f"未知练习类型: {exercise_type}"}
+
+    config = TRAINING_EXERCISES[exercise_type]
+    questions = config["questions"]
+
+    # 按难度筛选
+    if difficulty:
+        filtered = [q for q in questions if q.get("difficulty") == difficulty]
+        if filtered:
+            questions = filtered
+
+    # 随机选择
+    import random
+    q = random.choice(questions)
+
+    return {
+        "exercise_type": exercise_type,
+        "exercise_name": config["name"],
+        "question": q,
+    }
+
+
+def submit_training_answer(exercise_type: str, question_id: str,
+                           answer, confidence: int = 70) -> dict:
+    """提交练习答案并评分"""
+    if exercise_type not in TRAINING_EXERCISES:
+        return {"error": f"未知练习类型: {exercise_type}"}
+
+    config = TRAINING_EXERCISES[exercise_type]
+    question = None
+    for q in config["questions"]:
+        if q["id"] == question_id:
+            question = q
+            break
+
+    if not question:
+        return {"error": "题目未找到"}
+
+    # 评分逻辑
+    score = 0
+    feedback = ""
+    correct = False
+
+    if exercise_type == "delay_discounting":
+        correct_answer = question.get("correct", "B")
+        if correct_answer == "depends":
+            # 开放题，只要认真回答就给分
+            if isinstance(answer, str) and len(answer) > 10:
+                score = 80
+                feedback = "你认真思考了，这本身就是理性。"
+                correct = True
+            else:
+                score = 40
+                feedback = "这个问题需要更深入的思考。"
+        else:
+            if answer == correct_answer:
+                score = 100
+                feedback = "正确！" + question["explanation"]
+                correct = True
+            else:
+                score = 20
+                feedback = "不太对。" + question["explanation"]
+
+    elif exercise_type == "sunk_cost":
+        correct_answer = question.get("correct", "B")
+        if answer == correct_answer:
+            score = 100
+            feedback = "正确！" + question["explanation"]
+            correct = True
+        else:
+            score = 20
+            feedback = "你被沉没成本影响了。" + question["explanation"]
+
+    elif exercise_type == "emotion_labeling":
+        correct_emotions = question.get("correct", [])
+        if isinstance(answer, list):
+            matched = set(answer) & set(correct_emotions)
+            if len(matched) == len(correct_emotions):
+                score = 100
+                feedback = "完美识别！" + question["explanation"]
+                correct = True
+            elif len(matched) > 0:
+                score = 60
+                feedback = "部分正确。" + question["explanation"]
+            else:
+                score = 20
+                feedback = "再想想。" + question["explanation"]
+        else:
+            score = 40
+            feedback = "请选择你感受到的情绪。"
+
+    elif exercise_type == "base_rate":
+        ref_answer = question.get("answer", 0)
+        tolerance = question.get("tolerance", 0.2)
+        if ref_answer != 0:
+            error_pct = abs(float(answer) - ref_answer) / abs(ref_answer)
+        else:
+            error_pct = abs(float(answer))
+
+        if error_pct <= tolerance * 0.5:
+            score = 100
+            feedback = "非常准确！" + question["explanation"]
+            correct = True
+        elif error_pct <= tolerance:
+            score = 80
+            feedback = "在合理范围内。" + question["explanation"]
+            correct = True
+        elif error_pct <= tolerance * 2:
+            score = 50
+            feedback = "有一定偏差。" + question["explanation"]
+        else:
+            score = 20
+            feedback = "偏差较大。" + question["explanation"]
+
+    elif exercise_type == "inversion":
+        # 开放题，检查是否有实质内容
+        if isinstance(answer, str) and len(answer) > 20:
+            score = 80
+            feedback = "你认真思考了反面观点，这本身就是进步。"
+            correct = True
+        else:
+            score = 40
+            feedback = "请更深入地思考反面观点。"
+
+    elif exercise_type == "anchoring":
+        if "options" in question:
+            correct_idx = question.get("correct", 1)
+            if answer == correct_idx:
+                score = 100
+                feedback = "正确！" + question["explanation"]
+                correct = True
+            else:
+                score = 20
+                feedback = "你被锚点影响了。" + question["explanation"]
+        else:
+            ref_answer = question.get("answer", 0)
+            tolerance = question.get("tolerance", 0.2)
+            if ref_answer != 0:
+                error_pct = abs(float(answer) - ref_answer) / abs(ref_answer)
+            else:
+                error_pct = abs(float(answer))
+
+            if error_pct <= tolerance:
+                score = 100
+                feedback = "正确！" + question["explanation"]
+                correct = True
+            elif error_pct <= tolerance * 2:
+                score = 60
+                feedback = "接近了。" + question["explanation"]
+            else:
+                score = 20
+                feedback = "你被锚点影响了。" + question["explanation"]
+
+    # 新增4个练习的评分逻辑
+    elif exercise_type == "loss_aversion":
+        correct_answer = question.get("correct", "B")
+        if correct_answer == "depends":
+            if isinstance(answer, str) and len(answer) > 10:
+                score = 80
+                feedback = "你认真思考了。" + question["explanation"]
+                correct = True
+            else:
+                score = 40
+                feedback = "这个问题需要更深入的思考。" + question["explanation"]
+        else:
+            if answer == correct_answer:
+                score = 100
+                feedback = "正确！" + question["explanation"]
+                correct = True
+            else:
+                score = 20
+                feedback = "你被损失厌恶影响了。" + question["explanation"]
+
+    elif exercise_type == "herd_resistance":
+        correct_answer = question.get("correct", "B")
+        if answer == correct_answer:
+            score = 100
+            feedback = "正确！" + question["explanation"]
+            correct = True
+        else:
+            score = 20
+            feedback = "你被从众心理影响了。" + question["explanation"]
+
+    elif exercise_type == "narrative_detection":
+        correct_answer = question.get("correct", "B")
+        if answer == correct_answer:
+            score = 100
+            feedback = "正确！" + question["explanation"]
+            correct = True
+        else:
+            score = 20
+            feedback = "你被叙事迷惑了。" + question["explanation"]
+
+    elif exercise_type == "control_illusion":
+        correct_answer = question.get("correct", "B")
+        if answer == correct_answer:
+            score = 100
+            feedback = "正确！" + question["explanation"]
+            correct = True
+        else:
+            score = 20
+            feedback = "你高估了自己的控制力。" + question["explanation"]
+
+    # 记录训练日志
+    log = _load_training_log()
+    log.append({
+        "exercise_type": exercise_type,
+        "question_id": question_id,
+        "answer": answer,
+        "confidence": confidence,
+        "score": score,
+        "correct": correct,
+        "timestamp": datetime.now().isoformat(),
+    })
+    _save_training_log(log)
+
+    return {
+        "score": score,
+        "correct": correct,
+        "feedback": feedback,
+        "explanation": question.get("explanation", ""),
+        "difficulty": question.get("difficulty", 1),
+    }
+
+
+def get_training_stats() -> dict:
+    """获取训练统计"""
+    log = _load_training_log()
+
+    if not log:
+        return {
+            "status": "no_data",
+            "message": "还没有训练记录，开始第一次练习吧！",
+            "total_sessions": 0,
+            "by_exercise": {},
+            "recent_scores": [],
+            "streak": 0,
+        }
+
+    total = len(log)
+    by_exercise = {}
+    for record in log:
+        et = record.get("exercise_type", "unknown")
+        if et not in by_exercise:
+            by_exercise[et] = {"count": 0, "total_score": 0, "correct": 0}
+        by_exercise[et]["count"] += 1
+        by_exercise[et]["total_score"] += record.get("score", 0)
+        if record.get("correct"):
+            by_exercise[et]["correct"] += 1
+
+    # 计算平均分
+    for et in by_exercise:
+        stats = by_exercise[et]
+        stats["avg_score"] = round(stats["total_score"] / stats["count"], 1) if stats["count"] > 0 else 0
+        stats["accuracy"] = round(stats["correct"] / stats["count"] * 100, 1) if stats["count"] > 0 else 0
+
+    # 最近10次得分
+    recent_scores = [{
+        "exercise_type": r.get("exercise_type"),
+        "score": r.get("score", 0),
+        "timestamp": r.get("timestamp"),
+    } for r in log[-10:]]
+
+    # 连续练习天数
+    from datetime import timedelta
+    dates = set()
+    for r in log:
+        ts = r.get("timestamp", "")
+        if ts:
+            dates.add(ts[:10])
+
+    streak = 0
+    today = datetime.now().date()
+    check_date = today
+    while str(check_date) in dates:
+        streak += 1
+        check_date -= timedelta(days=1)
+
+    # 推荐练习（基于最弱项）
+    weakest = None
+    lowest_score = 100
+    for et, stats in by_exercise.items():
+        if stats["avg_score"] < lowest_score:
+            lowest_score = stats["avg_score"]
+            weakest = et
+
+    recommendation = None
+    if weakest and weakest in TRAINING_EXERCISES:
+        recommendation = {
+            "exercise_type": weakest,
+            "name": TRAINING_EXERCISES[weakest]["name"],
+            "reason": f"这是你得分最低的练习（平均{lowest_score}分），建议多练习。",
+        }
+
+    return {
+        "status": "ok",
+        "total_sessions": total,
+        "by_exercise": by_exercise,
+        "recent_scores": recent_scores,
+        "streak": streak,
+        "recommendation": recommendation,
+    }

@@ -1,10 +1,10 @@
-import { type CSSProperties, type ReactNode } from 'react'
+import { memo, type CSSProperties, type ReactNode } from 'react'
 
-export interface Column<T = any> {
+export interface Column<T = unknown> {
   key: string
   title: string
   dataIndex?: string
-  render?: (value: any, record: T, index: number) => ReactNode
+  render?: (value: unknown, record: T, index: number) => ReactNode
   align?: 'left' | 'center' | 'right'
   width?: number | string
   sortable?: boolean
@@ -12,7 +12,7 @@ export interface Column<T = any> {
   colorize?: boolean
 }
 
-interface DataTableProps<T = any> {
+interface DataTableProps<T = unknown> {
   columns: Column<T>[]
   data: T[]
   rowKey?: string | ((record: T, index: number) => string)
@@ -29,7 +29,7 @@ interface DataTableProps<T = any> {
  * 通用数据表格 - 替代各页面中重复的原生 <table> 模式
  * 轻量封装，不依赖antd Table（保持灵活性）
  */
-export default function DataTable<T extends Record<string, any>>({
+const DataTable = memo(function DataTable<T extends Record<string, unknown>>({
   columns, data, rowKey = 'id', loading, emptyText = '暂无数据',
   style, className, compact, striped, onRowClick
 }: DataTableProps<T>) {
@@ -43,12 +43,12 @@ export default function DataTable<T extends Record<string, any>>({
 
   const getRowKey = (record: T, index: number): string => {
     if (typeof rowKey === 'function') return rowKey(record, index)
-    return record[rowKey] ?? String(index)
+    return (record as Record<string, unknown>)[rowKey] as string ?? String(index)
   }
 
-  const getValue = (record: T, dataIndex?: string): any => {
+  const getValue = (record: T, dataIndex?: string): unknown => {
     if (!dataIndex) return undefined
-    return dataIndex.split('.').reduce((obj, key) => obj?.[key], record as any)
+    return dataIndex.split('.').reduce((obj: unknown, key) => (obj as Record<string, unknown>)?.[key], record as unknown)
   }
 
   const getAlign = (align?: string): CSSProperties['textAlign'] => {
@@ -57,9 +57,9 @@ export default function DataTable<T extends Record<string, any>>({
     return 'left'
   }
 
-  const getColor = (column: Column<T>, value: any): string | undefined => {
+  const getColor = (column: Column<T>, value: unknown): string | undefined => {
     if (!column.colorize) return undefined
-    const num = typeof value === 'number' ? value : parseFloat(value)
+    const num = typeof value === 'number' ? value : parseFloat(value as string)
     if (isNaN(num)) return undefined
     if (num > 0) return 'var(--accent-green)'
     if (num < 0) return 'var(--accent-red)'
@@ -110,4 +110,6 @@ export default function DataTable<T extends Record<string, any>>({
       </table>
     </div>
   )
-}
+}) as <T extends Record<string, unknown>>(props: DataTableProps<T>) => React.JSX.Element
+
+export default DataTable

@@ -15,6 +15,8 @@ from app.services.grid_service import (
     get_grid_status, optimize_parameters,
     add_to_grid_portfolio, get_grid_portfolio, remove_from_grid_portfolio,
     detect_grid_decay, stress_test_grid,
+    grid_vs_buy_and_hold, suggest_adaptive_grid,
+    grid_health_monitor, save_grid_health_snapshot, get_grid_health_history,
 )
 
 router = APIRouter()
@@ -196,3 +198,47 @@ def stress(
         sizing="equal",
         num_simulations=min(num_simulations, 1000),
     )
+
+
+@router.get("/compare")
+def compare(
+    stock_code: str = Query(..., description="股票代码"),
+    capital: float = Query(1000000, description="总资金"),
+    hist_days: int = Query(252, description="回测天数"),
+):
+    """网格策略 vs 买入持有对比"""
+    return grid_vs_buy_and_hold(stock_code=stock_code, total_capital=capital, hist_days=hist_days)
+
+
+@router.get("/suggest")
+def suggest(
+    stock_code: str = Query(..., description="股票代码"),
+    capital: float = Query(1000000, description="总资金"),
+):
+    """自适应网格参数建议"""
+    return suggest_adaptive_grid(stock_code=stock_code, capital=capital)
+
+
+@router.get("/health")
+def health(
+    stock_code: str = Query(..., description="股票代码"),
+    capital: float = Query(1000000, description="总资金"),
+):
+    """网格健康监控"""
+    return grid_health_monitor(stock_code=stock_code, capital=capital)
+
+
+@router.post("/health/snapshot")
+def health_snapshot(
+    stock_code: str = Query(..., description="股票代码"),
+):
+    """保存网格健康快照"""
+    return save_grid_health_snapshot(stock_code=stock_code)
+
+
+@router.get("/health/history")
+def health_history(
+    stock_code: str = Query(..., description="股票代码"),
+):
+    """获取网格健康历史趋势"""
+    return get_grid_health_history(stock_code=stock_code)

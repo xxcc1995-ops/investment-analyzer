@@ -1,3 +1,4 @@
+import { memo } from 'react'
 import { Input, Tooltip } from 'antd'
 import { SearchOutlined, ReloadOutlined } from '@ant-design/icons'
 
@@ -30,7 +31,7 @@ interface TopBarProps {
   onRefreshBonds: () => void
 }
 
-export default function TopBar({
+const TopBar = memo(function TopBar({
   searchKeyword,
   onSearchChange,
   searchResults,
@@ -222,4 +223,6 @@ export default function TopBar({
       </div>
     </div>
   )
-}
+})
+
+export default TopBar

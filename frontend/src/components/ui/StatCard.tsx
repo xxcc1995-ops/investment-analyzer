@@ -1,4 +1,4 @@
-import { type CSSProperties, type ReactNode } from 'react'
+import { memo, type CSSProperties, type ReactNode } from 'react'
 
 interface StatCardProps {
   label: string
@@ -15,7 +15,7 @@ interface StatCardProps {
  * 指标卡片 - 用于展示单个数值指标
  * 替代各页面中重复的 metric-card / stat-card 模式
  */
-export default function StatCard({ label, value, suffix, color, icon, onClick, style, className }: StatCardProps) {
+const StatCard = memo(function StatCard({ label, value, suffix, color, icon, onClick, style, className }: StatCardProps) {
   return (
     <div
       className={`ui-stat-card ${className || ''}`}
@@ -32,7 +32,9 @@ export default function StatCard({ label, value, suffix, color, icon, onClick, s
       </div>
     </div>
   )
-}
+})
+
+export default StatCard
 
 interface StatCardGroupProps {
   children: ReactNode
@@ -41,7 +43,7 @@ interface StatCardGroupProps {
 }
 
 /** 指标卡片组 - 网格布局容器 */
-export function StatCardGroup({ children, columns = 4, style }: StatCardGroupProps) {
+export const StatCardGroup = memo(function StatCardGroup({ children, columns = 4, style }: StatCardGroupProps) {
   return (
     <div
       className="ui-stat-card-group"
@@ -50,4 +52,4 @@ export function StatCardGroup({ children, columns = 4, style }: StatCardGroupPro
       {children}
     </div>
   )
-}
+})

@@ -1,6 +1,7 @@
 import axios from 'axios'
 
 const BASE = '/api/crypto-master'
+const CRAWLER_BASE = '/api/crypto-crawler'
 
 export const cryptoMasterApi = {
   // 市场数据
@@ -32,8 +33,18 @@ export const cryptoMasterApi = {
   // DeFi指南
   getDefiGuide: () => axios.get(`${BASE}/defi-guide`),
   getAirdropGuide: () => axios.get(`${BASE}/airdrop-guide`),
+  getPaymentTools: () => axios.get(`${BASE}/payment-tools`),
 
   // 实战
   getTradingChecklist: () => axios.get(`${BASE}/trading-checklist`),
   getMasterWisdom: () => axios.get(`${BASE}/master-wisdom`),
+
+  // 情报搜集器
+  getIntelLatest: (params?: { category?: string; impact?: string; limit?: number }) =>
+    axios.get(`${CRAWLER_BASE}/latest`, { params }),
+  getIntelHighImpact: (limit = 20) =>
+    axios.get(`${CRAWLER_BASE}/high-impact`, { params: { limit } }),
+  getIntelTrending: () => axios.get(`${CRAWLER_BASE}/trending`),
+  getIntelSources: () => axios.get(`${CRAWLER_BASE}/sources`),
+  triggerCrawl: () => axios.post(`${CRAWLER_BASE}/crawl`),
 }

@@ -5,7 +5,7 @@ import logging
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from app.api import stocks, cb, scraper, bonds, index_valuation, dividend, cigar_butt, cross_analysis, value_investing, reit, macro, futures, jc_screener, polymarket, export_champions, grid, national_team, right_side, fund_holdings, decision, t_trading, backtest, fund_arb, futu_options, drawdown_control, daily_info, tractor, cb_backtest, valuation, quantdinger, portfolio, sector_valuation, crypto_master, quant_backtest
+from app.api import stocks, cb, scraper, bonds, index_valuation, dividend, cigar_butt, cross_analysis, value_investing, reit, macro, futures, jc_screener, polymarket, export_champions, grid, national_team, right_side, fund_holdings, decision, t_trading, backtest, fund_arb, futu_options, drawdown_control, daily_info, tractor, cb_backtest, valuation, quantdinger, portfolio, sector_valuation, crypto_master, quant_backtest, airdrop_scanner, crypto_crawler
 from app.core.exceptions import register_exception_handlers
 
 logger = logging.getLogger(__name__)
@@ -26,25 +26,43 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning(f"集思录登录态恢复失败: {e}")
 
-    # 异步预热缓存
+    # 异步并行预热缓存
     def _warm():
+        from concurrent.futures import ThreadPoolExecutor, as_completed
         try:
             svc = AKShareService()
             logger.info("开始预热缓存...")
-            svc.get_gdp_data()
-            svc.get_cpi_data()
-            svc.get_pmi_data()
-            svc.get_lpr_data()
-            svc.get_money_supply()
-            svc.get_us_fed_rate()
-            svc.get_us_gdp()
-            svc.get_us_ism_pmi()
-            svc.get_yield_curve()
+            warmup_tasks = [
+                svc.get_gdp_data,
+                svc.get_cpi_data,
+                svc.get_pmi_data,
+                svc.get_lpr_data,
+                svc.get_money_supply,
+                svc.get_us_fed_rate,
+                svc.get_us_gdp,
+                svc.get_us_ism_pmi,
+                svc.get_yield_curve,
+            ]
+            with ThreadPoolExecutor(max_workers=4) as executor:
+                futures = {executor.submit(fn): fn.__name__ for fn in warmup_tasks}
+                for future in as_completed(futures):
+                    try:
+                        future.result()
+                    except Exception as e:
+                        logger.debug(f"预热 {futures[future]} 失败: {e}")
             logger.info("缓存预热完成")
         except Exception as e:
             logger.warning(f"缓存预热失败: {e}")
 
     threading.Thread(target=_warm, daemon=True).start()
+
+    # 启动币圈情报定时搜集器
+    try:
+        from app.services.crypto_scheduler import start_crypto_crawler_scheduler
+        start_crypto_crawler_scheduler(interval_minutes=30)
+        logger.info("币圈情报搜集器已启动")
+    except Exception as e:
+        logger.warning(f"币圈情报搜集器启动失败: {e}")
 
     yield
 
@@ -101,6 +119,8 @@ app.include_router(portfolio.router, prefix="/api/portfolio", tags=["组合管�
 app.include_router(sector_valuation.router, prefix="/api/sector-valuation", tags=["行业估值"])
 app.include_router(crypto_master.router, prefix="/api/crypto-master", tags=["币圈大师"])
 app.include_router(quant_backtest.router, prefix="/api/quant", tags=["量化回测"])
+app.include_router(airdrop_scanner.router, prefix="/api/airdrop-scanner", tags=["空投扫描器"])
+app.include_router(crypto_crawler.router, prefix="/api/crypto-crawler", tags=["币圈情报搜集"])
 
 
 @app.get("/")

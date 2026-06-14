@@ -219,6 +219,7 @@ def _parse_rss(xml_text: str) -> List[Dict[str, str]]:
 
 def _clean_html(text: str) -> str:
     """去除HTML标签和噪音"""
+    import html as _html
     text = re.sub(r'<!\[CDATA\[(.*?)\]\]>', r'\1', text, flags=re.DOTALL)
     # 去除 style/script 标签及其内容
     text = re.sub(r'<style[^>]*>.*?</style>', '', text, flags=re.DOTALL | re.IGNORECASE)
@@ -227,12 +228,8 @@ def _clean_html(text: str) -> str:
     text = re.sub(r'<svg[^>]*>.*?</svg>', '', text, flags=re.DOTALL | re.IGNORECASE)
     # 去除所有HTML标签
     text = re.sub(r'<[^>]+>', ' ', text)
-    # 解码HTML实体
-    text = text.replace('&amp;', '&').replace('&lt;', '<').replace('&gt;', '>')
-    text = text.replace('&quot;', '"').replace('&#39;', "'").replace('&nbsp;', ' ')
-    text = text.replace('&#x27;', "'").replace('&#x20;', ' ').replace('&#x2F;', '/')
-    text = text.replace('&rsquo;', "'").replace('&lsquo;', "'").replace('&rdquo;', '"').replace('&ldquo;', '"')
-    text = text.replace('&mdash;', '—').replace('&ndash;', '–').replace('&hellip;', '…')
+    # 解码所有HTML实体（标准库处理 &#x2019; &#8217; &rsquo; 等全部实体）
+    text = _html.unescape(text)
     # 去除多余空白
     text = re.sub(r'\s+', ' ', text)
     return text.strip()

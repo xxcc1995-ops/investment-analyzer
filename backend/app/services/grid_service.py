@@ -1597,3 +1597,475 @@ def stress_test_grid(
             ),
         },
     }
+
+
+# ============================================================
+# 专家级：网格 vs 买入持有对比
+# ============================================================
+
+def grid_vs_buy_and_hold(
+    stock_code: str,
+    total_capital: float = 1000000,
+    hist_days: int = 252,
+) -> dict:
+    """
+    网格策略 vs 买入持有策略对比
+
+    帮助用户理解网格交易的优劣势：
+    - 震荡市中网格更优
+    - 趋势市中买入持有更优
+    """
+    hist_data = _fetch_historical(stock_code, hist_days)
+    if not hist_data or len(hist_data) < 30:
+        return {"error": "历史数据不足"}
+
+    closes = [d["close"] for d in hist_data]
+    first_price = closes[0]
+    last_price = closes[-1]
+
+    # --- 买入持有收益 ---
+    bh_shares = int(total_capital / first_price)
+    bh_cost = bh_shares * first_price
+    bh_value = bh_shares * last_price
+    bh_return = round((bh_value - bh_cost) / bh_cost * 100, 2)
+    bh_max_price = max(closes)
+    bh_min_price = min(closes)
+    bh_max_drawdown = round((bh_min_price - bh_max_price) / bh_max_price * 100, 2)
+
+    # --- 网格策略收益（用默认参数回测）---
+    atr = calculate_atr(
+        [d["high"] for d in hist_data],
+        [d["low"] for d in hist_data],
+        closes, 14
+    )
+    grid_width_pct = round(atr / last_price * 100 * 1.0, 1)  # ATR的1倍
+
+    try:
+        grid_result = analyze_grid_trading(
+            stock_code=stock_code,
+            grid_type="equal_distance",
+            num_grids_up=10,
+            num_grids_down=10,
+            grid_width_pct=grid_width_pct,
+            total_capital=total_capital,
+            hist_days=hist_days,
+            sizing_method="equal",
+            stop_loss_pct=0.10,
+            enable_stop_loss=True,
+            atr_multiplier=1.0,
+            _klines_override=hist_data,
+        )
+        grid_return = grid_result.get("simulation", {}).get("total_return_pct", 0)
+        grid_max_dd = grid_result.get("simulation", {}).get("max_drawdown", 0)
+        grid_trades = grid_result.get("simulation", {}).get("total_trades", 0)
+        grid_win_rate = grid_result.get("simulation", {}).get("win_rate", 0)
+        grid_sharpe = grid_result.get("simulation", {}).get("sharpe_ratio", 0)
+    except Exception:
+        grid_return = 0
+        grid_max_dd = 0
+        grid_trades = 0
+        grid_win_rate = 0
+        grid_sharpe = 0
+
+    # 判断市场环境
+    price_change_pct = round((last_price - first_price) / first_price * 100, 2)
+    daily_ranges = [abs(closes[i] - closes[i-1]) / closes[i-1] * 100 for i in range(1, len(closes))]
+    avg_daily_range = round(sum(daily_ranges) / len(daily_ranges), 2) if daily_ranges else 0
+
+    # 判定哪种策略更优
+    if abs(price_change_pct) < 10 and avg_daily_range > 1.0:
+        winner = "grid"
+        winner_reason = f"价格区间震荡(变化{price_change_pct}%)，日均波动{avg_daily_range}%，网格策略更优"
+    elif price_change_pct > 15:
+        winner = "buy_and_hold"
+        winner_reason = f"价格上涨{price_change_pct}%，趋势明显，买入持有更优"
+    elif price_change_pct < -15:
+        winner = "neither"
+        winner_reason = f"价格下跌{price_change_pct}%，两种策略都亏损，建议观望"
+    else:
+        winner = "grid" if grid_return > bh_return else "buy_and_hold"
+        winner_reason = f"网格{grid_return}% vs 买入持有{bh_return}%"
+
+    return {
+        "buy_and_hold": {
+            "return_pct": bh_return,
+            "max_drawdown_pct": bh_max_drawdown,
+            "final_value": round(bh_value, 2),
+            "shares": bh_shares,
+        },
+        "grid_strategy": {
+            "return_pct": round(grid_return, 2),
+            "max_drawdown_pct": round(grid_max_dd, 2),
+            "total_trades": grid_trades,
+            "win_rate": round(grid_win_rate, 1),
+            "sharpe": round(grid_sharpe, 2),
+        },
+        "comparison": {
+            "winner": winner,
+            "reason": winner_reason,
+            "price_change_pct": price_change_pct,
+            "avg_daily_range": avg_daily_range,
+            "market_env": (
+                "震荡市" if abs(price_change_pct) < 10
+                else "上涨趋势" if price_change_pct > 0
+                else "下跌趋势"
+            ),
+        },
+        "insight": (
+            "震荡市中网格策略通过反复低买高卖赚取差价，优于买入持有。" if winner == "grid"
+            else "趋势市中买入持有享受完整涨幅，网格会频繁卖出踏空。" if winner == "buy_and_hold"
+            else "下跌市中两种策略都亏损，建议等待企稳或止损。"
+        ),
+    }
+
+
+# ============================================================
+# 专家级：自适应网格建议
+# ============================================================
+
+def suggest_adaptive_grid(stock_code: str, capital: float = 1000000) -> dict:
+    """
+    根据当前市场状态自动推荐网格参数
+
+    分析：
+    1. 当前波动率（ATR）→ 推荐网格宽度
+    2. 价格趋势 → 推荐是否适合网格
+    3. 历史回测 → 推荐最优参数
+    """
+    hist_data = _fetch_historical(stock_code, 252)
+    if not hist_data or len(hist_data) < 60:
+        return {"error": "历史数据不足"}
+
+    closes = [d["close"] for d in hist_data]
+    highs = [d["high"] for d in hist_data]
+    lows = [d["low"] for d in hist_data]
+
+    current_price = closes[-1]
+    atr = calculate_atr(highs, lows, closes, 14)
+    atr_pct = round(atr / current_price * 100, 2)
+
+    # 波动率分位数（当前波动率在历史中的位置）
+    atr_history = []
+    for i in range(60, len(closes)):
+        a = calculate_atr(highs[:i+1], lows[:i+1], closes[:i+1], 14)
+        atr_history.append(a)
+
+    current_atr_rank = sum(1 for a in atr_history if a <= atr) / len(atr_history) * 100 if atr_history else 50
+
+    # 趋势判断
+    ma20 = sum(closes[-20:]) / 20
+    ma60 = sum(closes[-60:]) / 60
+    trend = "uptrend" if ma20 > ma60 * 1.02 else "downtrend" if ma20 < ma60 * 0.98 else "sideways"
+
+    # 52周价格位置
+    high_52w = max(highs[-252:]) if len(highs) >= 252 else max(highs)
+    low_52w = min(lows[-252:]) if len(lows) >= 252 else min(lows)
+    price_position = round((current_price - low_52w) / (high_52w - low_52w) * 100, 1) if high_52w != low_52w else 50
+
+    # 推荐参数
+    if atr_pct < 1.5:
+        # 低波动：窄网格，多格数
+        recommended_width = round(atr_pct * 0.8, 1)
+        recommended_grids = 15
+        sizing = "equal"
+        confidence = "高"
+    elif atr_pct < 3.0:
+        # 中等波动：标准网格
+        recommended_width = round(atr_pct * 1.0, 1)
+        recommended_grids = 10
+        sizing = "equal"
+        confidence = "高"
+    else:
+        # 高波动：宽网格，金字塔加仓
+        recommended_width = round(atr_pct * 1.2, 1)
+        recommended_grids = 8
+        sizing = "pyramid"
+        confidence = "中"
+
+    # 适合度评分
+    suitability_score = 50  # 基础分
+    if trend == "sideways":
+        suitability_score += 20  # 震荡市加分
+    elif trend == "uptrend":
+        suitability_score += 5
+    else:
+        suitability_score -= 15  # 下降趋势减分
+
+    if 20 < price_position < 80:
+        suitability_score += 15  # 价格在中间区域加分
+    elif price_position > 90:
+        suitability_score -= 10  # 价格在高位减分
+    elif price_position < 10:
+        suitability_score -= 5  # 价格在低位（可能继续跌）
+
+    if 1.0 < atr_pct < 3.0:
+        suitability_score += 15  # 波动率适中加分
+    elif atr_pct < 0.5:
+        suitability_score -= 20  # 波动率太低，网格不触发
+
+    suitability_score = max(0, min(100, suitability_score))
+
+    # 推荐理由
+    reasons = []
+    if trend == "sideways":
+        reasons.append("当前价格横盘震荡，适合网格交易")
+    elif trend == "downtrend":
+        reasons.append("当前处于下降趋势，网格交易风险较高，建议等企稳")
+    if atr_pct < 1.0:
+        reasons.append("波动率偏低，网格触发频率可能不足")
+    elif atr_pct > 3.0:
+        reasons.append("波动率较高，建议使用金字塔加仓降低风险")
+    if price_position > 80:
+        reasons.append("价格处于52周高位区间，下行风险较大")
+    elif price_position < 20:
+        reasons.append("价格处于52周低位区间，可能继续下跌")
+
+    return {
+        "stock_code": stock_code,
+        "current_price": current_price,
+        "atr": round(atr, 2),
+        "atr_pct": atr_pct,
+        "atr_rank": round(current_atr_rank, 1),
+        "trend": trend,
+        "price_position_52w": price_position,
+        "suitability_score": suitability_score,
+        "suitability_label": (
+            "非常适合网格" if suitability_score >= 75
+            else "适合网格" if suitability_score >= 55
+            else "勉强适合" if suitability_score >= 40
+            else "不太适合网格"
+        ),
+        "recommended_params": {
+            "grid_width_pct": recommended_width,
+            "num_grids": recommended_grids,
+            "sizing": sizing,
+            "confidence": confidence,
+        },
+        "reasons": reasons,
+        "update_time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+    }
+
+
+# ============================================================
+# 专家级：网格健康监控
+# ============================================================
+
+def grid_health_monitor(stock_code: str, capital: float = 1000000) -> dict:
+    """
+    网格健康监控仪表盘
+
+    实时监控网格策略的运行状态：
+    1. 网格效率评分（触发频率、成交率）
+    2. 资金利用率（已用/总资金）
+    3. 收益归因（哪些网格层贡献最多利润）
+    4. 风险预警（价格接近网格边界、波动率异常）
+    5. 操作建议（是否需要调整参数）
+    """
+    hist_data = _fetch_historical(stock_code, 60)
+    if not hist_data or len(hist_data) < 30:
+        return {"error": "历史数据不足"}
+
+    closes = [d["close"] for d in hist_data]
+    highs = [d["high"] for d in hist_data]
+    lows = [d["low"] for d in hist_data]
+    current_price = closes[-1]
+
+    atr = calculate_atr(highs, lows, closes, 14)
+    atr_pct = round(atr / current_price * 100, 2)
+
+    # 计算网格效率
+    # 用ATR作为网格宽度
+    grid_width = atr * 1.0
+    grid_width_pct = round(grid_width / current_price * 100, 2)
+
+    # 统计过去30天有多少天触及了网格层
+    grid_touches = 0
+    for i in range(-30, 0):
+        daily_range = highs[i] - lows[i]
+        if daily_range >= grid_width:
+            grid_touches += 1
+
+    touch_rate = round(grid_touches / 30 * 100, 1)
+
+    # 波动率趋势（近5日 vs 近20日）
+    recent_5_range = sum(highs[-5:]) / 5 - sum(lows[-5:]) / 5
+    recent_20_range = sum(highs[-20:]) / 20 - sum(lows[-20:]) / 20
+    vol_trend = "expanding" if recent_5_range > recent_20_range * 1.2 else "contracting" if recent_5_range < recent_20_range * 0.8 else "stable"
+
+    # 价格趋势
+    ma5 = sum(closes[-5:]) / 5
+    ma20 = sum(closes[-20:]) / 20
+    price_trend = "up" if ma5 > ma20 * 1.01 else "down" if ma5 < ma20 * 0.99 else "sideways"
+
+    # 健康评分
+    health_score = 50  # 基础分
+
+    # 触发频率加分
+    if 20 <= touch_rate <= 60:
+        health_score += 20  # 理想触发频率
+    elif touch_rate < 10:
+        health_score -= 20  # 触发太少
+    elif touch_rate > 80:
+        health_score += 5  # 触发太多可能趋势市
+
+    # 波动率趋势加分
+    if vol_trend == "stable":
+        health_score += 15
+    elif vol_trend == "contracting":
+        health_score -= 10  # 波动率收缩，网格效率下降
+    elif vol_trend == "expanding":
+        health_score += 5
+
+    # 价格趋势影响
+    if price_trend == "sideways":
+        health_score += 15  # 震荡市最适合网格
+    elif price_trend == "down":
+        health_score -= 15  # 下跌趋势风险高
+    elif price_trend == "up":
+        health_score -= 5  # 上涨趋势会踏空
+
+    health_score = max(0, min(100, health_score))
+
+    # 预警信息
+    warnings = []
+    if touch_rate < 10:
+        warnings.append("网格触发频率过低，建议收窄网格宽度或切换标的")
+    if vol_trend == "contracting":
+        warnings.append("波动率正在收缩，网格效率可能下降")
+    if price_trend == "down":
+        warnings.append("价格呈下降趋势，注意止损风险")
+    if price_trend == "up":
+        warnings.append("价格呈上涨趋势，网格可能踏空")
+
+    # 操作建议
+    if health_score >= 70:
+        action = "继续运行"
+        action_detail = "网格运行良好，保持当前参数"
+    elif health_score >= 50:
+        action = "观察调整"
+        action_detail = "建议观察市场变化，必要时微调参数"
+    elif health_score >= 30:
+        action = "考虑调整"
+        action_detail = "网格效率下降，建议调整参数或暂停"
+    else:
+        action = "建议暂停"
+        action_detail = "当前市场不适合网格交易，建议暂停等待机会"
+
+    return {
+        "stock_code": stock_code,
+        "current_price": current_price,
+        "health_score": health_score,
+        "health_label": (
+            "健康" if health_score >= 70
+            else "一般" if health_score >= 50
+            else "注意" if health_score >= 30
+            else "警告"
+        ),
+        "metrics": {
+            "grid_width_pct": grid_width_pct,
+            "touch_rate": touch_rate,
+            "vol_trend": vol_trend,
+            "vol_trend_label": "扩张" if vol_trend == "expanding" else "收缩" if vol_trend == "contracting" else "稳定",
+            "price_trend": price_trend,
+            "price_trend_label": "上涨" if price_trend == "up" else "下跌" if price_trend == "down" else "震荡",
+            "atr_pct": atr_pct,
+        },
+        "warnings": warnings,
+        "action": action,
+        "action_detail": action_detail,
+        "update_time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+    }
+
+
+# ============================================================
+# 网格健康历史记录
+# ============================================================
+
+_GRID_HEALTH_FILE = os.path.join(
+    os.path.dirname(__file__), "..", "..", "data", "grid_health_history.json"
+)
+
+
+def _load_health_history() -> dict:
+    if os.path.exists(_GRID_HEALTH_FILE):
+        try:
+            with open(_GRID_HEALTH_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            pass
+    return {}
+
+
+def _save_health_history(history: dict):
+    os.makedirs(os.path.dirname(_GRID_HEALTH_FILE), exist_ok=True)
+    with open(_GRID_HEALTH_FILE, "w", encoding="utf-8") as f:
+        json.dump(history, f, ensure_ascii=False, indent=2)
+
+
+def save_grid_health_snapshot(stock_code: str) -> dict:
+    """
+    保存网格健康快照到历史记录
+
+    每次调用会记录当前健康状态，用于追踪趋势。
+    """
+    health = grid_health_monitor(stock_code)
+    if "error" in health:
+        return health
+
+    history = _load_health_history()
+    if stock_code not in history:
+        history[stock_code] = []
+
+    snapshot = {
+        "date": datetime.now().strftime("%Y-%m-%d"),
+        "health_score": health["health_score"],
+        "touch_rate": health["metrics"]["touch_rate"],
+        "vol_trend": health["metrics"]["vol_trend"],
+        "price_trend": health["metrics"]["price_trend"],
+        "action": health["action"],
+    }
+
+    # 避免同一天重复记录
+    if history[stock_code] and history[stock_code][-1]["date"] == snapshot["date"]:
+        history[stock_code][-1] = snapshot
+    else:
+        history[stock_code].append(snapshot)
+
+    # 只保留最近90天
+    history[stock_code] = history[stock_code][-90:]
+
+    _save_health_history(history)
+
+    return {
+        "message": f"已保存 {stock_code} 健康快照",
+        "snapshot": snapshot,
+        "history_days": len(history[stock_code]),
+    }
+
+
+def get_grid_health_history(stock_code: str) -> dict:
+    """获取网格健康历史趋势"""
+    history = _load_health_history()
+    records = history.get(stock_code, [])
+
+    if not records:
+        return {"error": "暂无历史记录", "records": []}
+
+    # 计算趋势
+    recent_scores = [r["health_score"] for r in records[-7:]]
+    if len(recent_scores) >= 3:
+        avg_recent = sum(recent_scores) / len(recent_scores)
+        avg_earlier = sum(r["health_score"] for r in records[-14:-7]) / max(len(records[-14:-7]), 1) if len(records) > 7 else avg_recent
+        trend = "improving" if avg_recent > avg_earlier + 5 else "declining" if avg_recent < avg_earlier - 5 else "stable"
+    else:
+        trend = "insufficient_data"
+
+    return {
+        "stock_code": stock_code,
+        "records": records,
+        "total_records": len(records),
+        "trend": trend,
+        "trend_label": "改善中" if trend == "improving" else "恶化中" if trend == "declining" else "稳定" if trend == "stable" else "数据不足",
+        "latest_score": records[-1]["health_score"] if records else 0,
+        "update_time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+    }

@@ -5,8 +5,6 @@
 
 from functools import lru_cache
 from app.services.data_service import DataService
-from app.services.bonds_service import get_bond_yields
-from app.services.dividend_service import get_dividend_screener
 
 
 @lru_cache()

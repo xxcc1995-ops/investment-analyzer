@@ -1,4 +1,4 @@
-import { type CSSProperties, type ReactNode } from 'react'
+import { memo, type CSSProperties, type ReactNode } from 'react'
 import { ReloadOutlined } from '@ant-design/icons'
 
 interface PageSectionProps {
@@ -16,7 +16,7 @@ interface PageSectionProps {
 /**
  * 页面区块容器 - 替代各页面中重复的 section/card 容器模式
  */
-export default function PageSection({
+const PageSection = memo(function PageSection({
   title, extra, onRefresh, refreshing, children, style, className, compact
 }: PageSectionProps) {
   return (
@@ -43,4 +43,6 @@ export default function PageSection({
       </div>
     </div>
   )
-}
+})
+
+export default PageSection

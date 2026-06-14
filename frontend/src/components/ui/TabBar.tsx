@@ -1,4 +1,4 @@
-import { type CSSProperties, type ReactNode } from 'react'
+import { memo, type CSSProperties, type ReactNode } from 'react'
 
 interface Tab {
   key: string
@@ -20,7 +20,7 @@ interface TabBarProps {
 /**
  * 标签栏 - 替代各页面中重复的自定义 tab 按钮组
  */
-export default function TabBar({ tabs, activeKey, onChange, style, className, size = 'medium' }: TabBarProps) {
+const TabBar = memo(function TabBar({ tabs, activeKey, onChange, style, className, size = 'medium' }: TabBarProps) {
   return (
     <div
       className={`ui-tab-bar ${size === 'small' ? 'ui-tab-bar--sm' : ''} ${className || ''}`}
@@ -41,4 +41,6 @@ export default function TabBar({ tabs, activeKey, onChange, style, className, si
       ))}
     </div>
   )
-}
+})
+
+export default TabBar

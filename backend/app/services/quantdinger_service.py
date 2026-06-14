@@ -12,7 +12,13 @@ from dataclasses import dataclass
 
 QUANTDINGER_BASE_URL = os.getenv("QUANTDINGER_API_URL", "http://localhost:8888")
 QUANTDINGER_USERNAME = os.getenv("QUANTDINGER_USERNAME", "quantdinger")
-QUANTDINGER_PASSWORD = os.getenv("QUANTDINGER_PASSWORD", "123456")
+QUANTDINGER_PASSWORD = os.getenv("QUANTDINGER_PASSWORD", "")
+if not QUANTDINGER_PASSWORD:
+    import logging
+    logging.getLogger(__name__).warning(
+        "QUANTDINGER_PASSWORD未设置，QuantDinger API认证将失败。"
+        "请设置环境变量: export QUANTDINGER_PASSWORD=your_password"
+    )
 
 
 @dataclass

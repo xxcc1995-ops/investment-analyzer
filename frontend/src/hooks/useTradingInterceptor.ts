@@ -1,4 +1,4 @@
-import { useState, useCallback, createElement } from 'react';
+import { useState, useCallback, useRef } from 'react';
 import RationalCheckpoint from '../components/RationalCheckpoint';
 
 // ============================================================
@@ -45,26 +45,27 @@ interface UseTradingInterceptorReturn {
 
 export function useTradingInterceptor(): UseTradingInterceptorReturn {
   const [open, setOpen] = useState(false);
-  const [pendingAction, setPendingAction] = useState<(() => void) | null>(null);
   const [meta, setMeta] = useState<InterceptorMeta>({ actionType: 'buy', target: '' });
+  // 使用ref存储pending action，避免stale closure问题
+  const pendingActionRef = useRef<(() => void) | null>(null);
 
-  const intercept = useCallback((action: () => void, meta: InterceptorMeta) => {
-    setPendingAction(() => action);
-    setMeta(meta);
+  const intercept = useCallback((action: () => void, actionMeta: InterceptorMeta) => {
+    pendingActionRef.current = action;
+    setMeta(actionMeta);
     setOpen(true);
   }, []);
 
   const handlePass = useCallback(() => {
     setOpen(false);
     setTimeout(() => {
-      pendingAction?.();
-      setPendingAction(null);
+      pendingActionRef.current?.();
+      pendingActionRef.current = null;
     }, 100);
-  }, [pendingAction]);
+  }, []);
 
   const handleCancel = useCallback(() => {
     setOpen(false);
-    setPendingAction(null);
+    pendingActionRef.current = null;
   }, []);
 
   return { intercept, checkpointOpen: open, checkpointMeta: meta, handlePass, handleCancel };

@@ -290,6 +290,7 @@ def calc_macd(closes: list[float], fast: int = 12, slow: int = 26,
         "dif": current_dif,
         "dea": current_dea,
         "hist": current_hist,
+        "hist_array": [round(h, 4) for h in hist],  # 完整历史数据
         "signal": signal,
         "divergence": divergence,
     }
@@ -817,7 +818,7 @@ def analyze_t_signal(code: str, market: str, t_capital: float = 300000) -> Optio
         sell_signals.append(("MACD死叉", f"DIF={macd['dif']}", "★★"))
 
     # 使用改进的背离检测（v2: 基于真正的swing high/low）
-    divergence_v2 = detect_macd_divergence_v2(closes, macd["histogram"], 60)
+    divergence_v2 = detect_macd_divergence_v2(closes, macd["hist_array"], 60)
     if divergence_v2 == "bottom":
         buy_signals.append(("MACD底背离", "价格新低但MACD不新低（Swing验证）", "★★★"))
     elif divergence_v2 == "top":
@@ -1003,6 +1004,20 @@ def analyze_t_signal(code: str, market: str, t_capital: float = 300000) -> Optio
         },
         reasoning=reasoning,
     )
+
+    # 附加风险计算（如果信号有效）
+    if signal_type != "hold":
+        try:
+            risk_info = calculate_position_size(code, market, t_capital * 3, 2.0, buy_point if signal_type == "buy" else None)
+            if "error" not in risk_info:
+                result.indicators["risk_management"] = {
+                    "stop_loss": risk_info["stop_loss"],
+                    "position": risk_info["position"],
+                    "targets": risk_info["targets"],
+                    "kelly": risk_info["kelly"],
+                }
+        except Exception:
+            pass
 
     _set_cached(cache_key, result)
     return result
@@ -1256,4 +1271,278 @@ def get_t_philosophy() -> dict:
             "偏离MA20超过8%时信号可信度下降，需谨慎操作",
             "回测结果仅供参考，历史表现不代表未来收益",
         ],
+    }
+
+
+# ============================================================
+# 专家级：策略对比分析
+# ============================================================
+
+def compare_t_strategies(code: str, market: str, t_capital: float = 300000) -> dict:
+    """
+    对比不同做T策略的表现
+
+    三种策略：
+    1. 保守策略：高阈值（buy_score>=5才入场），低频交易
+    2. 标准策略：中等阈值（buy_score>=3），当前默认
+    3. 激进策略：低阈值（buy_score>=2），高频交易
+
+    帮助用户找到最适合自己的做T风格。
+    """
+    klines = fetch_historical_klines(code, market, 252)
+    if not klines or len(klines) < 60:
+        return {"error": "历史数据不足"}
+
+    strategies = [
+        {"name": "保守策略", "buy_threshold": 5, "sell_threshold": 5, "desc": "高阈值，只做最确定的信号"},
+        {"name": "标准策略", "buy_threshold": 3, "sell_threshold": 3, "desc": "当前默认策略，平衡频率和质量"},
+        {"name": "激进策略", "buy_threshold": 2, "sell_threshold": 2, "desc": "低阈值，更多交易机会"},
+    ]
+
+    results = []
+    for strat in strategies:
+        # 运行回测（简化版，复用backtest逻辑但调整阈值）
+        round_trip_cost = calc_round_trip_cost(market)
+        base_lot = 100 if market == "A" else 1
+        trades = []
+        position = 0
+        entry_price = 0.0
+        total_pnl = 0.0
+        peak_pnl = 0.0
+        max_drawdown = 0.0
+
+        for i in range(30, len(klines)):
+            window = klines[:i + 1]
+            closes = [k["close"] for k in window]
+            highs = [k["high"] for k in window]
+            lows = [k["low"] for k in window]
+            volumes = [k["volume"] for k in window]
+            current_price = closes[-1]
+
+            rsi = calc_rsi(closes)
+            kdj = calc_kdj(highs, lows, closes)
+            bollinger = calc_bollinger(closes)
+            trend = calc_trend_filter(closes)
+
+            buy_score = 0
+            sell_score = 0
+
+            if rsi < 30: buy_score += 2
+            elif rsi > 70: sell_score += 2
+            if kdj["signal"] == "golden_cross": buy_score += 2
+            elif kdj["signal"] == "dead_cross": sell_score += 2
+            elif kdj["signal"] == "oversold": buy_score += 1
+            elif kdj["signal"] == "overbought": sell_score += 1
+            if bollinger["signal"] in ("below_lower", "near_lower"):
+                buy_score += 2 if bollinger["signal"] == "below_lower" else 1
+            elif bollinger["signal"] in ("above_upper", "near_upper"):
+                sell_score += 2 if bollinger["signal"] == "above_upper" else 1
+
+            if trend["trend"] == "downtrend": buy_score = max(0, buy_score - 2)
+            elif trend["trend"] == "uptrend": sell_score = max(0, sell_score - 1)
+
+            if buy_score >= strat["buy_threshold"] and position == 0:
+                t_shares = int(t_capital / 3 / current_price / base_lot) * base_lot
+                t_shares = max(t_shares, base_lot)
+                entry_price = current_price * (1 + TRADE_COST[market]["slippage"])
+                position = t_shares
+                trades.append({"date": klines[i]["date"], "action": "buy", "price": entry_price, "shares": t_shares})
+
+            elif sell_score >= strat["sell_threshold"] and position > 0:
+                exit_price = current_price * (1 - TRADE_COST[market]["slippage"])
+                gross_pnl = (exit_price - entry_price) * position
+                cost = position * entry_price * round_trip_cost
+                net_pnl = gross_pnl - cost
+                total_pnl += net_pnl
+                peak_pnl = max(peak_pnl, total_pnl)
+                max_drawdown = min(max_drawdown, total_pnl - peak_pnl)
+                trades.append({"date": klines[i]["date"], "action": "sell", "price": exit_price, "shares": position, "pnl": round(net_pnl, 2)})
+                position = 0
+
+        closed = [t for t in trades if t["action"] == "sell"]
+        wins = [t for t in closed if t.get("pnl", 0) > 0]
+        losses = [t for t in closed if t.get("pnl", 0) <= 0]
+        wr = len(wins) / len(closed) * 100 if closed else 0
+        avg_w = sum(t["pnl"] for t in wins) / len(wins) if wins else 0
+        avg_l = sum(t["pnl"] for t in losses) / len(losses) if losses else 0
+        pf = abs(avg_w / avg_l) if avg_l != 0 else float("inf")
+
+        results.append({
+            "name": strat["name"],
+            "desc": strat["desc"],
+            "buy_threshold": strat["buy_threshold"],
+            "total_trades": len(closed),
+            "win_rate": round(wr, 1),
+            "total_pnl": round(total_pnl, 2),
+            "avg_win": round(avg_w, 2),
+            "avg_loss": round(avg_l, 2),
+            "profit_factor": round(pf, 2) if pf != float("inf") else "N/A",
+            "max_drawdown": round(max_drawdown, 2),
+            "avg_trades_per_month": round(len(closed) / max((len(klines) - 30) / 21, 1), 1),
+        })
+
+    # 推荐最佳策略
+    valid_results = [r for r in results if r["total_trades"] >= 3]
+    if valid_results:
+        best = max(valid_results, key=lambda r: r["total_pnl"] if r["total_pnl"] != 0 else -999999)
+        recommendation = f"推荐「{best['name']}」：总盈亏¥{best['total_pnl']:,}，胜率{best['win_rate']}%，盈亏比{best['profit_factor']}"
+    else:
+        recommendation = "交易次数不足，建议观察更多信号后再选择策略"
+
+    return {
+        "strategies": results,
+        "recommendation": recommendation,
+        "code": code,
+        "market": market,
+        "backtest_period": f"{klines[30]['date']} ~ {klines[-1]['date']}",
+        "update_time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+    }
+
+
+# ============================================================
+# 专家级：风险计算器
+# ============================================================
+
+def calculate_position_size(
+    code: str,
+    market: str,
+    account_balance: float = 1000000,
+    risk_per_trade_pct: float = 2.0,
+    stop_loss_price: float = None,
+) -> dict:
+    """
+    风险计算器 — 基于凯利公式和ATR的仓位计算
+
+    专家级实现：
+    1. 基于ATR计算止损距离
+    2. 根据账户风险比例计算最大仓位
+    3. 根据信号强度调整实际仓位
+    4. 计算风险收益比
+    5. 凯利公式建议仓位
+
+    Args:
+        code: 股票代码
+        market: 市场
+        account_balance: 账户总资金
+        risk_per_trade_pct: 单笔交易风险比例(默认2%)
+        stop_loss_price: 自定义止损价(可选)
+    """
+    klines = fetch_historical_klines(code, market, 252)
+    if not klines or len(klines) < 30:
+        return {"error": "历史数据不足"}
+
+    closes = [k["close"] for k in klines]
+    highs = [k["high"] for k in klines]
+    lows = [k["low"] for k in klines]
+    current_price = closes[-1]
+    atr = calculate_atr(highs, lows, closes, 14)
+
+    # 计算止损距离
+    if stop_loss_price:
+        stop_distance = abs(current_price - stop_loss_price)
+        stop_loss_pct = round(stop_distance / current_price * 100, 2)
+    else:
+        # 默认用2倍ATR作为止损距离
+        stop_distance = atr * 2
+        stop_loss_price = round(current_price - stop_distance, 2)
+        stop_loss_pct = round(stop_distance / current_price * 100, 2)
+
+    # 最大可亏损金额
+    max_loss_amount = account_balance * (risk_per_trade_pct / 100)
+
+    # 基于风险的仓位计算
+    if stop_distance > 0:
+        risk_based_shares = int(max_loss_amount / stop_distance)
+    else:
+        risk_based_shares = 0
+
+    # A股100股整数倍
+    base_lot = 100 if market == "A" else 1
+    risk_based_shares = max(int(risk_based_shares / base_lot) * base_lot, base_lot)
+
+    # 最大仓位（不超过账户的25%单只股票）
+    max_position_value = account_balance * 0.25
+    max_shares_by_value = int(max_position_value / current_price / base_lot) * base_lot
+
+    # 实际建议仓位（取较小值）
+    suggested_shares = min(risk_based_shares, max_shares_by_value)
+    suggested_value = suggested_shares * current_price
+    suggested_pct = round(suggested_value / account_balance * 100, 2)
+
+    # 止盈目标（基于风险收益比）
+    target_1r = round(current_price + stop_distance * 1, 2)  # 1:1
+    target_2r = round(current_price + stop_distance * 2, 2)  # 2:1
+    target_3r = round(current_price + stop_distance * 3, 2)  # 3:1
+
+    # 凯利公式计算最优仓位比例
+    # Kelly% = W - (1-W)/R，其中W=胜率，R=盈亏比
+    # 使用真实回测数据计算
+    try:
+        backtest_result = backtest_t_strategy(code, market, klines, account_balance * 0.3)
+        if backtest_result.get("valid") and backtest_result.get("total_trades", 0) >= 3:
+            win_rate = backtest_result.get("win_rate", 50) / 100
+            avg_win = backtest_result.get("avg_win", 0)
+            avg_loss = abs(backtest_result.get("avg_loss", 1))
+            profit_ratio = avg_win / avg_loss if avg_loss > 0 else 1.5
+        else:
+            # 回测数据不足，使用保守估计
+            win_rate = 0.45
+            profit_ratio = 1.2
+    except Exception:
+        win_rate = 0.45
+        profit_ratio = 1.2
+
+    kelly_pct = win_rate - (1 - win_rate) / profit_ratio if profit_ratio > 0 else 0
+    kelly_pct = max(0, min(kelly_pct * 100, 25))  # 限制在0-25%
+
+    # 风险等级
+    if stop_loss_pct < 3:
+        risk_level = "低风险"
+        risk_color = "green"
+    elif stop_loss_pct < 6:
+        risk_level = "中风险"
+        risk_color = "yellow"
+    else:
+        risk_level = "高风险"
+        risk_color = "red"
+
+    return {
+        "code": code,
+        "market": market,
+        "current_price": current_price,
+        "atr": round(atr, 2),
+        "atr_pct": round(atr / current_price * 100, 2),
+        "stop_loss": {
+            "price": stop_loss_price,
+            "distance": round(stop_distance, 2),
+            "pct": stop_loss_pct,
+        },
+        "position": {
+            "suggested_shares": suggested_shares,
+            "suggested_value": round(suggested_value, 2),
+            "suggested_pct": suggested_pct,
+            "max_loss": round(max_loss_amount, 2),
+            "risk_per_share": round(stop_distance, 2),
+        },
+        "targets": {
+            "target_1r": target_1r,
+            "target_2r": target_2r,
+            "target_3r": target_3r,
+            "reward_1r_pct": round(stop_loss_pct, 2),
+            "reward_2r_pct": round(stop_loss_pct * 2, 2),
+            "reward_3r_pct": round(stop_loss_pct * 3, 2),
+        },
+        "kelly": {
+            "optimal_pct": round(kelly_pct, 1),
+            "win_rate": round(win_rate * 100, 1),
+            "profit_ratio": round(profit_ratio, 2),
+            "recommendation": (
+                f"凯利公式建议仓位{kelly_pct:.1f}%（约¥{account_balance * kelly_pct / 100:,.0f}）"
+                if kelly_pct > 0 else "胜率不足，建议观望"
+            ),
+        },
+        "risk_level": risk_level,
+        "risk_color": risk_color,
+        "account_balance": account_balance,
+        "update_time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
     }

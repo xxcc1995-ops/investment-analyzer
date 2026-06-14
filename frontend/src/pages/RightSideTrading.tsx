@@ -220,7 +220,22 @@ export default function RightSideTrading() {
   const [showBollinger, setShowBollinger] = useState(false)
   const [backtest, setBacktest] = useState<BacktestResult | null>(null)
   const [backtestLoading, setBacktestLoading] = useState(false)
-  const [activeTab, setActiveTab] = useState<'analysis' | 'backtest'>('analysis')
+  const [activeTab, setActiveTab] = useState<'analysis' | 'backtest' | 'scan' | 'sector' | 'watchlist'>('analysis')
+
+  // Scan state
+  const [scanResults, setScanResults] = useState<any>(null)
+  const [scanLoading, setScanLoading] = useState(false)
+  const [scanMinScore, setScanMinScore] = useState(50)
+
+  // Sector state
+  const [sectorData, setSectorData] = useState<any>(null)
+  const [sectorLoading, setSectorLoading] = useState(false)
+
+  // Watchlist state
+  const [watchlist, setWatchlist] = useState<any>(null)
+  const [watchlistLoading, setWatchlistLoading] = useState(false)
+  const [watchlistScan, setWatchlistScan] = useState<any>(null)
+  const [watchlistScanLoading, setWatchlistScanLoading] = useState(false)
 
   // 交易拦截器
   const { intercept, checkpointOpen, checkpointMeta, handlePass, handleCancel } = useTradingInterceptor()
@@ -287,6 +302,69 @@ export default function RightSideTrading() {
       setError(err.response?.data?.detail || '回测失败')
     } finally {
       setBacktestLoading(false)
+    }
+  }
+
+  const loadScan = async () => {
+    setScanLoading(true)
+    try {
+      const res = await axios.get(`${API_BASE}/right-side/scan/batch`, {
+        params: { min_score: scanMinScore, limit: 30 },
+      })
+      setScanResults(res.data)
+    } catch (err: any) {
+      console.error('扫描失败:', err)
+    } finally {
+      setScanLoading(false)
+    }
+  }
+
+  const loadSector = async () => {
+    setSectorLoading(true)
+    try {
+      const res = await axios.get(`${API_BASE}/right-side/sector/rotation`)
+      setSectorData(res.data)
+    } catch (err: any) {
+      console.error('板块分析失败:', err)
+    } finally {
+      setSectorLoading(false)
+    }
+  }
+
+  const loadWatchlist = async () => {
+    setWatchlistLoading(true)
+    try {
+      const res = await axios.get(`${API_BASE}/right-side/watchlist/list`)
+      setWatchlist(res.data)
+    } catch (err: any) {
+      console.error('加载自选股失败:', err)
+    } finally {
+      setWatchlistLoading(false)
+    }
+  }
+
+  const scanWatchlist = async () => {
+    setWatchlistScanLoading(true)
+    try {
+      const res = await axios.get(`${API_BASE}/right-side/watchlist/scan`)
+      setWatchlistScan(res.data)
+    } catch (err: any) {
+      console.error('扫描自选股失败:', err)
+    } finally {
+      setWatchlistScanLoading(false)
+    }
+  }
+
+  const addToWatchlist = async () => {
+    if (!stockCode) return
+    try {
+      await axios.post(`${API_BASE}/right-side/watchlist/add`, null, {
+        params: { code: stockCode, market: 'A' },
+      })
+      alert('已添加到自选股')
+      loadWatchlist()
+    } catch (err: any) {
+      alert(err?.response?.data?.detail || '添加失败')
     }
   }
 
@@ -657,7 +735,7 @@ export default function RightSideTrading() {
       {result && !loading && (
         <>
           {/* Tab bar */}
-          <div style={{ display: 'flex', gap: 8, marginBottom: 20 }}>
+          <div style={{ display: 'flex', gap: 8, marginBottom: 20, flexWrap: 'wrap' }}>
             <button onClick={() => setActiveTab('analysis')} style={{
               padding: '8px 20px', background: activeTab === 'analysis' ? '#3b82f6' : '#1f2937',
               border: '1px solid #374151', borderRadius: 8, color: '#f3f4f6', fontSize: 13, cursor: 'pointer',
@@ -666,6 +744,18 @@ export default function RightSideTrading() {
               padding: '8px 20px', background: activeTab === 'backtest' ? '#3b82f6' : '#1f2937',
               border: '1px solid #374151', borderRadius: 8, color: '#f3f4f6', fontSize: 13, cursor: 'pointer',
             }}>历史回测</button>
+            <button onClick={() => { setActiveTab('scan'); if (!scanResults) loadScan() }} style={{
+              padding: '8px 20px', background: activeTab === 'scan' ? '#3b82f6' : '#1f2937',
+              border: '1px solid #374151', borderRadius: 8, color: '#f3f4f6', fontSize: 13, cursor: 'pointer',
+            }}>🔍 批量扫描</button>
+            <button onClick={() => { setActiveTab('sector'); if (!sectorData) loadSector() }} style={{
+              padding: '8px 20px', background: activeTab === 'sector' ? '#3b82f6' : '#1f2937',
+              border: '1px solid #374151', borderRadius: 8, color: '#f3f4f6', fontSize: 13, cursor: 'pointer',
+            }}>📊 板块轮动</button>
+            <button onClick={() => { setActiveTab('watchlist'); loadWatchlist() }} style={{
+              padding: '8px 20px', background: activeTab === 'watchlist' ? '#3b82f6' : '#1f2937',
+              border: '1px solid #374151', borderRadius: 8, color: '#f3f4f6', fontSize: 13, cursor: 'pointer',
+            }}>⭐ 自选股</button>
           </div>
 
           {activeTab === 'analysis' && (
@@ -1070,6 +1160,244 @@ export default function RightSideTrading() {
                   )}
                 </>
               )}
+            </div>
+          )}
+
+          {/* Scan Tab */}
+          {activeTab === 'scan' && (
+            <div style={{ background: '#1f2937', borderRadius: 10, padding: 16, border: '1px solid #374151' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+                <div style={{ fontSize: 14, fontWeight: 600, color: '#f3f4f6' }}>批量扫描 · 全市场右侧信号</div>
+                <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                  <span style={{ fontSize: 12, color: '#9ca3af' }}>最低分数:</span>
+                  <input type="number" value={scanMinScore} onChange={e => setScanMinScore(Number(e.target.value))}
+                    style={{ width: 60, padding: '4px 8px', background: '#111827', border: '1px solid #374151', borderRadius: 4, color: '#f3f4f6', fontSize: 13 }} />
+                  <button onClick={loadScan} disabled={scanLoading} style={{
+                    padding: '6px 16px', background: '#3b82f6', border: 'none', borderRadius: 6, color: '#fff', fontSize: 13, cursor: 'pointer',
+                  }}>{scanLoading ? '扫描中...' : '重新扫描'}</button>
+                </div>
+              </div>
+
+              {scanLoading && <div style={{ textAlign: 'center', padding: 40, color: '#9ca3af' }}>正在扫描全市场...</div>}
+
+              {scanResults && !scanLoading && (
+                <>
+                  <div style={{ marginBottom: 12, fontSize: 13, color: '#9ca3af' }}>
+                    共发现 {scanResults.total} 只符合条件的股票 · 更新: {scanResults.update_time}
+                  </div>
+                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+                    <thead>
+                      <tr style={{ borderBottom: '1px solid #374151' }}>
+                        {['代码', '市场', '分数', '判定', 'Weinstein阶段', '市场环境', '入场类型'].map(h => (
+                          <th key={h} style={{ padding: '8px 12px', textAlign: 'left', color: '#9ca3af', fontWeight: 500 }}>{h}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {scanResults.results.map((s: any, i: number) => (
+                        <tr key={i} style={{ borderBottom: '1px solid #1f2937', cursor: 'pointer' }}
+                          onClick={() => { setStockCode(s.code); setActiveTab('analysis'); loadAnalysis(s.code) }}>
+                          <td style={{ padding: '8px 12px', fontFamily: 'monospace', fontWeight: 600 }}>{s.code}</td>
+                          <td style={{ padding: '8px 12px' }}>
+                            <span style={{ padding: '2px 6px', borderRadius: 4, fontSize: 10, background: s.market === 'A' ? '#16a34a30' : '#3b82f630', color: s.market === 'A' ? '#16a34a' : '#3b82f6' }}>
+                              {s.market === 'A' ? 'A股' : '港股'}
+                            </span>
+                          </td>
+                          <td style={{ padding: '8px 12px', fontWeight: 700, color: s.score >= 72 ? '#16a34a' : s.score >= 52 ? '#ca8a04' : '#6b7280' }}>{s.score}</td>
+                          <td style={{ padding: '8px 12px' }}>
+                            <span style={{ padding: '2px 8px', borderRadius: 4, fontSize: 11, background: getVerdictStyle(s.verdict).bg, color: '#fff' }}>{s.verdict}</span>
+                          </td>
+                          <td style={{ padding: '8px 12px', color: s.weinstein_stage === 2 ? '#16a34a' : '#9ca3af' }}>Stage {s.weinstein_stage}</td>
+                          <td style={{ padding: '8px 12px', color: s.market_regime === 'trending' ? '#16a34a' : '#9ca3af' }}>
+                            {s.market_regime === 'trending' ? '趋势' : s.market_regime === 'developing' ? '形成中' : '震荡'}
+                          </td>
+                          <td style={{ padding: '8px 12px', color: s.entry_type !== 'none' ? '#3b82f6' : '#6b7280' }}>
+                            {s.entry_type !== 'none' ? '有入场建议' : '暂无'}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </>
+              )}
+            </div>
+          )}
+
+          {/* Sector Tab */}
+          {activeTab === 'sector' && (
+            <div style={{ background: '#1f2937', borderRadius: 10, padding: 16, border: '1px solid #374151' }}>
+              <div style={{ fontSize: 14, fontWeight: 600, color: '#f3f4f6', marginBottom: 16 }}>板块轮动分析</div>
+
+              {sectorLoading && <div style={{ textAlign: 'center', padding: 40, color: '#9ca3af' }}>加载板块数据...</div>}
+
+              {sectorData && !sectorLoading && !sectorData.error && (
+                <>
+                  <div style={{ marginBottom: 16, display: 'flex', gap: 16, alignItems: 'center' }}>
+                    <span style={{ fontSize: 13, color: '#9ca3af' }}>市场情绪:</span>
+                    <span style={{
+                      padding: '4px 12px', borderRadius: 6, fontSize: 13, fontWeight: 600,
+                      background: sectorData.market_mood === '强势' ? '#16a34a20' : sectorData.market_mood === '偏弱' ? '#dc262620' : '#ca8a0420',
+                      color: sectorData.market_mood === '强势' ? '#16a34a' : sectorData.market_mood === '偏弱' ? '#dc2626' : '#ca8a04',
+                    }}>{sectorData.market_mood}</span>
+                    <span style={{ fontSize: 12, color: '#6b7280' }}>共 {sectorData.total} 个板块</span>
+                  </div>
+
+                  {/* Strong sectors */}
+                  {sectorData.strong_sectors && sectorData.strong_sectors.length > 0 && (
+                    <div style={{ marginBottom: 16 }}>
+                      <div style={{ fontSize: 13, fontWeight: 600, color: '#16a34a', marginBottom: 8 }}>🔥 领涨板块</div>
+                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: 8 }}>
+                        {sectorData.strong_sectors.map((s: any, i: number) => (
+                          <div key={i} style={{ background: '#111827', borderRadius: 8, padding: 12, border: '1px solid #16a34a30' }}>
+                            <div style={{ fontSize: 14, fontWeight: 600, color: '#f3f4f6' }}>{s.name}</div>
+                            <div style={{ fontSize: 18, fontWeight: 700, color: '#16a34a', margin: '4px 0' }}>+{s.change_pct}%</div>
+                            <div style={{ fontSize: 11, color: '#6b7280' }}>
+                              涨{s.up_count} / 跌{s.down_count}
+                              {s.lead_stock && ` · 领涨: ${s.lead_stock}`}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Weak sectors */}
+                  {sectorData.weak_sectors && sectorData.weak_sectors.length > 0 && (
+                    <div style={{ marginBottom: 16 }}>
+                      <div style={{ fontSize: 13, fontWeight: 600, color: '#dc2626', marginBottom: 8 }}>❄️ 领跌板块</div>
+                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: 8 }}>
+                        {sectorData.weak_sectors.map((s: any, i: number) => (
+                          <div key={i} style={{ background: '#111827', borderRadius: 8, padding: 12, border: '1px solid #dc262630' }}>
+                            <div style={{ fontSize: 14, fontWeight: 600, color: '#f3f4f6' }}>{s.name}</div>
+                            <div style={{ fontSize: 18, fontWeight: 700, color: '#dc2626', margin: '4px 0' }}>{s.change_pct}%</div>
+                            <div style={{ fontSize: 11, color: '#6b7280' }}>
+                              涨{s.up_count} / 跌{s.down_count}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Full sector table */}
+                  <div style={{ fontSize: 13, fontWeight: 600, color: '#f3f4f6', marginBottom: 8 }}>全部板块排名</div>
+                  <div style={{ maxHeight: 400, overflow: 'auto' }}>
+                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+                      <thead>
+                        <tr style={{ borderBottom: '1px solid #374151', position: 'sticky', top: 0, background: '#1f2937' }}>
+                          {['排名', '板块', '涨跌幅%', '涨家数', '跌家数', '领涨股'].map(h => (
+                            <th key={h} style={{ padding: '6px 8px', textAlign: 'left', color: '#9ca3af', fontWeight: 500 }}>{h}</th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {sectorData.sectors.map((s: any, i: number) => (
+                          <tr key={i} style={{ borderBottom: '1px solid #1f2937' }}>
+                            <td style={{ padding: '6px 8px', color: '#6b7280' }}>{i + 1}</td>
+                            <td style={{ padding: '6px 8px', fontWeight: 600, color: '#f3f4f6' }}>{s.name}</td>
+                            <td style={{ padding: '6px 8px', fontWeight: 600, color: s.change_pct > 0 ? '#16a34a' : s.change_pct < 0 ? '#dc2626' : '#6b7280' }}>
+                              {s.change_pct > 0 ? '+' : ''}{s.change_pct}%
+                            </td>
+                            <td style={{ padding: '6px 8px', color: '#16a34a' }}>{s.up_count}</td>
+                            <td style={{ padding: '6px 8px', color: '#dc2626' }}>{s.down_count}</td>
+                            <td style={{ padding: '6px 8px', color: '#9ca3af' }}>{s.lead_stock || '-'}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </>
+              )}
+              {sectorData?.error && <p style={{ color: '#dc2626' }}>{sectorData.error}</p>}
+            </div>
+          )}
+
+          {/* Watchlist Tab */}
+          {activeTab === 'watchlist' && (
+            <div style={{ background: '#1f2937', borderRadius: 10, padding: 16, border: '1px solid #374151' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+                <div style={{ fontSize: 14, fontWeight: 600, color: '#f3f4f6' }}>⭐ 自选股管理</div>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  {stockCode && (
+                    <button onClick={addToWatchlist} style={{
+                      padding: '6px 16px', background: '#16a34a', border: 'none', borderRadius: 6, color: '#fff', fontSize: 13, cursor: 'pointer',
+                    }}>+ 添加当前股票</button>
+                  )}
+                  <button onClick={scanWatchlist} disabled={watchlistScanLoading} style={{
+                    padding: '6px 16px', background: '#3b82f6', border: 'none', borderRadius: 6, color: '#fff', fontSize: 13, cursor: 'pointer',
+                  }}>{watchlistScanLoading ? '扫描中...' : '🔍 扫描自选股'}</button>
+                </div>
+              </div>
+
+              {watchlistLoading && <div style={{ textAlign: 'center', padding: 40, color: '#9ca3af' }}>加载中...</div>}
+
+              {/* Watchlist items */}
+              {watchlist && watchlist.watchlist && watchlist.watchlist.length > 0 && (
+                <div style={{ marginBottom: 16 }}>
+                  <div style={{ fontSize: 13, color: '#9ca3af', marginBottom: 8 }}>共 {watchlist.total} 只自选股</div>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: 8 }}>
+                    {watchlist.watchlist.map((w: any, i: number) => (
+                      <div key={i} style={{ background: '#111827', borderRadius: 8, padding: 12, border: '1px solid #374151' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                          <div>
+                            <span style={{ fontWeight: 700 }}>{w.code}</span>
+                            {w.name && <span style={{ color: '#9ca3af', marginLeft: 6, fontSize: 12 }}>{w.name}</span>}
+                          </div>
+                          <button onClick={async () => {
+                            await axios.delete(`${API_BASE}/right-side/watchlist/${w.code}`)
+                            loadWatchlist()
+                          }} style={{ background: 'none', border: 'none', color: '#6b7280', cursor: 'pointer', fontSize: 14 }}>×</button>
+                        </div>
+                        {w.last_verdict && (
+                          <div style={{ marginTop: 4, fontSize: 11, color: w.last_verdict === '右侧确认' ? '#16a34a' : '#9ca3af' }}>
+                            {w.last_verdict} · {w.last_score}分
+                          </div>
+                        )}
+                        {w.note && <div style={{ fontSize: 11, color: '#6b7280', marginTop: 2 }}>{w.note}</div>}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Watchlist scan results */}
+              {watchlistScan && !watchlistScanLoading && (
+                <div>
+                  <div style={{ fontSize: 13, fontWeight: 600, color: '#f3f4f6', marginBottom: 8 }}>
+                    扫描结果 · {watchlistScan.summary?.confirmed || 0} 只右侧确认
+                  </div>
+                  {watchlistScan.results && watchlistScan.results.length > 0 ? (
+                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+                      <thead>
+                        <tr style={{ borderBottom: '1px solid #374151' }}>
+                          {['代码', '分数', '判定', '阶段', '入场价', '止损价'].map(h => (
+                            <th key={h} style={{ padding: '8px 12px', textAlign: 'left', color: '#9ca3af', fontWeight: 500 }}>{h}</th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {watchlistScan.results.map((s: any, i: number) => (
+                          <tr key={i} style={{ borderBottom: '1px solid #1f2937', cursor: 'pointer' }}
+                            onClick={() => { setStockCode(s.code); setActiveTab('analysis'); doLoadAnalysis(s.code) }}>
+                            <td style={{ padding: '8px 12px', fontFamily: 'monospace', fontWeight: 600 }}>{s.code}</td>
+                            <td style={{ padding: '8px 12px', fontWeight: 700, color: s.score >= 72 ? '#16a34a' : '#9ca3af' }}>{s.score}</td>
+                            <td style={{ padding: '8px 12px' }}>
+                              <span style={{ padding: '2px 8px', borderRadius: 4, fontSize: 11, background: getVerdictStyle(s.verdict).bg, color: '#fff' }}>{s.verdict}</span>
+                            </td>
+                            <td style={{ padding: '8px 12px', color: s.weinstein_stage === 2 ? '#16a34a' : '#9ca3af' }}>Stage {s.weinstein_stage}</td>
+                            <td style={{ padding: '8px 12px', color: '#3b82f6' }}>{s.entry_price ? `¥${s.entry_price}` : '-'}</td>
+                            <td style={{ padding: '8px 12px', color: '#dc2626' }}>{s.stop_loss ? `¥${s.stop_loss}` : '-'}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  ) : (
+                    <div style={{ textAlign: 'center', padding: 40, color: '#6b7280' }}>自选股为空，请先添加股票</div>
+                  )}
+                </div>
+              )}
+
+              {watchlistScan?.error && <p style={{ color: '#dc2626' }}>{watchlistScan.error}</p>}
             </div>
           )}
         </>

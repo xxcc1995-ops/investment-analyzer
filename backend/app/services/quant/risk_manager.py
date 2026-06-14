@@ -26,10 +26,10 @@ class RiskConfig:
     stop_loss_pct: float = -0.08        # 硬止损 -8%
     trailing_stop_pct: float = -0.12    # 移动止损 -12%
 
-    # 组合回撤控制
-    drawdown_warn: float = -0.05        # 警戒线 -5%
-    drawdown_reduce: float = -0.10      # 减仓线 -10%
-    drawdown_close: float = -0.15       # 清仓线 -15%
+    # 组合回撤控制（宽松版，避免过早清仓）
+    drawdown_warn: float = -0.10        # 警戒线 -10%
+    drawdown_reduce: float = -0.20      # 减仓线 -20%
+    drawdown_close: float = -0.30       # 清仓线 -30%
 
     # 仓位限制
     max_single_pct: float = 0.15        # 单只最大仓位 15%

@@ -18,8 +18,7 @@ from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Tuple, Any
 from dataclasses import dataclass, field
 
-from .data_provider import get_stock_ohlcv, get_stock_snapshot, get_index_daily, get_batch_ohlcv
-from .universe import build_universe, check_tradeable, filter_universe_for_strategy
+from .data_provider import get_stock_ohlcv, get_index_daily, get_batch_ohlcv, build_stock_universe, get_snapshot_for_universe
 from .cost_model import AShareCostModel, DEFAULT_COST_MODEL
 from .risk_manager import RiskManager, RiskConfig
 from .metrics import calculate_full_metrics, calc_daily_returns
@@ -149,50 +148,34 @@ def _prepare_data(strategy_name: str, start_date: str, end_date: str) -> Dict:
     """准备回测数据"""
     logger.info("Preparing backtest data...")
 
-    # 获取全市场快照
-    snapshot = get_stock_snapshot()
-    if snapshot is None or snapshot.empty:
-        return {'error': 'Failed to fetch market snapshot'}
-
     # 构建股票池
-    universe = build_universe(
-        min_market_cap=2e9,
-        min_avg_turnover=5e6,
-    )
-    if universe.empty:
-        return {'error': 'Universe is empty after filtering'}
+    codes = build_stock_universe(max_stocks=300)
+    if not codes:
+        return {'error': 'Universe is empty'}
 
-    # 根据策略类型过滤
-    universe = filter_universe_for_strategy(universe, strategy_name)
-
-    codes = universe['code'].tolist()
     logger.info(f"Universe: {len(codes)} stocks")
 
     # 获取历史数据（需要额外的历史用于因子计算）
     lookback_start = (pd.Timestamp(start_date) - timedelta(days=400)).strftime('%Y-%m-%d')
 
     # 批量获取 OHLCV
-    price_data = {}
-    total = len(codes)
-    for i, code in enumerate(codes):
-        if (i + 1) % 50 == 0:
-            logger.info(f"Fetching data: {i + 1}/{total}")
-        df = get_stock_ohlcv(code, lookback_start, end_date)
-        if df is not None and len(df) > 60:
-            price_data[code] = df
+    price_data = get_batch_ohlcv(codes, lookback_start, end_date)
 
     logger.info(f"Price data: {len(price_data)} stocks with sufficient history")
 
     if len(price_data) < 20:
         return {'error': f'Insufficient stocks with data: {len(price_data)}'}
 
+    # 获取快照
+    snapshot = get_snapshot_for_universe(list(price_data.keys()))
+
     # 获取基准数据
-    benchmark_data = get_index_daily(benchmark, lookback_start, end_date)
+    benchmark_data = get_index_daily('000300', lookback_start, end_date)
 
     return {
         'price_data': price_data,
         'snapshot': snapshot,
-        'universe': universe,
+        'codes': list(price_data.keys()),
         'benchmark_data': benchmark_data,
     }
 
@@ -484,7 +467,7 @@ def _run_fold(strategy, price_data, test_dates, test_start_idx,
     risk_manager._peak_value = capital
 
     rebalance_dates = _get_rebalance_dates(test_dates, rebalance_freq)
-    snapshot = get_stock_snapshot()
+    snapshot = get_snapshot_for_universe(list(price_data.keys()))
 
     for date in test_dates:
         date_str = str(date)[:10]

@@ -1,4 +1,4 @@
-import { type CSSProperties, type ReactNode } from 'react'
+import { memo, type CSSProperties, type ReactNode } from 'react'
 import { InboxOutlined } from '@ant-design/icons'
 
 interface EmptyStateProps {
@@ -13,7 +13,7 @@ interface EmptyStateProps {
 /**
  * 空状态 - 替代各页面中重复的 empty-state 模式
  */
-export default function EmptyState({
+const EmptyState = memo(function EmptyState({
   icon, title = '暂无数据', description, action, style, className
 }: EmptyStateProps) {
   return (
@@ -24,4 +24,6 @@ export default function EmptyState({
       {action && <div className="ui-empty__action">{action}</div>}
     </div>
   )
-}
+})
+
+export default EmptyState

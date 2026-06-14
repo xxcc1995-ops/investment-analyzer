@@ -3184,3 +3184,132 @@ def get_signal_performance_history(stock_code: str) -> dict:
         ),
         "update_time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
     }
+
+
+# ============================================================
+# 专家级：自选股管理
+# ============================================================
+
+import json
+import os
+
+_WATCHLIST_FILE = os.path.join(os.path.dirname(__file__), "..", "..", "data", "right_side_watchlist.json")
+
+
+def _load_watchlist() -> list:
+    if os.path.exists(_WATCHLIST_FILE):
+        try:
+            with open(_WATCHLIST_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            pass
+    return []
+
+
+def _save_watchlist(watchlist: list):
+    os.makedirs(os.path.dirname(_WATCHLIST_FILE), exist_ok=True)
+    with open(_WATCHLIST_FILE, "w", encoding="utf-8") as f:
+        json.dump(watchlist, f, ensure_ascii=False, indent=2)
+
+
+def add_to_watchlist(code: str, name: str = "", market: str = "A", note: str = "") -> dict:
+    """添加股票到右侧交易自选股"""
+    watchlist = _load_watchlist()
+    for w in watchlist:
+        if w["code"] == code:
+            return {"error": f"{code} 已在自选股中"}
+
+    entry = {
+        "code": code,
+        "name": name or code,
+        "market": market,
+        "note": note,
+        "added_date": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "last_score": None,
+        "last_verdict": None,
+    }
+    watchlist.append(entry)
+    _save_watchlist(watchlist)
+    return {"message": f"已添加 {code} 到自选股", "entry": entry}
+
+
+def remove_from_watchlist(code: str) -> dict:
+    """从自选股中移除"""
+    watchlist = _load_watchlist()
+    new_list = [w for w in watchlist if w["code"] != code]
+    if len(new_list) == len(watchlist):
+        return {"error": f"未找到 {code}"}
+    _save_watchlist(new_list)
+    return {"message": f"已移除 {code}"}
+
+
+def get_watchlist() -> dict:
+    """获取自选股列表"""
+    watchlist = _load_watchlist()
+    return {
+        "watchlist": watchlist,
+        "total": len(watchlist),
+        "update_time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+    }
+
+
+def scan_watchlist() -> dict:
+    """
+    扫描自选股的右侧信号
+
+    只扫描自选股中的股票，比全市场扫描更快更精准。
+    """
+    watchlist = _load_watchlist()
+    if not watchlist:
+        return {"error": "自选股为空", "results": []}
+
+    results = []
+    for w in watchlist:
+        try:
+            result = analyze_right_side(w["code"])
+            if "error" in result:
+                continue
+
+            score = result.get("score", 0)
+            verdict = result.get("verdict", "")
+
+            # 更新自选股记录
+            w["last_score"] = score
+            w["last_verdict"] = verdict
+
+            results.append({
+                "code": w["code"],
+                "name": w.get("name", w["code"]),
+                "market": w.get("market", "A"),
+                "score": score,
+                "verdict": verdict,
+                "market_regime": result.get("market_regime", {}).get("regime", ""),
+                "weinstein_stage": result.get("weinstein_stage", {}).get("stage", 0),
+                "entry_type": result.get("entry_plan", {}).get("entry_type", "none"),
+                "entry_price": result.get("entry_plan", {}).get("entry_price"),
+                "stop_loss": result.get("risk_management", {}).get("stop_loss", {}).get("normal"),
+                "note": w.get("note", ""),
+            })
+        except Exception:
+            continue
+
+    # 保存更新后的自选股
+    _save_watchlist(watchlist)
+
+    # 按分数排序
+    results.sort(key=lambda x: x["score"], reverse=True)
+
+    # 统计
+    confirmed = [r for r in results if r["verdict"] == "右侧确认"]
+    waiting = [r for r in results if r["verdict"] == "观望等待"]
+
+    return {
+        "results": results,
+        "summary": {
+            "total": len(results),
+            "confirmed": len(confirmed),
+            "waiting": len(waiting),
+            "top_opportunity": results[0] if results else None,
+        },
+        "update_time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+    }

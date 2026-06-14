@@ -1,4 +1,5 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, memo } from 'react'
+import { useNavigate, useLocation } from 'react-router-dom'
 import { Menu, Layout } from 'antd'
 import {
   LineChartOutlined,
@@ -15,10 +16,8 @@ import {
   AreaChartOutlined,
   SwapOutlined,
   BankOutlined,
-
   TrophyOutlined,
   SafetyOutlined,
-  TeamOutlined,
   BulbOutlined,
   ExperimentOutlined,
   RocketOutlined,
@@ -31,6 +30,7 @@ import {
   SettingOutlined,
   LinkOutlined,
   FireOutlined,
+  GiftOutlined,
 } from '@ant-design/icons'
 import type { MenuProps } from 'antd'
 
@@ -39,10 +39,52 @@ const { Sider } = Layout
 type MenuItem = Required<MenuProps>['items'][number]
 
 interface AppSidebarProps {
-  activeKey: string
-  onNavigate: (key: string) => void
   collapsed: boolean
   onCollapse: (collapsed: boolean) => void
+}
+
+// 菜单 key → URL 路径 映射
+const keyToPath: Record<string, string> = {
+  dailyInfo: '/',
+  stock: '/stock',
+  indexVal: '/index-valuation',
+  macro: '/macro',
+  futures: '/futures',
+  dividend: '/dividend',
+  cigarButt: '/cigar-butt',
+  valueInvesting: '/value-investing',
+  reit: '/reit',
+  exportChampions: '/export-champions',
+  jcScreener: '/jc-screener',
+  tTrading: '/t-trading',
+  gridTrading: '/grid-trading',
+  rightSide: '/right-side',
+  futuOptionChain: '/futu-options',
+  option: '/option-calculator',
+  backtestReport: '/backtest',
+  quantBacktest: '/quant-backtest',
+  drawdownControl: '/drawdown',
+  fundArb: '/fund-arb',
+  tractorTrading: '/tractor',
+  cb: '/cb',
+  cbBacktest: '/cb-backtest',
+  masterStrategy: '/master-strategy',
+  polymarket: '/polymarket',
+  hki: '/hki',
+  cryptoMaster: '/crypto',
+  airdropScanner: '/airdrop-scanner',
+  nationalTeam: '/national-team',
+  strategyValidation: '/strategy-validation',
+  decisionGuard: '/decision-guard',
+  prefrontalTraining: '/prefrontal-training',
+  portfolio: '/portfolio',
+  mobileSettings: '/settings',
+}
+
+// URL 路径 → 菜单 key 反向映射
+const pathToKey: Record<string, string> = {}
+for (const [key, path] of Object.entries(keyToPath)) {
+  pathToKey[path] = key
 }
 
 function getItem(
@@ -60,7 +102,6 @@ const menuItems: MenuItem[] = [
     getItem('每日资讯', 'dailyInfo', <DashboardOutlined />),
     getItem('我的自选', 'stock', <DashboardOutlined />),
     getItem('指数估值', 'indexVal', <BarChartOutlined />),
-
     getItem('宏观数据', 'macro', <AreaChartOutlined />),
     getItem('期货洞察', 'futures', <ExperimentOutlined />),
   ]),
@@ -79,6 +120,7 @@ const menuItems: MenuItem[] = [
     getItem('期权轮动(实战)', 'futuOptionChain', <PieChartOutlined />),
     getItem('期权计算', 'option', <ReconciliationOutlined />),
     getItem('策略回测', 'backtestReport', <MonitorOutlined />),
+    getItem('量化回测', 'quantBacktest', <ExperimentOutlined />),
     getItem('回撤控制', 'drawdownControl', <AlertOutlined />),
   ]),
   getItem('基金与债券', 'funds', <FundOutlined />, [
@@ -92,11 +134,13 @@ const menuItems: MenuItem[] = [
     getItem('Polymarket', 'polymarket', <GlobalOutlined />),
     getItem('港股打新', 'hki', <RocketOutlined />),
     getItem('币圈大师', 'cryptoMaster', <FireOutlined />),
+    getItem('空投扫描器', 'airdropScanner', <GiftOutlined />),
   ]),
   getItem('辅助工具', 'tools', <ToolOutlined />, [
+    getItem('策略验证', 'strategyValidation', <BarChartOutlined />),
     getItem('国家队监控', 'nationalTeam', <SafetyOutlined />),
-
     getItem('决策卫士', 'decisionGuard', <SafetyCertificateOutlined />),
+    getItem('前额叶练习', 'prefrontalTraining', <ExperimentOutlined />),
     getItem('APP设置', 'mobileSettings', <SettingOutlined />),
   ]),
   getItem('量化工具', 'recommend', <LinkOutlined />, [
@@ -122,11 +166,24 @@ function findParentKey(items: MenuItem[], targetKey: string): string | null {
   return null
 }
 
-export default function AppSidebar({ activeKey, onNavigate, collapsed, onCollapse }: AppSidebarProps) {
+// 从当前 pathname 推导出菜单 activeKey
+function deriveActiveKey(pathname: string): string {
+  // 精确匹配
+  if (pathToKey[pathname]) return pathToKey[pathname]
+  // 前缀匹配（如 /stock/600519 → stock）
+  if (pathname.startsWith('/stock')) return 'stock'
+  // 默认
+  return 'dailyInfo'
+}
+
+const AppSidebar = memo(function AppSidebar({ collapsed, onCollapse }: AppSidebarProps) {
+  const navigate = useNavigate()
+  const location = useLocation()
+  const activeKey = deriveActiveKey(location.pathname)
   const parentKey = findParentKey(menuItems, activeKey)
   const [openKeys, setOpenKeys] = useState<string[]>(parentKey ? [parentKey] : ['market'])
 
-  // 当activeKey变化时，自动展开对应的子菜单
+  // 当 activeKey 变化时，自动展开对应的子菜单
   useEffect(() => {
     const pk = findParentKey(menuItems, activeKey)
     if (pk && !openKeys.includes(pk)) {
@@ -135,7 +192,6 @@ export default function AppSidebar({ activeKey, onNavigate, collapsed, onCollaps
   }, [activeKey])
 
   const handleOpenChange = (keys: string[]) => {
-    // 只展开最后一个打开的子菜单
     const latestOpenKey = keys.find(key => openKeys.indexOf(key) === -1)
     const rootSubmenuKeys = ['market', 'screening', 'trading', 'funds', 'alternative', 'tools', 'recommend']
     if (latestOpenKey && rootSubmenuKeys.indexOf(latestOpenKey) === -1) {
@@ -158,7 +214,11 @@ export default function AppSidebar({ activeKey, onNavigate, collapsed, onCollaps
     }
     // 忽略分组的点击
     if (['market', 'screening', 'trading', 'funds', 'alternative', 'tools', 'recommend'].includes(key)) return
-    onNavigate(key)
+    // 导航到对应路径
+    const path = keyToPath[key]
+    if (path) {
+      navigate(path)
+    }
   }
 
   return (
@@ -219,4 +279,6 @@ export default function AppSidebar({ activeKey, onNavigate, collapsed, onCollaps
       </div>
     </Sider>
   )
-}
+})
+
+export default AppSidebar

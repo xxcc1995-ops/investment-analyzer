@@ -74,19 +74,51 @@ class NeoDataService:
 
     def _parse_metrics(self, data: dict) -> dict:
         """解析指标数据"""
-        # 根据NeoData的实际响应格式解析
         api_data = data.get("apiData", {})
         recall = api_data.get("apiRecall", [])
 
         result = {}
         for item in recall:
             content = item.get("content", {})
-            # 解析具体字段
-            # 这里需要根据实际返回的数据结构调整
-            pass
+            if not isinstance(content, dict):
+                continue
+            # NeoData返回的key-value对，提取常见财务指标
+            for key, value in content.items():
+                key_lower = str(key).lower()
+                if any(k in key_lower for k in ('pe', '市盈率')):
+                    result['pe'] = value
+                elif any(k in key_lower for k in ('pb', '市净率')):
+                    result['pb'] = value
+                elif any(k in key_lower for k in ('roe', '净资产收益率')):
+                    result['roe'] = value
+                elif any(k in key_lower for k in ('市值', 'market_cap')):
+                    result['market_cap'] = value
+                elif any(k in key_lower for k in ('股息', 'dividend')):
+                    result['dividend_yield'] = value
 
         return result
 
     def _parse_growth(self, data: dict) -> dict:
         """解析增长数据"""
-        return {}
+        api_data = data.get("apiData", {})
+        recall = api_data.get("apiRecall", [])
+
+        result = {}
+        for item in recall:
+            content = item.get("content", {})
+            if not isinstance(content, dict):
+                continue
+            for key, value in content.items():
+                key_lower = str(key).lower()
+                if any(k in key_lower for k in ('营收增长', 'revenue_growth')):
+                    result['revenue_growth'] = value
+                elif any(k in key_lower for k in ('净利润增长', 'profit_growth')):
+                    result['profit_growth'] = value
+                elif any(k in key_lower for k in ('营收', 'revenue')):
+                    result['revenue'] = value
+                elif any(k in key_lower for k in ('净利润', 'net_profit')):
+                    result['net_profit'] = value
+                elif any(k in key_lower for k in ('自由现金流', 'free_cash_flow')):
+                    result['free_cash_flow'] = value
+
+        return result

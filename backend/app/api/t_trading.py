@@ -21,7 +21,8 @@ from fastapi import APIRouter, Query, Body
 from app.services.t_trading_service import (
     scan_all_signals, get_detailed_analysis, calc_pyramid_orders,
     get_t_philosophy, fetch_historical_klines, backtest_t_strategy,
-    calc_trend_filter, calc_round_trip_cost,
+    calc_trend_filter, calc_round_trip_cost, compare_t_strategies,
+    calculate_position_size,
 )
 from app.services.t_position_service import (
     init_position, get_all_positions, get_position,
@@ -216,6 +217,49 @@ def risk_summary():
     - 整体风险等级
     """
     return get_risk_summary()
+
+
+@router.get("/compare-strategies/{code}")
+def compare_strategies(
+    code: str,
+    market: str = Query(..., description="市场: A/HK/US"),
+    t_capital: float = Query(300000, description="做T资金"),
+):
+    """
+    策略对比分析 — 三种做T风格对比
+
+    对比保守/标准/激进三种策略：
+    - 胜率、盈亏比、最大回撤
+    - 交易频率
+    - 推荐最适合的策略
+    """
+    return compare_t_strategies(code=code, market=market, t_capital=t_capital)
+
+
+@router.get("/risk-calculator/{code}")
+def risk_calculator(
+    code: str,
+    market: str = Query(..., description="市场: A/HK/US"),
+    account_balance: float = Query(1000000, description="账户总资金"),
+    risk_per_trade_pct: float = Query(2.0, description="单笔风险比例(%)"),
+    stop_loss_price: float = Query(None, description="自定义止损价(可选)"),
+):
+    """
+    风险计算器 — 基于凯利公式和ATR的仓位计算
+
+    返回：
+    - 建议仓位（股数、金额、占比）
+    - 止损价位和止损距离
+    - 止盈目标（1R/2R/3R）
+    - 凯利公式最优仓位
+    - 风险等级
+    """
+    return calculate_position_size(
+        code=code, market=market,
+        account_balance=account_balance,
+        risk_per_trade_pct=risk_per_trade_pct,
+        stop_loss_price=stop_loss_price,
+    )
 
 
 @router.get("/analytics")

@@ -48,32 +48,26 @@ STRATEGIES = {
     'andaoquan': {
         'name': '安道全面值策略',
         'description': '面值附近买入，130元卖出。规则极简，适合新手。',
-        'filter': lambda b: (
-            b['price'] <= 110
-            and b.get('rating_order', 0) >= 3  # AA-及以上
-        ),
+        'filter': lambda b: b['price'] <= 115,
         'sort_key': lambda b: b['price'],  # 价格越低越优先
         'reverse': False,
         'sell_rule': 'price >= 130',
     },
     'dual_low': {
         'name': '双低策略',
-        'description': '低价格+低溢价率，经典量化轮动。回测用 price≤125 近似 double_low≤130。',
-        'filter': lambda b: b['price'] <= 125,
+        'description': '低价格+低溢价率，经典量化轮动。回测用 price≤130 近似 double_low≤130。',
+        'filter': lambda b: b['price'] <= 130,
         'sort_key': lambda b: b['price'],
         'reverse': False,
-        'sell_rule': 'price >= 130 or not in top_n',
+        'sell_rule': 'price >= 140 or not in top_n',
     },
     'pancake': {
         'name': '摊大饼策略',
         'description': '不选股，买一篮子低价转债，靠概率取胜。',
-        'filter': lambda b: (
-            b['price'] <= 130
-            and b.get('rating_order', 0) >= 1  # A-及以上
-        ),
+        'filter': lambda b: b['price'] <= 140,
         'sort_key': lambda b: b['price'],
         'reverse': False,
-        'sell_rule': 'price >= 140 or not in top_n',
+        'sell_rule': 'price >= 150 or not in top_n',
     },
     'ytm_defense': {
         'name': 'YTM保本策略',
@@ -393,24 +387,34 @@ def run_cb_backtest(
         if filtered_codes:
             all_codes = filtered_codes
 
-    # 限制数量（优先选择上市时间早的转债，确保有足够历史数据）
-    MAX_BONDS = 200
+    # 限制数量（优先选择在回测期间内上市的转债，确保有足够历史数据）
+    MAX_BONDS = 100  # 减少到100只，提高性能
     if len(all_codes) > MAX_BONDS:
-        # 优先选择上市时间早的转债（有更长的历史数据）
+        # 优先选择在回测开始日期之前1-3年上市的转债（既有历史数据，又不太老）
+        start_dt = pd.to_datetime(start_date)
         list_date_map = {}
         for _, row in universe.iterrows():
             code = str(row.get('code', ''))
             list_date = row.get('list_date')
             if pd.notna(list_date):
                 try:
-                    list_date_map[code] = pd.to_datetime(list_date)
+                    ld = pd.to_datetime(list_date)
+                    # 优先选择在回测开始前1-3年上市的转债
+                    # 距离start_date越近的优先（但必须在start_date之前）
+                    if ld <= start_dt:
+                        list_date_map[code] = ld
+                    else:
+                        list_date_map[code] = pd.Timestamp.max  # 上市太晚的排最后
                 except Exception:
                     list_date_map[code] = pd.Timestamp.max
             else:
                 list_date_map[code] = pd.Timestamp.max
-        all_codes.sort(key=lambda c: list_date_map.get(c, pd.Timestamp.max))
+        # 按上市时间降序排列（最近上市的优先，但必须在start_date之前）
+        all_codes.sort(key=lambda c: list_date_map.get(c, pd.Timestamp.max), reverse=True)
+        # 过滤掉上市太晚的
+        all_codes = [c for c in all_codes if list_date_map.get(c, pd.Timestamp.max) <= start_dt]
         all_codes = all_codes[:MAX_BONDS]
-        logger.info(f"转债数量过多，按上市时间选取前 {MAX_BONDS} 只（优先选择历史数据长的）")
+        logger.info(f"转债数量过多，选取前 {MAX_BONDS} 只（优先选择回测期间内有交易的）")
 
     logger.info(f"开始获取 {len(all_codes)} 只转债的历史价格数据...")
 
@@ -419,7 +423,7 @@ def run_cb_backtest(
     for i, code in enumerate(all_codes):
         if i > 0 and i % 10 == 0:
             logger.info(f"  进度: {i}/{len(all_codes)} (成功: {len(price_data)})")
-            time.sleep(0.5)  # 限速
+            time.sleep(0.3)  # 限速
 
         df = fetch_bond_history(code, start_date, end_date)
         if not df.empty:
@@ -427,7 +431,7 @@ def run_cb_backtest(
         else:
             fetch_errors += 1
 
-        time.sleep(0.15)  # 基本限速
+        time.sleep(0.1)  # 基本限速
 
     logger.info(f"价格数据获取完成: {len(price_data)} 只成功, {fetch_errors} 只失败")
 

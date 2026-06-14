@@ -3,6 +3,7 @@ QuantDinger AI分析 API
 提供股票AI分析、历史查询、绩效统计等接口
 """
 
+import httpx
 from fastapi import APIRouter, HTTPException, Query
 from typing import Optional
 from ..services.quantdinger_service import quantdinger_service

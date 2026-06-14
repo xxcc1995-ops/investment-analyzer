@@ -1,18 +1,20 @@
-import { useState, useEffect, useCallback, useRef, useMemo, lazy, Suspense } from 'react'
+import { useState, useEffect, useCallback, useRef, lazy, Suspense } from 'react'
+import { Routes, Route, useNavigate, useParams } from 'react-router-dom'
 import AppShell from './components/AppShell'
-import StockAnalysis from './pages/StockAnalysis'
+import ErrorBoundary from './components/ErrorBoundary'
 import { bondApi, stockApi } from './services/api'
 
 // ============ 懒加载页面组件 ============
 
+const StockAnalysis = lazy(() => import('./pages/StockAnalysis'))
+const RationalityGate = lazy(() => import('./components/RationalityGate'))
+
 const HKIpoPage = lazy(() => import('./pages/HKIpoPage'))
 const IndexValuation = lazy(() => import('./pages/IndexValuation'))
-
 const DividendScreener = lazy(() => import('./pages/DividendScreener'))
 const CigarButtScreener = lazy(() => import('./pages/CigarButtScreener'))
 const ValueInvesting = lazy(() => import('./pages/ValueInvesting'))
 const REITScreener = lazy(() => import('./pages/REITScreener'))
-
 const MacroData = lazy(() => import('./pages/MacroData'))
 const FuturesInsight = lazy(() => import('./pages/FuturesInsight'))
 const JCScreener = lazy(() => import('./pages/JCScreener'))
@@ -20,7 +22,6 @@ const PolymarketPage = lazy(() => import('./pages/PolymarketPage'))
 const ExportChampions = lazy(() => import('./pages/ExportChampions'))
 const GridTrading = lazy(() => import('./pages/GridTrading'))
 const TTrading = lazy(() => import('./pages/TTrading'))
-
 const NationalTeamMonitor = lazy(() => import('./pages/NationalTeamMonitor'))
 const RightSideTrading = lazy(() => import('./pages/RightSideTrading'))
 const FundArbitragePage = lazy(() => import('./pages/FundArbitragePage'))
@@ -36,8 +37,11 @@ const TractorPage = lazy(() => import('./pages/TractorPage'))
 const MobileSettings = lazy(() => import('./pages/MobileSettings'))
 const CBBacktestPage = lazy(() => import('./pages/CBBacktestPage'))
 const Portfolio = lazy(() => import('./pages/Portfolio'))
+const StrategyValidation = lazy(() => import('./pages/StrategyValidation'))
 const CryptoMasterPage = lazy(() => import('./pages/CryptoMasterPage'))
-import RationalityGate from './components/RationalityGate'
+const QuantBacktest = lazy(() => import('./pages/QuantBacktest'))
+const PrefrontalTraining = lazy(() => import('./pages/PrefrontalTraining'))
+const AirdropScannerPage = lazy(() => import('./pages/AirdropScannerPage'))
 
 // ============ 类型定义 ============
 
@@ -53,50 +57,20 @@ interface SearchItem {
   code: string; name: string; market?: string
 }
 
-type MainView =
-  | 'stock' | 'fundArb' | 'option' | 'cb' | 'hki' | 'indexVal'
-  | 'dividend' | 'cigarButt' | 'valueInvesting' | 'reit' | 'macro' | 'futures'
-  | 'jcScreener' | 'polymarket' | 'exportChampions'
-  | 'futuOptionChain' | 'gridTrading' | 'nationalTeam' | 'rightSide'
-  | 'decisionGuard' | 'tTrading' | 'backtestReport'
-  | 'drawdownControl' | 'masterStrategy' | 'tractorTrading' | 'dailyInfo' | 'mobileSettings'
-  | 'cbBacktest' | 'portfolio' | 'cryptoMaster'
+// ============ 股票页面包装组件 ============
 
-// ============ 路由映射 ============
-
-const routeMap: Record<string, React.LazyExoticComponent<any>> = {
-  dailyInfo: DailyInfo,
-  hki: HKIpoPage,
-  indexVal: IndexValuation,
-
-  dividend: DividendScreener,
-  cigarButt: CigarButtScreener,
-  valueInvesting: ValueInvesting,
-  reit: REITScreener,
-
-  macro: MacroData,
-  futures: FuturesInsight,
-  jcScreener: JCScreener,
-  tTrading: TTrading,
-  polymarket: PolymarketPage,
-  exportChampions: ExportChampions,
-  backtestReport: BacktestReport,
-  futuOptionChain: FutuOptionChain,
-  drawdownControl: DrawdownControl,
-  gridTrading: GridTrading,
-
-  nationalTeam: NationalTeamMonitor,
-  rightSide: RightSideTrading,
-  fundArb: FundArbitragePage,
-  decisionGuard: DecisionGuard,
-  option: OptionCalculator,
-  cb: ConvertibleBondPage,
-  masterStrategy: MasterStrategyPage,
-  tractorTrading: TractorPage,
-  mobileSettings: MobileSettings,
-  cbBacktest: CBBacktestPage,
-  portfolio: Portfolio,
-  cryptoMaster: CryptoMasterPage,
+function StockPageWrapper() {
+  const { code } = useParams<{ code: string }>()
+  if (!code) {
+    return (
+      <div className="empty-state">
+        <div className="icon">📊</div>
+        <div className="text">新源的Invest工具</div>
+        <div className="sub-text">输入股票代码开始分析 | 支持A股/港股</div>
+      </div>
+    )
+  }
+  return <StockAnalysis code={code} />
 }
 
 // ============ 主组件 ============
@@ -107,10 +81,9 @@ function App() {
   const [showSearch, setShowSearch] = useState(false)
   const [searchLoading, setSearchLoading] = useState(false)
   const searchBoxRef = useRef<HTMLDivElement>(null)
-  const [activeStockCode, setActiveStockCode] = useState<string | null>(null)
-  const [mainView, setMainView] = useState<MainView>('dailyInfo')
   const [bondYields, setBondYields] = useState<BondYields | null>(null)
   const [bondLoading, setBondLoading] = useState(false)
+  const navigate = useNavigate()
 
   // 理性门卫
   const [showGate, setShowGate] = useState(() => !sessionStorage.getItem('rationality_gate_passed'))
@@ -159,57 +132,20 @@ function App() {
     return () => document.removeEventListener('mousedown', handleClickOutside)
   }, [])
 
-  // 选择股票
+  // 选择股票 - 导航到 /stock/:code
   const handleSelectStock = useCallback((code: string) => {
-    setActiveStockCode(code)
-    setMainView('stock')
+    navigate(`/stock/${code}`)
     setShowSearch(false)
     setSearchKeyword('')
-  }, [])
+  }, [navigate])
 
-  // 导航
-  const handleNavigate = useCallback((key: string) => {
-    if (key === 'stock' && !activeStockCode) {
-      // 如果没有选中股票，保持当前视图
-      return
-    }
-    setMainView(key as MainView)
-  }, [activeStockCode])
-
-  // 全局导航函数，供子页面调用
+  // 全局导航函数，供子页面调用（兼容旧的 window.__navigateTo）
   useEffect(() => {
-    (window as any).__navigateTo = (key: string) => handleNavigate(key)
+    (window as any).__navigateTo = (path: string) => navigate(path)
     return () => { delete (window as any).__navigateTo }
-  }, [handleNavigate])
+  }, [navigate])
 
-  // 渲染当前页面 - 用useMemo避免每次App渲染时重建JSX树
-  const currentView = useMemo(() => {
-    if (mainView === 'stock') {
-      if (!activeStockCode) {
-        return (
-          <div className="empty-state">
-            <div className="icon">📊</div>
-            <div className="text">新源的Invest工具</div>
-            <div className="sub-text">输入股票代码开始分析 | 支持A股/港股</div>
-          </div>
-        )
-      }
-      return <StockAnalysis code={activeStockCode} />
-    }
-
-    const LazyComponent = routeMap[mainView]
-    if (LazyComponent) return <LazyComponent />
-
-    return (
-      <div className="empty-state">
-        <div className="icon">📊</div>
-        <div className="text">新源的Invest工具</div>
-        <div className="sub-text">输入股票代码开始分析 | 支持A股/港股</div>
-      </div>
-    )
-  }, [mainView, activeStockCode])
-
-  // Gate callbacks - stable references
+  // Gate callbacks
   const handleGatePass = useCallback(() => {
     sessionStorage.setItem('rationality_gate_passed', '1')
     setGateDismissed(true)
@@ -218,22 +154,24 @@ function App() {
   const handleGateFullCheck = useCallback(() => {
     sessionStorage.setItem('rationality_gate_passed', '1')
     setGateDismissed(true)
-    setMainView('decisionGuard')
-  }, [])
+    navigate('/decision-guard')
+  }, [navigate])
 
   return (
     <>
       {showGate && !gateDismissed && (
-        <RationalityGate
-          onPass={handleGatePass}
-          onSkip={handleGatePass}
-          onFullCheck={handleGateFullCheck}
-        />
+        <ErrorBoundary>
+          <Suspense fallback={null}>
+            <RationalityGate
+              onPass={handleGatePass}
+              onSkip={handleGatePass}
+              onFullCheck={handleGateFullCheck}
+            />
+          </Suspense>
+        </ErrorBoundary>
       )}
 
       <AppShell
-        activeKey={mainView}
-        onNavigate={handleNavigate}
         searchKeyword={searchKeyword}
         onSearchChange={setSearchKeyword}
         searchResults={searchResults}
@@ -246,9 +184,46 @@ function App() {
         bondLoading={bondLoading}
         onRefreshBonds={loadBondYields}
       >
-        <Suspense fallback={<div className="loading"><div className="spinner"></div>加载中...</div>}>
-          {currentView}
-        </Suspense>
+        <ErrorBoundary>
+          <Suspense fallback={<div className="loading"><div className="spinner"></div>加载中...</div>}>
+            <Routes>
+              <Route path="/" element={<DailyInfo />} />
+              <Route path="/stock/:code?" element={<StockPageWrapper />} />
+              <Route path="/index-valuation" element={<IndexValuation />} />
+              <Route path="/macro" element={<MacroData />} />
+              <Route path="/futures" element={<FuturesInsight />} />
+              <Route path="/dividend" element={<DividendScreener />} />
+              <Route path="/cigar-butt" element={<CigarButtScreener />} />
+              <Route path="/value-investing" element={<ValueInvesting />} />
+              <Route path="/reit" element={<REITScreener />} />
+              <Route path="/export-champions" element={<ExportChampions />} />
+              <Route path="/jc-screener" element={<JCScreener />} />
+              <Route path="/t-trading" element={<TTrading />} />
+              <Route path="/grid-trading" element={<GridTrading />} />
+              <Route path="/right-side" element={<RightSideTrading />} />
+              <Route path="/futu-options" element={<FutuOptionChain />} />
+              <Route path="/option-calculator" element={<OptionCalculator />} />
+              <Route path="/backtest" element={<BacktestReport />} />
+              <Route path="/quant-backtest" element={<QuantBacktest />} />
+              <Route path="/drawdown" element={<DrawdownControl />} />
+              <Route path="/fund-arb" element={<FundArbitragePage />} />
+              <Route path="/tractor" element={<TractorPage />} />
+              <Route path="/cb" element={<ConvertibleBondPage />} />
+              <Route path="/cb-backtest" element={<CBBacktestPage />} />
+              <Route path="/master-strategy" element={<MasterStrategyPage />} />
+              <Route path="/polymarket" element={<PolymarketPage />} />
+              <Route path="/hki" element={<HKIpoPage />} />
+              <Route path="/crypto" element={<CryptoMasterPage />} />
+              <Route path="/airdrop-scanner" element={<AirdropScannerPage />} />
+              <Route path="/national-team" element={<NationalTeamMonitor />} />
+              <Route path="/decision-guard" element={<DecisionGuard />} />
+              <Route path="/prefrontal-training" element={<PrefrontalTraining />} />
+              <Route path="/strategy-validation" element={<StrategyValidation />} />
+              <Route path="/portfolio" element={<Portfolio />} />
+              <Route path="/settings" element={<MobileSettings />} />
+            </Routes>
+          </Suspense>
+        </ErrorBoundary>
       </AppShell>
     </>
   )

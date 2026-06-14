@@ -9,6 +9,7 @@ from ..services.decision_service import (
     analyze_decision, submit_diagnosis, get_history, record_outcome, quick_scan,
     get_prefrontal_warmup, get_calibration_question, submit_calibration_answer,
     get_calibration_stats, get_base_rates, get_decision_stats,
+    get_training_exercises, get_training_question, submit_training_answer, get_training_stats,
 )
 
 router = APIRouter()
@@ -163,3 +164,43 @@ async def api_base_rates():
 async def api_decision_stats():
     """获取决策系统综合统计（仪表盘）"""
     return get_decision_stats()
+
+
+# ============================================================
+# 前额叶练习 API
+# ============================================================
+
+class TrainingSubmitRequest(BaseModel):
+    exercise_type: str
+    question_id: str
+    answer: str | int | list  # 可以是字符串、数字或列表
+    confidence: int = 70
+
+
+@router.get("/training/exercises")
+async def api_training_exercises():
+    """获取所有练习类型"""
+    return get_training_exercises()
+
+
+@router.get("/training/question")
+async def api_training_question(exercise_type: str, difficulty: int = None):
+    """获取一道练习题"""
+    return get_training_question(exercise_type, difficulty)
+
+
+@router.post("/training/submit")
+async def api_training_submit(req: TrainingSubmitRequest):
+    """提交练习答案"""
+    return submit_training_answer(
+        exercise_type=req.exercise_type,
+        question_id=req.question_id,
+        answer=req.answer,
+        confidence=req.confidence,
+    )
+
+
+@router.get("/training/stats")
+async def api_training_stats():
+    """获取训练统计"""
+    return get_training_stats()

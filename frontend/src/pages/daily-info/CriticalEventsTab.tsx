@@ -27,7 +27,9 @@ export default function CriticalEventsTab({ data, loading }: Props) {
           </div>
         ) : (
           <div style={{ color: 'var(--text-muted)', fontSize: 13, padding: '20px 0', textAlign: 'center' }}>
-            ✅ 未检测到重大异动事件，市场运行平稳
+            <div style={{ fontSize: 28, marginBottom: 8 }}>✅</div>
+            未检测到重大异动事件。非交易日期间行情数据暂停更新，<br />
+            事件检测将在下一个交易日自动恢复。
           </div>
         )}
       </Section>

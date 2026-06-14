@@ -1,11 +1,39 @@
 """Web Scraping API 路由"""
 
+import logging
+from urllib.parse import urlparse
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel
-from typing import Optional, List
+from pydantic import BaseModel, field_validator
+from typing import Optional
 from app.utils.scraper import scrape, scrape_stealthy, scrape_dynamic, extract_text, extract_table
 
+logger = logging.getLogger(__name__)
+
 router = APIRouter()
+
+# SSRF防护：禁止访问的内网地址前缀
+_BLOCKED_HOSTS = {
+    'localhost', '127.0.0.1', '0.0.0.0', '::1',
+    '169.254.169.254',  # 云实例元数据
+    'metadata.google.internal',
+}
+_BLOCKED_PREFIXES = ('10.', '172.16.', '172.17.', '172.18.', '172.19.',
+                     '172.20.', '172.21.', '172.22.', '172.23.', '172.24.',
+                     '172.25.', '172.26.', '172.27.', '172.28.', '172.29.',
+                     '172.30.', '172.31.', '192.168.')
+
+
+def _validate_url(url: str) -> str:
+    """验证URL，防止SSRF攻击"""
+    parsed = urlparse(url)
+    if parsed.scheme not in ('http', 'https'):
+        raise ValueError(f"不支持的协议: {parsed.scheme}")
+    hostname = parsed.hostname or ''
+    if hostname in _BLOCKED_HOSTS:
+        raise ValueError(f"禁止访问内部地址: {hostname}")
+    if any(hostname.startswith(p) for p in _BLOCKED_PREFIXES):
+        raise ValueError(f"禁止访问内网地址: {hostname}")
+    return url
 
 
 class ScrapeRequest(BaseModel):
@@ -14,6 +42,12 @@ class ScrapeRequest(BaseModel):
     selector: Optional[str] = None
     extract_type: str = "text"  # text / table / html
     headless: bool = True
+
+    @field_validator('url')
+    @classmethod
+    def validate_url(cls, v: str) -> str:
+        _validate_url(v)
+        return v
 
 
 class ScrapeResponse(BaseModel):
@@ -58,7 +92,10 @@ def fetch_page(req: ScrapeRequest):
         body_text = page.css("body").text[:2000] if page.css("body") else ""
         return ScrapeResponse(success=True, data=[title, body_text])
 
+    except ValueError as e:
+        return ScrapeResponse(success=False, error=str(e))
     except Exception as e:
+        logger.exception("爬取失败: %s", req.url)
         return ScrapeResponse(success=False, error=str(e))
 
 

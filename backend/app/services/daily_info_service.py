@@ -443,23 +443,38 @@ def _compute_sentiment_score(indices: Dict, sectors: List, fund_flow: List) -> D
     """计算多维市场情绪评分（0-100分）
 
     维度：
-    1. 价格动量（40%权重）：指数涨跌幅综合
-    2. 市场广度（25%权重）：板块涨跌比例
+    1. 价格动量（35%权重）：指数涨跌幅综合（A股+港股+美股加权）
+    2. 市场广度（25%权重）：板块涨跌比例 + 涨跌家数
     3. 资金动向（20%权重）：主力资金净流入
-    4. 波动率（15%权重）：涨跌幅标准差
+    4. 波动率（10%权重）：涨跌幅标准差
+    5. 极端信号（10%权重）：涨跌停比、板块极端分化
     """
+    import math
     scores = {}
+    data_quality = 0  # 数据完整度（0-4），用于加权
 
-    # --- 维度1: 价格动量 (40%) ---
-    all_changes = []
-    for idx in indices.get("a_share", []):
-        all_changes.append(idx.get("change_pct", 0))
-    for idx in indices.get("us", []):
-        all_changes.append(idx.get("change_pct", 0))
+    # --- 维度1: 价格动量 (35%) ---
+    # A股权重60%，港股20%，美股20%（A股对国内市场情绪影响最大）
+    a_changes = [idx.get("change_pct", 0) for idx in indices.get("a_share", [])]
+    hk_changes = [idx.get("change_pct", 0) for idx in indices.get("hk", [])]
+    us_changes = [idx.get("change_pct", 0) for idx in indices.get("us", [])]
 
-    if all_changes:
-        avg_change = sum(all_changes) / len(all_changes)
-        # 映射到0-100：-3%→20, 0%→50, +3%→80
+    weighted_change = 0
+    weight_sum = 0
+    if a_changes:
+        weighted_change += sum(a_changes) / len(a_changes) * 0.6
+        weight_sum += 0.6
+        data_quality += 1
+    if hk_changes:
+        weighted_change += sum(hk_changes) / len(hk_changes) * 0.2
+        weight_sum += 0.2
+    if us_changes:
+        weighted_change += sum(us_changes) / len(us_changes) * 0.2
+        weight_sum += 0.2
+        data_quality += 1
+
+    if weight_sum > 0:
+        avg_change = weighted_change / weight_sum
         momentum_score = max(0, min(100, 50 + avg_change * 10))
     else:
         momentum_score = 50
@@ -468,10 +483,18 @@ def _compute_sentiment_score(indices: Dict, sectors: List, fund_flow: List) -> D
     # --- 维度2: 市场广度 (25%) ---
     if sectors:
         up_count = sum(1 for s in sectors if s.get("change_pct", 0) > 0)
+        down_count = sum(1 for s in sectors if s.get("change_pct", 0) < 0)
         total = len(sectors)
         breadth_ratio = up_count / total if total > 0 else 0.5
-        # 映射到0-100：ratio=0→20, 0.5→50, 1.0→80
-        breadth_score = max(0, min(100, 20 + breadth_ratio * 60))
+        # 涨跌比信号：涨多跌少→乐观，跌多涨少→悲观
+        if total > 0:
+            adv_ratio = up_count / max(down_count, 1)  # 涨跌比
+            # 涨跌比 1:1→50, 2:1→65, 3:1→75, 1:2→35, 1:3→25
+            ratio_score = max(0, min(100, 50 + math.log(max(adv_ratio, 0.1), 2) * 15))
+        else:
+            ratio_score = 50
+        breadth_score = max(0, min(100, 20 + breadth_ratio * 60)) * 0.6 + ratio_score * 0.4
+        data_quality += 1
     else:
         breadth_score = 50
     scores["breadth"] = round(breadth_score, 1)
@@ -479,16 +502,18 @@ def _compute_sentiment_score(indices: Dict, sectors: List, fund_flow: List) -> D
     # --- 维度3: 资金动向 (20%) ---
     if fund_flow:
         total_net = sum(f.get("main_net_inflow", 0) for f in fund_flow[:15])
-        # 映射：-50亿→20, 0→50, +50亿→80
         net_in_yi = total_net / 1e8  # 转为亿
-        fund_score = max(0, min(100, 50 + net_in_yi * 0.6))
+        # 非线性映射：大额流入/流出的信号更强
+        # -100亿→20, -50亿→35, 0→50, +50亿→65, +100亿→80
+        fund_score = max(0, min(100, 50 + math.copysign(abs(net_in_yi) ** 0.8, net_in_yi) * 0.6))
+        data_quality += 1
     else:
         fund_score = 50
     scores["fund_flow"] = round(fund_score, 1)
 
-    # --- 维度4: 波动率 (15%) ---
+    # --- 维度4: 波动率 (10%) ---
+    all_changes = a_changes + us_changes
     if len(all_changes) >= 2:
-        import math
         mean_c = sum(all_changes) / len(all_changes)
         variance = sum((c - mean_c) ** 2 for c in all_changes) / len(all_changes)
         std_dev = math.sqrt(variance)
@@ -498,12 +523,40 @@ def _compute_sentiment_score(indices: Dict, sectors: List, fund_flow: List) -> D
         vol_score = 60
     scores["volatility"] = round(vol_score, 1)
 
+    # --- 维度5: 极端信号 (10%) ---
+    extreme_score = 50  # 默认中性
+    if sectors:
+        changes = [s.get("change_pct", 0) for s in sectors]
+        if changes:
+            max_c = max(changes)
+            min_c = min(changes)
+            spread = max_c - min_c
+            # 板块分化越严重，市场越不稳定
+            # spread<3→60（平稳）, 3-6→50（正常）, 6-10→35（分化）, >10→20（极端分化）
+            if spread < 3:
+                extreme_score = 60
+            elif spread < 6:
+                extreme_score = 50
+            elif spread < 10:
+                extreme_score = 35
+            else:
+                extreme_score = 20
+            # 如果有涨跌停股，信号更强
+            limit_up = sum(1 for s in sectors if s.get("change_pct", 0) >= 9.9)
+            limit_down = sum(1 for s in sectors if s.get("change_pct", 0) <= -9.9)
+            if limit_up > 3:
+                extreme_score = min(100, extreme_score + 15)  # 涨停潮→乐观
+            if limit_down > 3:
+                extreme_score = max(0, extreme_score - 15)  # 跌停潮→悲观
+    scores["extreme"] = round(extreme_score, 1)
+
     # --- 综合评分 ---
     composite = (
-        scores["momentum"] * 0.40 +
+        scores["momentum"] * 0.35 +
         scores["breadth"] * 0.25 +
         scores["fund_flow"] * 0.20 +
-        scores["volatility"] * 0.15
+        scores["volatility"] * 0.10 +
+        scores["extreme"] * 0.10
     )
     scores["composite"] = round(composite, 1)
 
@@ -529,7 +582,8 @@ def _compute_sentiment_score(indices: Dict, sectors: List, fund_flow: List) -> D
     scores["description"] = (
         f"情绪评分 {composite:.0f}/100（{level}）。"
         f"动量{scores['momentum']:.0f}、广度{scores['breadth']:.0f}、"
-        f"资金{scores['fund_flow']:.0f}、波动{scores['volatility']:.0f}"
+        f"资金{scores['fund_flow']:.0f}、波动{scores['volatility']:.0f}、"
+        f"极端{scores['extreme']:.0f}"
     )
 
     return scores

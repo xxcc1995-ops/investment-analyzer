@@ -65,13 +65,25 @@ function MarketOverview() {
   useEffect(() => { load() }, [load])
 
   if (loading) return <Spin size="large" style={{ display: 'block', margin: '100px auto' }} />
-  if (!data) return <Alert type="error" message="加载失败" />
+  if (!data) return <Alert type="error" message="加载失败，请检查网络连接" />
 
   const fng = data.fear_greed_index || {}
   const fngColor = fng.value <= 25 ? '#ff4d4f' : fng.value <= 50 ? '#faad14' : fng.value <= 75 ? '#1890ff' : '#52c41a'
+  const hasCoinGecko = data.btc_price > 0
+  const hasDefiLlama = data.total_tvl > 0
 
   return (
     <div>
+      {/* CoinGecko不可达提示 */}
+      {!hasCoinGecko && hasDefiLlama && (
+        <Alert
+          type="warning" showIcon closable
+          message="CoinGecko行情API暂不可达"
+          description="当前使用DefiLlama链上数据。如需完整行情数据，请配置代理（设置POLYMARKET_PROXY环境变量）。"
+          style={{ marginBottom: 16, background: '#161b22', border: '1px solid #30363d' }}
+        />
+      )}
+
       {/* 恐惧贪婪指数 */}
       <Card style={{ marginBottom: 16, background: 'linear-gradient(135deg, #1a1a2e 0%, #16213e 100%)', border: '1px solid #30363d' }}>
         <Row gutter={24} align="middle">
@@ -87,20 +99,51 @@ function MarketOverview() {
             <div style={{ color: fngColor, fontSize: 16, fontWeight: 600, marginTop: 8 }}>{fng.label || 'N/A'}</div>
           </Col>
           <Col span={6}>
-            <Statistic title="总市值" value={fmt(data.total_market_cap_usd)} valueStyle={{ color: '#e6edf3', fontSize: 22 }} />
-            <div style={{ color: '#8b949e', fontSize: 12, marginTop: 4 }}>24h变化: {fmtPct(data.market_cap_change_24h)}</div>
+            {hasCoinGecko ? (
+              <>
+                <Statistic title="总市值" value={fmt(data.total_market_cap_usd)} valueStyle={{ color: '#e6edf3', fontSize: 22 }} />
+                <div style={{ color: '#8b949e', fontSize: 12, marginTop: 4 }}>24h变化: {fmtPct(data.market_cap_change_24h)}</div>
+              </>
+            ) : (
+              <>
+                <Statistic title="DeFi总锁仓量" value={fmt(data.total_tvl)} valueStyle={{ color: '#52c41a', fontSize: 22 }} />
+                <div style={{ color: '#8b949e', fontSize: 12, marginTop: 4 }}>公链数量: {data.chain_count}</div>
+              </>
+            )}
           </Col>
           <Col span={6}>
-            <Statistic title="24h交易量" value={fmt(data.total_volume_24h)} valueStyle={{ color: '#e6edf3', fontSize: 22 }} />
-            <div style={{ color: '#8b949e', fontSize: 12, marginTop: 4 }}>活跃币种: {data.active_cryptocurrencies?.toLocaleString()}</div>
+            {hasCoinGecko ? (
+              <>
+                <Statistic title="24h交易量" value={fmt(data.total_volume_24h)} valueStyle={{ color: '#e6edf3', fontSize: 22 }} />
+                <div style={{ color: '#8b949e', fontSize: 12, marginTop: 4 }}>活跃币种: {data.active_cryptocurrencies?.toLocaleString()}</div>
+              </>
+            ) : (
+              <>
+                <Statistic title="ETH锁仓量" value={fmt(data.eth_tvl)} valueStyle={{ color: '#627eea', fontSize: 22 }} />
+                <div style={{ color: '#8b949e', fontSize: 12, marginTop: 4 }}>ETH TVL占比: {data.eth_tvl_dominance}%</div>
+              </>
+            )}
           </Col>
           <Col span={6}>
-            <div style={{ marginBottom: 12 }}>
-              <Statistic title="BTC主导率" value={`${data.btc_dominance}%`} valueStyle={{ color: '#f7931a', fontSize: 22 }} />
-            </div>
-            <div>
-              <Statistic title="ETH主导率" value={`${data.eth_dominance}%`} valueStyle={{ color: '#627eea', fontSize: 22 }} />
-            </div>
+            {hasCoinGecko ? (
+              <>
+                <div style={{ marginBottom: 12 }}>
+                  <Statistic title="BTC主导率" value={`${data.btc_dominance}%`} valueStyle={{ color: '#f7931a', fontSize: 22 }} />
+                </div>
+                <div>
+                  <Statistic title="ETH主导率" value={`${data.eth_dominance}%`} valueStyle={{ color: '#627eea', fontSize: 22 }} />
+                </div>
+              </>
+            ) : (
+              <div>
+                <div style={{ color: '#8b949e', fontSize: 13, marginBottom: 8 }}>Top公链TVL</div>
+                {data.top_chains_tvl?.slice(0, 3).map((c: any, i: number) => (
+                  <div key={i} style={{ color: '#e6edf3', fontSize: 13, marginBottom: 2 }}>
+                    {c.name}: {fmt(c.tvl)}
+                  </div>
+                ))}
+              </div>
+            )}
           </Col>
         </Row>
       </Card>
@@ -134,19 +177,21 @@ function MarketOverview() {
       </Row>
 
       {/* BTC主导率解读 */}
-      <Alert
-        type="info"
-        showIcon
-        icon={<BulbOutlined />}
-        message="BTC主导率解读"
-        description={data.btc_dominance > 55
-          ? "BTC主导率较高，市场处于避险模式。资金集中于BTC，山寨币表现通常较弱。适合持有BTC，谨慎投资山寨币。"
-          : data.btc_dominance > 45
-            ? "BTC主导率适中，市场相对均衡。优质山寨币开始有机会，可以关注ETH和头部Layer1。"
-            : "BTC主导率较低，可能是山寨季！资金从BTC流向山寨币，DeFi/NFT/Meme等板块可能爆发。注意风险管理。"
-        }
-        style={{ marginBottom: 16, background: '#161b22', border: '1px solid #30363d' }}
-      />
+      {hasCoinGecko && data.btc_dominance > 0 && (
+        <Alert
+          type="info"
+          showIcon
+          icon={<BulbOutlined />}
+          message="BTC主导率解读"
+          description={data.btc_dominance > 55
+            ? "BTC主导率较高，市场处于避险模式。资金集中于BTC，山寨币表现通常较弱。适合持有BTC，谨慎投资山寨币。"
+            : data.btc_dominance > 45
+              ? "BTC主导率适中，市场相对均衡。优质山寨币开始有机会，可以关注ETH和头部Layer1。"
+              : "BTC主导率较低，可能是山寨季！资金从BTC流向山寨币，DeFi/NFT/Meme等板块可能爆发。注意风险管理。"
+          }
+          style={{ marginBottom: 16, background: '#161b22', border: '1px solid #30363d' }}
+        />
+      )}
 
       {/* 热门币种 */}
       {trending?.trending?.length > 0 && (
@@ -729,18 +774,21 @@ function DeFiGuide() {
   const [defi, setDefi] = useState<any>(null)
   const [airdrop, setAirdrop] = useState<any>(null)
   const [tvl, setTvl] = useState<any>(null)
+  const [payment, setPayment] = useState<any>(null)
   const [loading, setLoading] = useState(true)
-  const [subTab, setSubTab] = useState('defi')
+  const [subTab, setSubTab] = useState('payment')
 
   useEffect(() => {
     Promise.all([
       cryptoMasterApi.getDefiGuide(),
       cryptoMasterApi.getAirdropGuide(),
       cryptoMasterApi.getDefiTvl(),
-    ]).then(([d, a, t]) => {
+      cryptoMasterApi.getPaymentTools(),
+    ]).then(([d, a, t, p]) => {
       setDefi(d.data)
       setAirdrop(a.data)
       setTvl(t.data)
+      setPayment(p.data)
       setLoading(false)
     }).catch(() => setLoading(false))
   }, [])
@@ -750,10 +798,107 @@ function DeFiGuide() {
   return (
     <div>
       <Tabs activeKey={subTab} onChange={setSubTab} style={{ marginBottom: 16 }}>
+        <TabPane tab={<span><DollarOutlined /> 出入金工具</span>} key="payment" />
         <TabPane tab={<span><BankOutlined /> DeFi实操</span>} key="defi" />
         <TabPane tab={<span><RocketOutlined /> 空投指南</span>} key="airdrop" />
         <TabPane tab={<span><RiseOutlined /> 链上数据</span>} key="onchain" />
       </Tabs>
+
+      {/* 出入金工具 */}
+      {subTab === 'payment' && payment && (
+        <div>
+          <Alert type="info" showIcon icon={<DollarOutlined />}
+            message="加密货币出入金工具"
+            description={payment.intro}
+            style={{ marginBottom: 16, background: '#161b22', border: '1px solid #30363d' }}
+          />
+
+          <div style={{ marginBottom: 16 }}>
+            <Title level={5} style={{ color: '#e6edf3', marginBottom: 12 }}>💳 加密支付卡</Title>
+            <Row gutter={[16, 16]}>
+              {payment.tools?.map((tool: any, i: number) => (
+                <Col span={8} key={i}>
+                  <Card style={{ background: '#161b22', border: i === 0 ? '1px solid #52c41a' : '1px solid #30363d', height: '100%' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
+                      <span style={{ fontSize: 20 }}>💳</span>
+                      <div>
+                        <div style={{ color: '#e6edf3', fontWeight: 700, fontSize: 16 }}>{tool.name}</div>
+                        <div style={{ color: '#8b949e', fontSize: 12 }}>{tool.type}</div>
+                      </div>
+                      {i === 0 && <Tag color="green" style={{ marginLeft: 'auto' }}>推荐</Tag>}
+                    </div>
+                    <div style={{ color: '#52c41a', fontSize: 13, marginBottom: 8, fontWeight: 600 }}>✨ {tool.highlight}</div>
+                    <ul style={{ color: '#c9d1d9', fontSize: 13, paddingLeft: 16, marginBottom: 12 }}>
+                      {tool.features?.map((f: string, j: number) => <li key={j} style={{ marginBottom: 3 }}>{f}</li>)}
+                    </ul>
+                    {tool.fees && (
+                      <div style={{ background: '#1c2128', borderRadius: 6, padding: '8px 12px', marginBottom: 8 }}>
+                        <div style={{ color: '#8b949e', fontSize: 12, marginBottom: 4 }}>费率明细：</div>
+                        {Object.entries(tool.fees).map(([k, v]: [string, any]) => (
+                          <div key={k} style={{ color: '#c9d1d9', fontSize: 12, display: 'flex', justifyContent: 'space-between' }}>
+                            <span>{k}:</span><span style={{ color: v === '免费' ? '#52c41a' : '#faad14' }}>{v}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    <div style={{ color: '#8b949e', fontSize: 12 }}>
+                      适合：{tool.best_for}
+                    </div>
+                  </Card>
+                </Col>
+              ))}
+            </Row>
+          </div>
+
+          {payment.fiat_channels && (
+            <div style={{ marginBottom: 16 }}>
+              <Title level={5} style={{ color: '#e6edf3', marginBottom: 12 }}>🏦 法币入金渠道</Title>
+              <Row gutter={[16, 16]}>
+                {payment.fiat_channels.map((ch: any, i: number) => (
+                  <Col span={12} key={i}>
+                    <Card style={{ background: '#161b22', border: '1px solid #30363d' }}>
+                      <div style={{ color: '#e6edf3', fontWeight: 600, fontSize: 15, marginBottom: 8 }}>{ch.name}</div>
+                      <div style={{ color: '#8b949e', fontSize: 13, marginBottom: 8 }}>{ch.description}</div>
+                      <div style={{ marginBottom: 8 }}>
+                        <Text strong style={{ color: '#8b949e', fontSize: 12 }}>平台：</Text>
+                        <Space style={{ marginLeft: 4 }}>
+                          {ch.platforms?.map((p: string, j: number) => <Tag key={j}>{p}</Tag>)}
+                        </Space>
+                      </div>
+                      <div style={{ marginBottom: 6 }}>
+                        <Text strong style={{ color: '#52c41a', fontSize: 12 }}>✅ 优势：</Text>
+                        <ul style={{ color: '#c9d1d9', fontSize: 12, margin: '4px 0', paddingLeft: 16 }}>
+                          {ch.advantages?.map((a: string, j: number) => <li key={j}>{a}</li>)}
+                        </ul>
+                      </div>
+                      <div style={{ marginBottom: 6 }}>
+                        <Text strong style={{ color: '#ff4d4f', fontSize: 12 }}>⚠️ 风险：</Text>
+                        <ul style={{ color: '#c9d1d9', fontSize: 12, margin: '4px 0', paddingLeft: 16 }}>
+                          {ch.risks?.map((r: string, j: number) => <li key={j}>{r}</li>)}
+                        </ul>
+                      </div>
+                      <div style={{ padding: '6px 10px', background: '#1c2128', borderRadius: 4, color: '#faad14', fontSize: 12 }}>
+                        💡 {ch.tips}
+                      </div>
+                    </Card>
+                  </Col>
+                ))}
+              </Row>
+            </div>
+          )}
+
+          {payment.safety_tips && (
+            <Card title={<span style={{ color: '#ff4d4f' }}>🛡️ 出入金安全须知</span>}
+              style={{ background: '#161b22', border: '1px solid #30363d' }}>
+              <ul style={{ color: '#c9d1d9' }}>
+                {payment.safety_tips.map((t: string, i: number) => (
+                  <li key={i} style={{ marginBottom: 6, fontSize: 13 }}>{t}</li>
+                ))}
+              </ul>
+            </Card>
+          )}
+        </div>
+      )}
 
       {subTab === 'defi' && defi?.levels && (
         <div>
@@ -883,7 +1028,191 @@ function DeFiGuide() {
   )
 }
 
-// ============ Tab6: 实战检查清单 ============
+// ============ Tab6: 情报搜集 ============
+
+function IntelCollector() {
+  const [items, setItems] = useState<any[]>([])
+  const [trending, setTrending] = useState<any>(null)
+  const [sources, setSources] = useState<any>(null)
+  const [loading, setLoading] = useState(true)
+  const [crawling, setCrawling] = useState(false)
+  const [filter, setFilter] = useState<string>('all')
+  const [impactFilter, setImpactFilter] = useState<string>('all')
+
+  const load = useCallback(async () => {
+    setLoading(true)
+    try {
+      const [latest, trd, src] = await Promise.all([
+        cryptoMasterApi.getIntelLatest({ limit: 100 }),
+        cryptoMasterApi.getIntelTrending(),
+        cryptoMasterApi.getIntelSources(),
+      ])
+      setItems(latest.data?.items || [])
+      setTrending(trd.data)
+      setSources(src.data)
+    } catch (e) { console.error(e) }
+    finally { setLoading(false) }
+  }, [])
+
+  useEffect(() => { load() }, [load])
+
+  const handleCrawl = async () => {
+    setCrawling(true)
+    try {
+      await cryptoMasterApi.triggerCrawl()
+      await load()
+    } catch (e) { console.error(e) }
+    finally { setCrawling(false) }
+  }
+
+  const impactColor: Record<string, string> = { high: '#ff4d4f', medium: '#faad14', low: '#8b949e' }
+  const impactLabel: Record<string, string> = { high: '🔴 高', medium: '🟡 中', low: '⚪ 低' }
+  const categoryLabel: Record<string, string> = {
+    news: '📰 新闻', btc: '₿ BTC', defi: '🏦 DeFi', research: '📊 研究', onchain: '🔗 链上'
+  }
+
+  const filtered = items.filter(i => {
+    if (filter !== 'all' && i.source_category !== filter) return false
+    if (impactFilter !== 'all' && i.impact !== impactFilter) return false
+    return true
+  })
+
+  return (
+    <div>
+      {/* 头部状态栏 */}
+      <Card style={{ background: '#161b22', border: '1px solid #30363d', marginBottom: 16 }}>
+        <Row gutter={16} align="middle">
+          <Col span={6}>
+            <Statistic title="情报总数" value={sources?.total_items || 0} valueStyle={{ color: '#e6edf3' }} />
+          </Col>
+          <Col span={6}>
+            <Statistic title="数据源" value={Object.keys(sources?.sources || {}).length} suffix="个" valueStyle={{ color: '#58a6ff' }} />
+          </Col>
+          <Col span={6}>
+            <div style={{ color: '#8b949e', fontSize: 13 }}>上次搜集</div>
+            <div style={{ color: '#c9d1d9', fontSize: 13 }}>
+              {sources?.last_crawl ? new Date(sources.last_crawl).toLocaleString('zh-CN') : '尚未搜集'}
+            </div>
+          </Col>
+          <Col span={6}>
+            <Button type="primary" icon={<ReloadOutlined />} onClick={handleCrawl} loading={crawling} block>
+              立即搜集
+            </Button>
+          </Col>
+        </Row>
+      </Card>
+
+      {/* 热门话题 */}
+      {trending?.trending?.length > 0 && (
+        <Card title={<><FireOutlined /> 热门话题</>} style={{ background: '#161b22', border: '1px solid #30363d', marginBottom: 16 }}>
+          <Space wrap>
+            {trending.trending.slice(0, 12).map((t: any, i: number) => (
+              <Tag key={i} color={i < 3 ? 'red' : i < 6 ? 'orange' : 'default'} style={{ cursor: 'pointer' }}
+                onClick={() => setFilter('all')}>
+                {t.topic} ({t.count})
+              </Tag>
+            ))}
+          </Space>
+        </Card>
+      )}
+
+      {/* 过滤器 */}
+      <Space style={{ marginBottom: 12 }} wrap>
+        {[{ k: 'all', l: '全部' }, { k: 'news', l: '📰 新闻' }, { k: 'btc', l: '₿ BTC' }, { k: 'defi', l: '🏦 DeFi' }, { k: 'research', l: '📊 研究' }, { k: 'onchain', l: '🔗 链上' }].map(f => (
+          <Button key={f.k} size="small" type={filter === f.k ? 'primary' : 'default'} onClick={() => setFilter(f.k)}>{f.l}</Button>
+        ))}
+        <span style={{ color: '#30363d', margin: '0 4px' }}>|</span>
+        {[{ k: 'all', l: '全部影响力' }, { k: 'high', l: '🔴 高' }, { k: 'medium', l: '🟡 中' }, { k: 'low', l: '⚪ 低' }].map(f => (
+          <Button key={f.k} size="small" type={impactFilter === f.k ? 'primary' : 'default'} onClick={() => setImpactFilter(f.k)}>{f.l}</Button>
+        ))}
+      </Space>
+
+      {/* 情报列表 */}
+      {loading ? <Spin size="large" style={{ display: 'block', margin: '60px auto' }} /> : (
+        <div>
+          {filtered.length === 0 ? (
+            <Alert type="info" showIcon message="暂无情报" description="点击'立即搜集'按钮开始从互联网抓取币圈情报。首次搜集需要等待几分钟。" />
+          ) : (
+            filtered.slice(0, 80).map((item, i) => (
+              <Card key={item.hash || i} size="small"
+                style={{ background: '#161b22', border: '1px solid #30363d', marginBottom: 8 }}>
+                <Row gutter={12} align="middle">
+                  <Col span={1}>
+                    <div style={{
+                      width: 8, height: 8, borderRadius: '50%',
+                      background: impactColor[item.impact] || '#30363d'
+                    }} />
+                  </Col>
+                  <Col span={14}>
+                    <a href={item.url} target="_blank" rel="noopener noreferrer"
+                      style={{ color: '#58a6ff', fontSize: 14, fontWeight: 500, textDecoration: 'none' }}>
+                      {item.title}
+                    </a>
+                    {item.summary && (
+                      <div style={{ color: '#8b949e', fontSize: 12, marginTop: 2, lineHeight: 1.4 }}>
+                        {item.summary.slice(0, 120)}{item.summary.length > 120 ? '...' : ''}
+                      </div>
+                    )}
+                  </Col>
+                  <Col span={3}>
+                    <Tag>{item.source}</Tag>
+                  </Col>
+                  <Col span={3}>
+                    <Tag color={item.source_lang === 'zh' ? 'blue' : 'default'}>
+                      {item.source_lang === 'zh' ? '中文' : 'EN'}
+                    </Tag>
+                    <Tag>{categoryLabel[item.source_category] || item.source_category}</Tag>
+                  </Col>
+                  <Col span={3} style={{ textAlign: 'right' }}>
+                    <div style={{ color: impactColor[item.impact], fontSize: 12 }}>
+                      {impactLabel[item.impact] || item.impact}
+                    </div>
+                    <div style={{ color: '#484f58', fontSize: 11 }}>
+                      {item.collected_at ? new Date(item.collected_at).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) : ''}
+                    </div>
+                  </Col>
+                </Row>
+                {item.tags?.length > 0 && (
+                  <div style={{ marginTop: 4, marginLeft: 20 }}>
+                    {item.tags.slice(0, 5).map((tag: string, j: number) => (
+                      <Tag key={j} style={{ fontSize: 11, padding: '0 4px' }}>{tag}</Tag>
+                    ))}
+                  </div>
+                )}
+              </Card>
+            ))
+          )}
+        </div>
+      )}
+
+      {/* 数据源状态 */}
+      {sources?.sources && (
+        <Collapse ghost style={{ marginTop: 16 }}>
+          <Panel header={<span style={{ color: '#8b949e' }}>📡 数据源状态 ({Object.keys(sources.sources).length}个)</span>} key="sources">
+            <Row gutter={[8, 8]}>
+              {Object.entries(sources.sources).map(([name, status]: [string, any]) => (
+                <Col span={6} key={name}>
+                  <div style={{
+                    padding: '6px 10px', background: '#1c2128', borderRadius: 4,
+                    borderLeft: `3px solid ${status.status === 'ok' ? '#52c41a' : '#ff4d4f'}`,
+                    fontSize: 12
+                  }}>
+                    <div style={{ color: '#e6edf3' }}>{name}</div>
+                    <div style={{ color: '#8b949e' }}>
+                      {status.status === 'ok' ? `✅ ${status.fetched}条` : `❌ ${status.error?.slice(0, 30)}`}
+                    </div>
+                  </div>
+                </Col>
+              ))}
+            </Row>
+          </Panel>
+        </Collapse>
+      )}
+    </div>
+  )
+}
+
+// ============ Tab7: 实战检查清单 ============
 
 function TradingPractice() {
   const [checklist, setChecklist] = useState<any>(null)
@@ -994,6 +1323,9 @@ export default function CryptoMasterPage() {
       <Tabs defaultActiveKey="market" type="card" size="large">
         <TabPane tab={<span><RiseOutlined /> 市场全景</span>} key="market">
           <MarketOverview />
+        </TabPane>
+        <TabPane tab={<span><ThunderboltOutlined /> 情报搜集</span>} key="intel">
+          <IntelCollector />
         </TabPane>
         <TabPane tab={<span><BookOutlined /> 知识体系</span>} key="knowledge">
           <KnowledgeSystem />

@@ -98,7 +98,7 @@ export default function MasterStrategyPage() {
     }
   }, [topN])
 
-  useEffect(() => { loadStrategy(activeStrategy) }, []) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { loadStrategy(activeStrategy) }, [loadStrategy, activeStrategy])
 
   const handleStrategyChange = (key: string) => {
     setActiveStrategy(key)

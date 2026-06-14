@@ -3,10 +3,26 @@
 从零到一的完整加密货币投资教育体系
 """
 from fastapi import APIRouter, HTTPException
+from pydantic import BaseModel, Field
+from typing import Optional
 from app.services.crypto_master_service import CryptoMasterService
 
 router = APIRouter()
 svc = CryptoMasterService()
+
+
+class DCARequest(BaseModel):
+    coin: str = "bitcoin"
+    monthly_amount: float = Field(1000, gt=0, le=1_000_000, description="每月定投金额")
+    months: int = Field(12, ge=1, le=120, description="定投月数")
+
+
+class PositionRequest(BaseModel):
+    total_capital: float = Field(100000, gt=0, le=100_000_000, description="总资金")
+    risk_per_trade: float = Field(0.02, gt=0, le=1, description="单笔风险比例")
+    win_rate: float = Field(0.55, gt=0, lt=1, description="胜率")
+    avg_win: float = Field(0.15, gt=0, le=10, description="平均盈利")
+    avg_loss: float = Field(0.08, gt=0, le=10, description="平均亏损")
 
 
 # ========== 市场数据 ==========
@@ -14,31 +30,31 @@ svc = CryptoMasterService()
 @router.get("/market-overview")
 async def market_overview():
     """加密市场全景 - BTC/ETH主导率、总市值、恐惧贪婪指数"""
-    return await svc.get_market_overview()
+    return svc.get_market_overview()
 
 
 @router.get("/top-coins")
 async def top_coins(limit: int = 50):
     """Top N 加密货币排行"""
-    return await svc.get_top_coins(limit)
+    return svc.get_top_coins(limit)
 
 
 @router.get("/trending")
 async def trending():
     """热门币种 + 涨幅榜 + 跌幅榜"""
-    return await svc.get_trending()
+    return svc.get_trending()
 
 
 @router.get("/stablecoins")
 async def stablecoins():
     """稳定币市值监控 - 资金流入流出信号"""
-    return await svc.get_stablecoin_monitor()
+    return svc.get_stablecoin_monitor()
 
 
 @router.get("/btc-dominance-history")
 async def btc_dominance_history():
     """BTC主导率历史趋势"""
-    return await svc.get_btc_dominance_history()
+    return svc.get_btc_dominance_history()
 
 
 # ========== 链上数据 ==========
@@ -46,13 +62,13 @@ async def btc_dominance_history():
 @router.get("/defi-tvl")
 async def defi_tvl():
     """DeFi总锁仓量 + 各链分布"""
-    return await svc.get_defi_tvl()
+    return svc.get_defi_tvl()
 
 
 @router.get("/chain-comparison")
 async def chain_comparison():
     """公链对比 - TVL、活跃地址、交易量"""
-    return await svc.get_chain_comparison()
+    return svc.get_chain_comparison()
 
 
 # ========== 知识体系 ==========
@@ -87,23 +103,18 @@ async def strategies():
 
 
 @router.post("/dca-simulator")
-async def dca_simulator(payload: dict):
+async def dca_simulator(req: DCARequest):
     """定投模拟器 - 计算DCA收益"""
-    coin = payload.get("coin", "bitcoin")
-    monthly_amount = payload.get("monthly_amount", 1000)
-    months = payload.get("months", 12)
-    return svc.simulate_dca(coin, monthly_amount, months)
+    return svc.simulate_dca(req.coin, req.monthly_amount, req.months)
 
 
 @router.post("/position-calculator")
-async def position_calculator(payload: dict):
+async def position_calculator(req: PositionRequest):
     """仓位计算器 - Kelly公式 + 风险平价"""
-    total_capital = payload.get("total_capital", 100000)
-    risk_per_trade = payload.get("risk_per_trade", 0.02)
-    win_rate = payload.get("win_rate", 0.55)
-    avg_win = payload.get("avg_win", 0.15)
-    avg_loss = payload.get("avg_loss", 0.08)
-    return svc.calculate_position(total_capital, risk_per_trade, win_rate, avg_win, avg_loss)
+    return svc.calculate_position(
+        req.total_capital, req.risk_per_trade,
+        req.win_rate, req.avg_win, req.avg_loss
+    )
 
 
 # ========== 风险管理 ==========
@@ -132,6 +143,12 @@ async def security_guide():
 async def defi_guide():
     """DeFi实操指南 - 从入门到精通"""
     return svc.get_defi_guide()
+
+
+@router.get("/payment-tools")
+async def payment_tools():
+    """加密货币出入金工具指南"""
+    return svc.get_payment_tools()
 
 
 @router.get("/airdrop-guide")

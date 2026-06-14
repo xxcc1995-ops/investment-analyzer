@@ -11,6 +11,12 @@ interface Props {
   loading: boolean
 }
 
+function isTradingDay(): boolean {
+  const now = new Date()
+  const day = now.getDay()
+  return day >= 1 && day <= 5
+}
+
 export default function SectorFlowTab({ data, loading }: Props) {
   const [view, setView] = useState<'sectors' | 'flow' | 'movers'>('sectors')
 
@@ -20,6 +26,27 @@ export default function SectorFlowTab({ data, loading }: Props) {
   const sectors = data.sector_performance || []
   const fundFlow = data.fund_flow || []
   const movers = data.top_movers
+
+  // 非交易日且数据为空时显示提示
+  const isEmpty = sectors.length === 0 && fundFlow.length === 0 &&
+    (!movers || (movers.gainers?.length === 0 && movers.losers?.length === 0))
+  if (isEmpty && !isTradingDay()) {
+    return (
+      <div style={{
+        background: 'var(--bg-secondary)', border: '1px solid var(--border-primary)',
+        borderRadius: 'var(--radius-md)', padding: 40, textAlign: 'center',
+      }}>
+        <div style={{ fontSize: 32, marginBottom: 12 }}>📅</div>
+        <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-primary)', marginBottom: 6 }}>
+          今日非交易日
+        </div>
+        <div style={{ fontSize: 12, color: 'var(--text-muted)', lineHeight: 1.6 }}>
+          板块涨跌、资金流向、涨跌榜数据在交易日（周一至周五）实时更新。<br />
+          下一个交易日开盘后将自动恢复。
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>

@@ -48,7 +48,7 @@ export default function ConvertibleBondPage() {
     }
   }, [cbMaxDoubleLow, cbTopN, sortBy, minYtm])
 
-  useEffect(() => { loadCB() }, [])  // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { loadCB() }, [loadCB])
 
   const handleSortChange = (newSort: string) => {
     setSortBy(newSort)

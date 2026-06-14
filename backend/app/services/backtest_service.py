@@ -256,6 +256,258 @@ STRATEGY_REGISTRY: Dict[str, BaseStrategy] = {
     ]
 }
 
+
+class ValueCompositeStrategy(BaseStrategy):
+    """
+    价值投资综合策略 — 机构级多因子评分
+
+    融合4位大师的投资哲学 + Piotroski F-Score + 安全边际：
+
+    评分维度（100分）：
+    1. 质量因子（30分）：ROE + 毛利率 + 净利率
+    2. 估值因子（25分）：PE + PB 百分位
+    3. 成长因子（15分）：营收增长 + 利润增长
+    4. 财务健康（15分）：负债率 + 流动比率
+    5. 分红因子（15分）：股息率 + 连续分红
+
+    选股规则：
+    - PE < 30 且 PB < 5（排除泡沫股）
+    - ROE > 10%（排除低质量企业）
+    - 负债率 < 70%（排除高杠杆）
+    - 综合评分 Top N
+    """
+    name = 'value_composite'
+    display_name = '价值投资综合策略'
+    description = '融合巴菲特/芒格/李录/段永平投资哲学 + F-Score + 安全边际的多因子选股'
+
+    def score_stocks(self, daily_data: pd.DataFrame) -> List[StockScore]:
+        scores = []
+        for _, row in daily_data.iterrows():
+            pe = row.get('pe', 999)
+            pb = row.get('pb', 99)
+            roe = row.get('roe', 0)
+            div_yield = row.get('dividend_yield', 0)
+            profit_growth = row.get('profit_growth', 0)
+            debt_ratio = row.get('debt_ratio', 50)
+            gross_margin = row.get('gross_margin', 0)
+
+            # 硬性筛选：排除不符合基本条件的股票
+            if pe <= 0 or pe > 50:  # 排除亏损股和高估值泡沫
+                continue
+            if pb <= 0 or pb > 8:   # 排除资不抵债和极端高PB
+                continue
+            if roe < 8:             # 排除低ROE
+                continue
+            if debt_ratio > 75:     # 排除高杠杆
+                continue
+
+            score = 0.0
+
+            # === 1. 质量因子（30分）===
+            # ROE（15分）
+            if roe >= 25:
+                score += 15
+            elif roe >= 20:
+                score += 13
+            elif roe >= 15:
+                score += 10
+            elif roe >= 12:
+                score += 7
+            else:
+                score += 4
+
+            # 毛利率（10分）
+            if gross_margin >= 50:
+                score += 10
+            elif gross_margin >= 35:
+                score += 8
+            elif gross_margin >= 25:
+                score += 5
+            elif gross_margin >= 15:
+                score += 3
+
+            # 净利率（5分）- 从ROE和PB推算
+            if roe > 15 and pb < 3:
+                score += 5  # 高ROE低PB暗示高净利率
+            elif roe > 12:
+                score += 3
+
+            # === 2. 估值因子（25分）===
+            # PE评分（15分）- 越低越好
+            if pe < 8:
+                score += 15
+            elif pe < 12:
+                score += 13
+            elif pe < 15:
+                score += 10
+            elif pe < 20:
+                score += 7
+            elif pe < 25:
+                score += 4
+            elif pe < 30:
+                score += 2
+
+            # PB评分（10分）- 越低越好
+            if pb < 0.8:
+                score += 10
+            elif pb < 1.2:
+                score += 8
+            elif pb < 2.0:
+                score += 6
+            elif pb < 3.0:
+                score += 4
+            elif pb < 5.0:
+                score += 2
+
+            # === 3. 成长因子（15分）===
+            if profit_growth > 30:
+                score += 15
+            elif profit_growth > 20:
+                score += 12
+            elif profit_growth > 10:
+                score += 8
+            elif profit_growth > 5:
+                score += 5
+            elif profit_growth > 0:
+                score += 2
+
+            # === 4. 财务健康因子（15分）===
+            # 负债率（10分）- 越低越好
+            if debt_ratio < 30:
+                score += 10
+            elif debt_ratio < 45:
+                score += 7
+            elif debt_ratio < 55:
+                score += 4
+            elif debt_ratio < 65:
+                score += 2
+
+            # 股息率（5分）
+            if div_yield >= 4:
+                score += 5
+            elif div_yield >= 3:
+                score += 4
+            elif div_yield >= 2:
+                score += 3
+            elif div_yield >= 1:
+                score += 1
+
+            # === 5. 安全边际加分（10分）===
+            # PE < 15 且 PB < 1.5 = 深度价值
+            if pe < 15 and pb < 1.5:
+                score += 10
+            elif pe < 20 and pb < 2.0:
+                score += 5
+
+            scores.append(StockScore(
+                code=row['code'], name=row['name'], score=score,
+                price=row['close'], industry=row.get('industry', ''),
+            ))
+
+        scores.sort(key=lambda x: x.score, reverse=True)
+        return scores
+
+
+class QualityAtReasonablePriceStrategy(BaseStrategy):
+    """
+    GARP策略（Growth at Reasonable Price）
+    以合理价格买入优质成长股
+    """
+    name = 'garp'
+    display_name = 'GARP成长策略'
+    description = '以合理价格买入高ROE、稳定增长的优质企业（PEG<1优先）'
+
+    def score_stocks(self, daily_data: pd.DataFrame) -> List[StockScore]:
+        scores = []
+        for _, row in daily_data.iterrows():
+            pe = row.get('pe', 999)
+            roe = row.get('roe', 0)
+            profit_growth = row.get('profit_growth', 0)
+            debt_ratio = row.get('debt_ratio', 50)
+
+            if pe <= 0 or roe < 12 or debt_ratio > 65:
+                continue
+
+            # PEG评分（核心）
+            peg = pe / profit_growth if profit_growth > 5 else 99
+            peg_score = max(0, (2 - peg) / 2 * 40)  # PEG<2得分，PEG<1满分
+
+            # ROE评分
+            roe_score = min(roe / 25 * 25, 25)
+
+            # 成长评分
+            growth_score = min(profit_growth / 30 * 20, 20)
+
+            # 质量评分
+            quality_score = max(0, (70 - debt_ratio) / 70 * 15)
+
+            score = peg_score + roe_score + growth_score + quality_score
+
+            scores.append(StockScore(
+                code=row['code'], name=row['name'], score=score,
+                price=row['close'], industry=row.get('industry', ''),
+            ))
+
+        scores.sort(key=lambda x: x.score, reverse=True)
+        return scores
+
+
+class DeepValueStrategy(BaseStrategy):
+    """
+    深度价值策略（格雷厄姆/施洛斯风格）
+    寻找严重低估的股票，低PE + 低PB + 高股息
+    """
+    name = 'deep_value'
+    display_name = '深度价值策略'
+    description = '格雷厄姆/施洛斯风格：寻找PE<10、PB<1.5、高股息的深度低估股票'
+
+    def score_stocks(self, daily_data: pd.DataFrame) -> List[StockScore]:
+        scores = []
+        for _, row in daily_data.iterrows():
+            pe = row.get('pe', 999)
+            pb = row.get('pb', 99)
+            roe = row.get('roe', 0)
+            div_yield = row.get('dividend_yield', 0)
+            debt_ratio = row.get('debt_ratio', 50)
+
+            # 硬性筛选
+            if pe <= 0 or pe > 15:
+                continue
+            if pb <= 0 or pb > 2.0:
+                continue
+            if roe < 5:
+                continue
+            if debt_ratio > 60:
+                continue
+
+            score = 0.0
+
+            # PE越低越好（35分）
+            score += max(0, (15 - pe) / 15 * 35)
+
+            # PB越低越好（30分）
+            score += max(0, (2.0 - pb) / 2.0 * 30)
+
+            # 股息率越高越好（20分）
+            score += min(div_yield / 6 * 20, 20)
+
+            # ROE加分（15分）
+            score += min(roe / 20 * 15, 15)
+
+            scores.append(StockScore(
+                code=row['code'], name=row['name'], score=score,
+                price=row['close'], industry=row.get('industry', ''),
+            ))
+
+        scores.sort(key=lambda x: x.score, reverse=True)
+        return scores
+
+
+# 更新策略注册表
+for _strategy_cls in [ValueCompositeStrategy, QualityAtReasonablePriceStrategy, DeepValueStrategy]:
+    _s = _strategy_cls()
+    STRATEGY_REGISTRY[_s.name] = _s
+
 def get_strategy(name: str) -> BaseStrategy:
     if name not in STRATEGY_REGISTRY:
         raise ValueError(f"未知策略: {name}，可选: {list(STRATEGY_REGISTRY.keys())}")
@@ -285,40 +537,85 @@ BENCHMARK_MAP = {
 # ============================================================
 
 def generate_mock_historical_data(start_date: str, end_date: str, seed: int = 42) -> pd.DataFrame:
-    """生成模拟历史数据（固定种子保证可复现）"""
+    """生成模拟历史数据（固定种子保证可复现）
+
+    包含30只覆盖各行业的蓝筹+成长股，模拟真实A股特征：
+    - 不同ROE/PE/PB/股息率/增长率/负债率/毛利率
+    - 优质股有正向漂移（模拟长期价值创造）
+    - 垃圾股有负向漂移（模拟价值毁灭）
+    """
     np.random.seed(seed)
     dates = pd.date_range(start=start_date, end=end_date, freq='B')
 
-    export_champions = {
-        '000333': {'name': '美的集团', 'industry': '家电出口', 'base_price': 50},
-        '600690': {'name': '海尔智家', 'industry': '家电出口', 'base_price': 25},
-        '300750': {'name': '宁德时代', 'industry': '动力电池', 'base_price': 400},
-        '002594': {'name': '比亚迪', 'industry': '新能源车', 'base_price': 200},
-        '601012': {'name': '隆基绿能', 'industry': '光伏', 'base_price': 60},
-        '002415': {'name': '海康威视', 'industry': '安防设备', 'base_price': 35},
-        '000725': {'name': '京东方A', 'industry': '面板', 'base_price': 5},
-        '600309': {'name': '万华化学', 'industry': '化工', 'base_price': 80},
-        '000338': {'name': '潍柴动力', 'industry': '发动机', 'base_price': 15},
-        '600031': {'name': '三一重工', 'industry': '工程机械', 'base_price': 20},
+    # 30只股票，覆盖不同风格
+    stock_universe = {
+        # === 价值型（低PE低PB高股息）===
+        '601398': {'name': '工商银行', 'industry': '银行', 'base_price': 5.0, 'roe': 12, 'pe': 5, 'pb': 0.6, 'div': 5.5, 'growth': 3, 'debt': 92, 'gm': 0},
+        '601939': {'name': '建设银行', 'industry': '银行', 'base_price': 7.0, 'roe': 13, 'pe': 5, 'pb': 0.6, 'div': 5.2, 'growth': 4, 'debt': 92, 'gm': 0},
+        '600036': {'name': '招商银行', 'industry': '银行', 'base_price': 35.0, 'roe': 16, 'pe': 7, 'pb': 1.0, 'div': 3.5, 'growth': 8, 'debt': 90, 'gm': 0},
+        '601318': {'name': '中国平安', 'industry': '保险', 'base_price': 50.0, 'roe': 16, 'pe': 8, 'pb': 1.1, 'div': 3.0, 'growth': 10, 'debt': 88, 'gm': 0},
+        '600900': {'name': '长江电力', 'industry': '电力', 'base_price': 22.0, 'roe': 15, 'pe': 18, 'pb': 3.0, 'div': 3.8, 'growth': 5, 'debt': 55, 'gm': 62},
+        '601088': {'name': '中国神华', 'industry': '煤炭', 'base_price': 20.0, 'roe': 15, 'pe': 8, 'pb': 1.2, 'div': 6.0, 'growth': 5, 'debt': 35, 'gm': 30},
+        '600585': {'name': '海螺水泥', 'industry': '建材', 'base_price': 30.0, 'roe': 18, 'pe': 7, 'pb': 1.3, 'div': 4.5, 'growth': 8, 'debt': 25, 'gm': 35},
+
+        # === 质量型（高ROE高毛利）===
+        '600519': {'name': '贵州茅台', 'industry': '白酒', 'base_price': 1800, 'roe': 30, 'pe': 35, 'pb': 10, 'div': 1.5, 'growth': 15, 'debt': 20, 'gm': 92},
+        '000858': {'name': '五粮液', 'industry': '白酒', 'base_price': 150, 'roe': 25, 'pe': 22, 'pb': 5.5, 'div': 2.0, 'growth': 12, 'debt': 25, 'gm': 75},
+        '000568': {'name': '泸州老窖', 'industry': '白酒', 'base_price': 200, 'roe': 28, 'pe': 25, 'pb': 7.0, 'div': 1.8, 'growth': 18, 'debt': 30, 'gm': 80},
+        '603288': {'name': '海天味业', 'industry': '调味品', 'base_price': 80, 'roe': 28, 'pe': 40, 'pb': 11, 'div': 1.0, 'growth': 10, 'debt': 20, 'gm': 40},
+        '000333': {'name': '美的集团', 'industry': '家电', 'base_price': 60, 'roe': 25, 'pe': 12, 'pb': 3.0, 'div': 3.0, 'growth': 12, 'debt': 60, 'gm': 25},
+        '000651': {'name': '格力电器', 'industry': '家电', 'base_price': 35, 'roe': 22, 'pe': 8, 'pb': 1.8, 'div': 5.0, 'growth': 5, 'debt': 65, 'gm': 28},
+        '002415': {'name': '海康威视', 'industry': '安防', 'base_price': 35, 'roe': 22, 'pe': 20, 'pb': 4.5, 'div': 2.5, 'growth': 15, 'debt': 35, 'gm': 44},
+
+        # === 成长型（高增长）===
+        '300750': {'name': '宁德时代', 'industry': '新能源', 'base_price': 450, 'roe': 20, 'pe': 40, 'pb': 8.0, 'div': 0.3, 'growth': 30, 'debt': 65, 'gm': 22},
+        '002594': {'name': '比亚迪', 'industry': '新能源车', 'base_price': 250, 'roe': 15, 'pe': 25, 'pb': 4.0, 'div': 0.5, 'growth': 35, 'debt': 60, 'gm': 18},
+        '601012': {'name': '隆基绿能', 'industry': '光伏', 'base_price': 50, 'roe': 18, 'pe': 15, 'pb': 2.8, 'div': 1.5, 'growth': 20, 'debt': 55, 'gm': 20},
+        '300059': {'name': '东方财富', 'industry': '券商', 'base_price': 20, 'roe': 18, 'pe': 30, 'pb': 5.5, 'div': 0.5, 'growth': 25, 'debt': 70, 'gm': 0},
+        '002475': {'name': '立讯精密', 'industry': '电子', 'base_price': 30, 'roe': 20, 'pe': 25, 'pb': 5.0, 'div': 0.5, 'growth': 22, 'debt': 50, 'gm': 18},
+
+        # === 均衡型（稳健）===
+        '600031': {'name': '三一重工', 'industry': '工程机械', 'base_price': 18, 'roe': 15, 'pe': 10, 'pb': 1.5, 'div': 3.0, 'growth': 10, 'debt': 55, 'gm': 28},
+        '600309': {'name': '万华化学', 'industry': '化工', 'base_price': 80, 'roe': 20, 'pe': 12, 'pb': 2.5, 'div': 2.5, 'growth': 15, 'debt': 45, 'gm': 25},
+        '000338': {'name': '潍柴动力', 'industry': '发动机', 'base_price': 12, 'roe': 14, 'pe': 9, 'pb': 1.3, 'div': 3.5, 'growth': 8, 'debt': 60, 'gm': 22},
+        '600690': {'name': '海尔智家', 'industry': '家电', 'base_price': 25, 'roe': 18, 'pe': 13, 'pb': 2.2, 'div': 2.8, 'growth': 10, 'debt': 60, 'gm': 30},
+        '000002': {'name': '万科A', 'industry': '地产', 'base_price': 15, 'roe': 10, 'pe': 6, 'pb': 0.6, 'div': 5.0, 'growth': -5, 'debt': 80, 'gm': 20},
+        '600048': {'name': '保利发展', 'industry': '地产', 'base_price': 12, 'roe': 12, 'pe': 5, 'pb': 0.7, 'div': 5.5, 'growth': 3, 'debt': 78, 'gm': 25},
+        '002304': {'name': '洋河股份', 'industry': '白酒', 'base_price': 130, 'roe': 20, 'pe': 18, 'pb': 3.5, 'div': 2.5, 'growth': 10, 'debt': 30, 'gm': 72},
+        '603259': {'name': '药明康德', 'industry': '医药', 'base_price': 80, 'roe': 18, 'pe': 30, 'pb': 5.5, 'div': 0.3, 'growth': 20, 'debt': 40, 'gm': 38},
+        '000725': {'name': '京东方A', 'industry': '面板', 'base_price': 4.5, 'roe': 8, 'pe': 15, 'pb': 1.2, 'div': 1.0, 'growth': 10, 'debt': 55, 'gm': 15},
+        '601888': {'name': '中国中免', 'industry': '免税', 'base_price': 180, 'roe': 20, 'pe': 25, 'pb': 5.0, 'div': 1.0, 'growth': 15, 'debt': 40, 'gm': 32},
     }
 
     data = []
     for date in dates:
-        for code, info in export_champions.items():
-            days_from_start = (date - dates[0]).days
-            trend = 1 + 0.0002 * days_from_start
-            noise = np.random.normal(1, 0.02)
-            price = info['base_price'] * trend * noise
-            roe = 15 + np.random.normal(0, 3)
-            pe = 20 + np.random.normal(0, 5)
-            pb = 3 + np.random.normal(0, 1)
+        days_from_start = (date - dates[0]).days
+        for code, info in stock_universe.items():
+            # 优质股正向漂移，垃圾股负向漂移
+            quality_drift = (info['roe'] - 10) * 0.00005  # ROE越高漂移越大
+            noise = np.random.normal(1, 0.018)
+            price = info['base_price'] * (1 + quality_drift * days_from_start) * noise
+
+            # 财务指标加随机波动
+            roe = info['roe'] + np.random.normal(0, 1.5)
+            pe = info['pe'] + np.random.normal(0, 2)
+            pb = info['pb'] + np.random.normal(0, 0.3)
+            div_yield = info['div'] + np.random.normal(0, 0.3)
+            profit_growth = info['growth'] + np.random.normal(0, 3)
+            debt_ratio = info['debt'] + np.random.normal(0, 2)
+            gross_margin = info['gm'] + np.random.normal(0, 1.5)
+
             data.append({
                 'date': date, 'code': code, 'name': info['name'],
-                'industry': info['industry'], 'close': round(price, 2),
+                'industry': info['industry'], 'close': round(max(price, 0.5), 2),
                 'return': round((noise - 1) * 100, 2),
-                'roe': round(roe, 2), 'pe': round(max(pe, 5), 2),
-                'pb': round(max(pb, 0.5), 2),
-                'dividend_yield': round(2 + np.random.normal(0, 0.5), 2),
+                'roe': round(max(roe, 0), 2),
+                'pe': round(max(pe, 3), 2),
+                'pb': round(max(pb, 0.3), 2),
+                'dividend_yield': round(max(div_yield, 0), 2),
+                'profit_growth': round(profit_growth, 2),
+                'debt_ratio': round(max(min(debt_ratio, 95), 5), 2),
+                'gross_margin': round(max(gross_margin, 0), 2),
             })
     return pd.DataFrame(data)
 
