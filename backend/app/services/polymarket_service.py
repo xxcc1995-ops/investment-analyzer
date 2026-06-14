@@ -258,15 +258,15 @@ def _parse_market(m: dict) -> Optional[Dict]:
         volume = float(m.get('volume', 0) or 0)
         liquidity = float(m.get('liquidity', 0) or 0)
 
-        # Dynamic arbitrage threshold: base 1% + estimated slippage
+        # Estimate slippage based on liquidity/volume ratio
         slippage = _estimate_slippage(liquidity, volume)
-        arb_threshold = 1.0 + slippage / 100  # e.g. 1.01 for 1% slippage
 
-        # Determine if there's an arbitrage opportunity
-        # If Yes + No < 1.0 - slippage, buy both for guaranteed profit
-        has_arbitrage = price_sum > 0 and price_sum < arb_threshold
-        arbitrage_profit = round((1.0 - price_sum) * 100, 2) if has_arbitrage else 0
-        # Net profit after estimated slippage
+        # Gross arbitrage: Yes + No < 1.0 means buying both guarantees $1 payout
+        # Net arbitrage: subtract estimated slippage to get real profit
+        has_arbitrage = price_sum > 0 and price_sum < 1.0
+        # Gross profit % (before slippage)
+        arbitrage_profit = round((1.0 - price_sum) / price_sum * 100, 2) if has_arbitrage else 0
+        # Net profit % after estimated slippage
         net_arb_profit = round(arbitrage_profit - slippage, 2) if has_arbitrage else 0
 
         return {
@@ -316,7 +316,8 @@ def find_arbitrage_opportunities(min_profit: float = 0.5) -> List[Dict]:
 
     opportunities = []
     for m in markets:
-        if m.get('has_arbitrage') and m.get('arbitrage_profit', 0) >= min_profit:
+        # Filter by NET profit (after slippage) to show only truly profitable opportunities
+        if m.get('has_arbitrage') and m.get('net_arbitrage_profit', 0) >= min_profit:
             opportunities.append(m)
 
     # Also check for neg-risk markets where outcomes don't sum to 1.0
@@ -471,9 +472,13 @@ def calculate_kelly(price: float, estimated_prob: float,
     kelly_adjusted = (b_adj * p - q) / b_adj if b_adj > 0 else 0
     kelly_adjusted_fractional = max(0, kelly_adjusted * fraction)
 
-    # Expected value (扣除交易成本)
-    ev_gross = p * (1.0 - price) - q * price  # EV per dollar before costs
-    ev_net = ev_gross - fee_rate  # EV after costs
+    # Expected value per dollar invested (扣除交易成本)
+    # EV per share = p*(1-price) - q*price = p - price
+    # EV per dollar = (p - price) / price = p/price - 1
+    ev_per_share_gross = p * (1.0 - price) - q * price
+    ev_per_share_net = ev_per_share_gross - fee_rate * price  # fee is on the dollar amount
+    ev_gross = ev_per_share_gross / price if price > 0 else 0  # per dollar invested
+    ev_net = ev_per_share_net / price if price > 0 else 0
     ev_pct = ev_net * 100
 
     # Position sizing (使用调整后的Kelly)
@@ -506,8 +511,8 @@ def calculate_kelly(price: float, estimated_prob: float,
         risk_level = 'very_high'
         risk_msg = '极强优势，务必二次确认概率估计'
 
-    # Potential loss if wrong
-    potential_loss = position_fractional * price / (1.0 - price) if price < 1 else position_fractional
+    # Potential loss if wrong: in a binary market you lose your entire position
+    potential_loss = position_fractional
 
     return {
         'price': price,
@@ -940,10 +945,12 @@ def find_cross_platform_arbitrage(
         s2_total_fee = s2_op_fee + s2_pm_fee
 
         # 选择最优策略
+        # Profit formula: payout = budget / sum (you buy budget/sum shares, each pays $1)
+        # profit = budget/sum - budget - fees = budget * (1-sum)/sum - fees
         if s1_sum < 1 and s2_sum < 1:
             # 两个策略都可行，选择利润更高的
-            s1_profit = (1 - s1_sum) * budget - s1_total_fee
-            s2_profit = (1 - s2_sum) * budget - s2_total_fee
+            s1_profit = budget * (1 - s1_sum) / s1_sum - s1_total_fee
+            s2_profit = budget * (1 - s2_sum) / s2_sum - s2_total_fee
             if s1_profit > s2_profit:
                 best = 'strategy_1'
                 best_sum = s1_sum
@@ -952,7 +959,7 @@ def find_cross_platform_arbitrage(
                 best_yes = s1_yes
                 best_no = s1_no
                 best_yes_fee_rate = s1_op_fee / s1_yes_invest if s1_yes_invest > 0 else 0
-                best_no_fee_rate = 0
+                best_no_fee_rate = s1_pm_fee / s1_no_invest if s1_no_invest > 0 else 0
             else:
                 best = 'strategy_2'
                 best_sum = s2_sum
@@ -960,25 +967,25 @@ def find_cross_platform_arbitrage(
                 best_profit = s2_profit
                 best_yes = s2_yes
                 best_no = s2_no
-                best_yes_fee_rate = 0
+                best_yes_fee_rate = s2_pm_fee / s2_yes_invest if s2_yes_invest > 0 else 0
                 best_no_fee_rate = s2_op_fee / s2_no_invest if s2_no_invest > 0 else 0
         elif s1_sum < 1:
             best = 'strategy_1'
             best_sum = s1_sum
             best_fee = s1_total_fee
-            best_profit = (1 - s1_sum) * budget - s1_total_fee
+            best_profit = budget * (1 - s1_sum) / s1_sum - s1_total_fee
             best_yes = s1_yes
             best_no = s1_no
             best_yes_fee_rate = s1_op_fee / s1_yes_invest if s1_yes_invest > 0 else 0
-            best_no_fee_rate = 0
+            best_no_fee_rate = s1_pm_fee / s1_no_invest if s1_no_invest > 0 else 0
         elif s2_sum < 1:
             best = 'strategy_2'
             best_sum = s2_sum
             best_fee = s2_total_fee
-            best_profit = (1 - s2_sum) * budget - s2_total_fee
+            best_profit = budget * (1 - s2_sum) / s2_sum - s2_total_fee
             best_yes = s2_yes
             best_no = s2_no
-            best_yes_fee_rate = 0
+            best_yes_fee_rate = s2_pm_fee / s2_yes_invest if s2_yes_invest > 0 else 0
             best_no_fee_rate = s2_op_fee / s2_no_invest if s2_no_invest > 0 else 0
         else:
             continue  # 没有套利机会

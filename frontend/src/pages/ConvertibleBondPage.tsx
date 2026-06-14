@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import React, { useState, useEffect, useCallback } from 'react'
 import { cbApi, type ConvertibleBond } from '../services/api'
 import { PageSection, DataTable, LoadingSpinner, EmptyState, StatCard, StatCardGroup } from '../components/ui'
 import type { Column } from '../components/ui'
@@ -301,8 +301,8 @@ export default function ConvertibleBondPage() {
             </thead>
             <tbody>
               {cbBonds.map((b, i) => (
-                <>
-                  <tr key={b.bond_id} onClick={() => setExpandedRow(expandedRow === b.bond_id ? null : b.bond_id)}
+                <React.Fragment key={b.bond_id}>
+                  <tr onClick={() => setExpandedRow(expandedRow === b.bond_id ? null : b.bond_id)}
                     style={{ cursor: 'pointer' }}>
                     <td>{i + 1}</td>
                     <td>{b.bond_id}</td>
@@ -460,7 +460,7 @@ export default function ConvertibleBondPage() {
                       </td>
                     </tr>
                   )}
-                </>
+                </React.Fragment>
               ))}
               {cbBonds.length === 0 && (
                 <tr>

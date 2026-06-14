@@ -3,9 +3,9 @@
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 from typing import Optional
-from app.services.vi_service import screen_stocks, _get_a_stock_data, _get_hk_stock_data, _get_us_stock_data
+from app.services.vi_service import screen_stocks
 from app.services.dcf import DCFService, calculate_graham_number, estimate_wacc
-from app.services.data_service import DataService, _get_annual_report
+from app.services.data_service import DataService
 
 router = APIRouter()
 
@@ -541,7 +541,7 @@ def dcf_auto_fetch(req: AutoDCFRequest):
             current_fcf=current_fcf / 1e8,  # 转为亿元
             growth_rate=growth_rate,
             shares=shares,
-            net_debt=net_debt / 1e8 if net_debt > 0 else 0,
+            net_debt=net_debt / 1e8,
             current_price=current_price,
         )
 
@@ -560,13 +560,13 @@ def dcf_auto_fetch(req: AutoDCFRequest):
         class MockReq:
             pass
         mock = MockReq()
-        mock.current_fcf = result.get('fcf_raw', current_fcf / 1e8)
+        mock.current_fcf = current_fcf / 1e8
         mock.growth_rate = growth_rate
         mock.shares = shares
         mock.discount_rate = discount_rate
         mock.terminal_growth_rate = 0.03
         mock.safety_margin = req.safety_margin
-        mock.net_debt = net_debt / 1e8 if net_debt > 0 else 0
+        mock.net_debt = net_debt / 1e8
         mock.current_price = current_price
         result['sensitivity'] = _build_sensitivity_matrix(mock)
 

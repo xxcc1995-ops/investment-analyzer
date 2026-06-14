@@ -4,6 +4,7 @@ import { stockApi } from '../services/api'
 import type { StockBasic, FinancialReport, ValuationHistory, DividendHistory, FragilityResult, DerivedMetrics, CrossAnalysisResult } from '../services/api'
 import { StatCard, StatCardGroup, PageSection, DataTable, TabBar, LoadingSpinner, EmptyState, StatusBadge, Tag } from '../components/ui'
 import type { Column } from '../components/ui'
+import { AIAnalysisPanel } from '../components/AIAnalysisPanel'
 
 const FinancialStatements = lazy(() => import('./FinancialStatements'))
 
@@ -20,7 +21,8 @@ const formatAmount = (num: number | null | undefined) => {
   return num.toFixed(2) + '万'
 }
 
-const formatVolume = (num: number) => {
+const formatVolume = (num: number | null | undefined) => {
+  if (num === null || num === undefined) return '-'
   if (num >= 100000000) return (num / 100000000).toFixed(2) + '亿股'
   if (num >= 10000) return (num / 10000).toFixed(2) + '万股'
   return num + '股'
@@ -378,7 +380,7 @@ export default function StockAnalysis({ code }: StockAnalysisProps) {
   const [valuationError, setValuationError] = useState<string | null>(null)
   const [fetchTime, setFetchTime] = useState('')
   const [latestReport, setLatestReport] = useState('')
-  const [sectionView, setSectionView] = useState<'overview' | 'cross' | 'f12'>('overview')
+  const [sectionView, setSectionView] = useState<'overview' | 'cross' | 'ai' | 'f12'>('overview')
 
   const loadStock = useCallback(async (stockCode: string) => {
     setLoading(true)
@@ -646,7 +648,7 @@ export default function StockAnalysis({ code }: StockAnalysisProps) {
           <StatCard label="市净率(PB)" value={formatNum(selectedStock.pb)} />
           <StatCard label="股息率" value={valuationHistory?.stats?.div?.current ? valuationHistory.stats.div.current + '%' : (selectedStock.dividend_yield ? selectedStock.dividend_yield + '%' : '-')} />
           <StatCard label="ROE" value={formatNum(latestFin?.roe, '%')} />
-          <StatCard label="总市值" value={selectedStock.market_cap.toFixed(0) + '亿'} />
+          <StatCard label="总市值" value={selectedStock.market_cap != null ? selectedStock.market_cap.toFixed(0) + '亿' : '-'} />
           <StatCard label="营收增长率" value={formatNum(latestFin?.revenue_growth, '%')} color={latestFin?.revenue_growth && latestFin.revenue_growth >= 0 ? 'var(--accent-green)' : 'var(--accent-red)'} />
           <StatCard label="净利润增长率" value={formatNum(latestFin?.profit_growth, '%')} color={latestFin?.profit_growth && latestFin.profit_growth >= 0 ? 'var(--accent-green)' : 'var(--accent-red)'} />
           <StatCard
@@ -815,15 +817,18 @@ export default function StockAnalysis({ code }: StockAnalysisProps) {
         tabs={[
           { key: 'overview', label: '财务概览' },
           { key: 'cross', label: '交叉分析' },
+          { key: 'ai', label: '🤖 AI分析' },
           { key: 'f12', label: '三大报表 (F12)' },
         ]}
         activeKey={sectionView}
-        onChange={k => setSectionView(k as 'overview' | 'cross' | 'f12')}
+        onChange={k => setSectionView(k as 'overview' | 'cross' | 'ai' | 'f12')}
         style={{ marginBottom: 16 }}
       />
 
       {sectionView === 'cross' ? (
         <CrossAnalysisPanel data={crossAnalysis} loading={crossLoading} />
+      ) : sectionView === 'ai' ? (
+        <AIAnalysisPanel code={code} stockName={selectedStock?.name} />
       ) : sectionView === 'f12' ? (
         <Suspense fallback={<LoadingSpinner text="加载三大报表..." />}>
           <FinancialStatements code={code} />

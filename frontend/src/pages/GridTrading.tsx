@@ -62,7 +62,7 @@ interface Simulation {
   annual_volatility: number
   max_consecutive_losses: number
   capital_utilization: number
-  total_fees_paid?: number
+  total_fees_paid: number
   equity_curve: { date: string; equity: number }[]
   open_positions: number
   position_details: { level: number; shares: number; entry: number; unrealized: number }[]
@@ -87,7 +87,7 @@ interface GridAnalysis {
   total_levels: number
   simulation: Simulation
   status: { current_price: number; nearest_level: GridLevel; next_buy: GridLevel; next_sell: GridLevel }
-  breakeven: { min_grid_width: number; min_grid_pct: number; profit_per_trade: number; is_profitable: boolean; trading_cost_per_share: number }
+  breakeven: { min_grid_width: number; min_grid_pct: number; current_grid_width: number; current_grid_pct: number; profit_per_trade: number; is_profitable: boolean; trading_cost_per_share: number }
   cagr: number
   hist_days: number
   stop_loss_pct: number
@@ -155,7 +155,7 @@ export default function GridTrading() {
   const searchRef = useRef<HTMLDivElement>(null)
   const searchTimerRef = useRef<number | null>(null)
 
-  const [gridType, setGridType] = useState<'equal_distance' | 'equal_ratio'>('equal_distance')
+  const [gridType, setGridType] = useState<'equal_distance' | 'equal_ratio' | 'dynamic'>('equal_distance')
   const [gridsUp, setGridsUp] = useState('10')
   const [gridsDown, setGridsDown] = useState('10')
   const [gridWidthPct, setGridWidthPct] = useState('')
@@ -225,7 +225,10 @@ export default function GridTrading() {
       if (gridWidthPct) params.grid_width_pct = parseFloat(gridWidthPct)
       const res = await axios.get(`${API_BASE}/grid/analysis`, { params })
       setAnalysis(res.data)
-    } catch (e) { console.error(e) }
+    } catch (e: any) {
+      console.error(e)
+      setAnalysis({ error: e?.response?.data?.detail || e?.message || '请求失败，请检查网络或股票代码' } as any)
+    }
     setLoading(false)
   }, [stockCode, gridType, gridsUp, gridsDown, gridWidthPct, capital, histDays, sizing, enableStopLoss, stopLossPct, atrMultiplier])
 
@@ -236,7 +239,10 @@ export default function GridTrading() {
         params: { stock_code: stockCode, capital: parseFloat(capital), hist_days: parseInt(histDays) }
       })
       setOptimizeResult(res.data)
-    } catch (e) { console.error(e) }
+    } catch (e: any) {
+      console.error(e)
+      setOptimizeResult({ error: e?.response?.data?.detail || e?.message || '优化请求失败' } as any)
+    }
     setOptimizeLoading(false)
   }, [stockCode, capital, histDays])
 
@@ -318,14 +324,14 @@ export default function GridTrading() {
     { key: 'price', title: '价格', dataIndex: 'price', align: 'right', render: v => fmt(v) },
     { key: 'level', title: '网格层级', dataIndex: 'level', align: 'right', render: v => fmt(v) },
     { key: 'shares', title: '股数', dataIndex: 'shares', align: 'right' },
-    { key: 'pnl', title: '盈亏', align: 'right', render: (_, r) => <span style={{ color: (r.pnl || 0) >= 0 ? '#52c41a' : '#ff4d4f' }}>{r.pnl ? `${getCurrency(analysis?.market)}${fmt(r.pnl)}` : '-'}</span> },
+    { key: 'pnl', title: '盈亏', align: 'right', render: (_, r) => <span style={{ color: (r.pnl || 0) >= 0 ? '#52c41a' : '#ff4d4f' }}>{r.pnl !== undefined && r.pnl !== null ? `${getCurrency(analysis?.market)}${fmt(r.pnl)}` : '-'}</span> },
   ]
 
   const positionColumns: Column<any>[] = [
     { key: 'level', title: '网格层级', dataIndex: 'level', align: 'right', render: v => fmt(v) },
     { key: 'shares', title: '股数', dataIndex: 'shares', align: 'right' },
     { key: 'entry', title: '买入价', dataIndex: 'entry', align: 'right', render: v => fmt(v) },
-    { key: 'unrealized', title: '未实现盈亏', dataIndex: 'unrealized', align: 'right', render: v => <span style={{ color: v >= 0 ? '#52c41a' : '#ff4d4f' }}>{getCurrency(analysis?.market)}${fmt(v)}</span> },
+    { key: 'unrealized', title: '未实现盈亏', dataIndex: 'unrealized', align: 'right', render: v => <span style={{ color: v >= 0 ? '#52c41a' : '#ff4d4f' }}>{getCurrency(analysis?.market)}{fmt(v)}</span> },
   ]
 
   const optimizeColumns: Column<any>[] = [
@@ -506,11 +512,11 @@ export default function GridTrading() {
               {/* 52周价格区间 */}
               <PageSection title="52周价格区间">
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <span style={{ color: 'var(--text-secondary)', fontSize: 13 }}>52周低: <span style={{ color: '#52c41a' }}>{getCurrency(analysis.market)}${fmt(analysis.low_52w)}</span></span>
+                  <span style={{ color: 'var(--text-secondary)', fontSize: 13 }}>52周低: <span style={{ color: '#52c41a' }}>{getCurrency(analysis.market)}{fmt(analysis.low_52w)}</span></span>
                   <div className="grid-52w-bar">
                     <div className="grid-52w-dot" style={{ left: `${((analysis.current_price - analysis.low_52w) / (analysis.high_52w - analysis.low_52w)) * 100}%` }} />
                   </div>
-                  <span style={{ color: 'var(--text-secondary)', fontSize: 13 }}>52周高: <span style={{ color: '#ff4d4f' }}>{getCurrency(analysis.market)}${fmt(analysis.high_52w)}</span></span>
+                  <span style={{ color: 'var(--text-secondary)', fontSize: 13 }}>52周高: <span style={{ color: '#ff4d4f' }}>{getCurrency(analysis.market)}{fmt(analysis.high_52w)}</span></span>
                 </div>
               </PageSection>
 
@@ -539,7 +545,7 @@ export default function GridTrading() {
               <PageSection title="盈亏平衡分析">
                 <p style={{ color: 'var(--text-secondary)', fontSize: 13 }}>最小网格宽度: {fmt(analysis.breakeven.min_grid_width)} ({analysis.breakeven.min_grid_pct}%)</p>
                 <p style={{ color: 'var(--text-secondary)', fontSize: 13 }}>每笔交易成本: {fmt(analysis.breakeven.trading_cost_per_share)}/股</p>
-                <p style={{ color: 'var(--text-secondary)', fontSize: 13 }}>每格利润: {getCurrency(analysis.market)}${fmt(analysis.breakeven.profit_per_trade)}</p>
+                <p style={{ color: 'var(--text-secondary)', fontSize: 13 }}>每格利润: {getCurrency(analysis.market)}{fmt(analysis.breakeven.profit_per_trade)}</p>
                 <p style={{ color: analysis.breakeven.is_profitable ? '#52c41a' : '#ff4d4f', fontWeight: 600 }}>
                   {analysis.breakeven.is_profitable ? '✓ 网格宽度足够覆盖交易成本' : '✗ 网格宽度过窄，利润被手续费侵蚀！请加大网格宽度'}
                 </p>
@@ -560,7 +566,7 @@ export default function GridTrading() {
             <StatCard label="未实现盈亏" value={`${getCurrency(analysis.market)}${fmt(analysis.simulation.unrealized_pnl)}`} color="#faad14" />
             <StatCard label="交易次数" value={analysis.simulation.total_trades} color="#d4a76a" />
             <StatCard label="持仓数" value={analysis.simulation.open_positions} color="#722ed1" />
-            <StatCard label="累计手续费" value={`${getCurrency(analysis.market)}${fmt(analysis.simulation.total_fees_paid || 0)}`} color="#ff4d4f" />
+            <StatCard label="累计手续费" value={`${getCurrency(analysis.market)}${fmt(analysis.simulation.total_fees_paid)}`} color="#ff4d4f" />
           </StatCardGroup>
 
           <PageSection title="风险指标">
@@ -604,7 +610,7 @@ export default function GridTrading() {
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 16 }}>
             <PageSection title="当前位置">
               <p style={{ color: 'var(--text-secondary)', fontSize: 14 }}>
-                现价: <span style={{ color: '#d4a76a', fontWeight: 700 }}>{getCurrency(analysis.market)}${fmt(analysis.current_price)}</span>
+                现价: <span style={{ color: '#d4a76a', fontWeight: 700 }}>{getCurrency(analysis.market)}{fmt(analysis.current_price)}</span>
               </p>
               <p style={{ color: 'var(--text-secondary)', fontSize: 14 }}>
                 最近网格: <span style={{ color: '#1890ff' }}>{fmt(analysis.status.nearest_level?.price)}</span>
@@ -619,13 +625,13 @@ export default function GridTrading() {
             <PageSection title="触发价位">
               {analysis.status.next_buy && (
                 <p style={{ color: 'var(--text-secondary)', fontSize: 14 }}>
-                  下一买入: <span style={{ color: '#52c41a', fontWeight: 700 }}>{getCurrency(analysis.market)}${fmt(analysis.status.next_buy.price)}</span>
+                  下一买入: <span style={{ color: '#52c41a', fontWeight: 700 }}>{getCurrency(analysis.market)}{fmt(analysis.status.next_buy.price)}</span>
                   ({analysis.status.next_buy.distance_pct}%)
                 </p>
               )}
               {analysis.status.next_sell && (
                 <p style={{ color: 'var(--text-secondary)', fontSize: 14 }}>
-                  下一卖出: <span style={{ color: '#ff4d4f', fontWeight: 700 }}>{getCurrency(analysis.market)}${fmt(analysis.status.next_sell.price)}</span>
+                  下一卖出: <span style={{ color: '#ff4d4f', fontWeight: 700 }}>{getCurrency(analysis.market)}{fmt(analysis.status.next_sell.price)}</span>
                   (+{analysis.status.next_sell.distance_pct}%)
                 </p>
               )}

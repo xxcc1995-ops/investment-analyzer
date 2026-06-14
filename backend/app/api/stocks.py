@@ -129,7 +129,10 @@ def get_derived_metrics(stock_code: str, data_service: DataService = Depends(get
                     da = cashflow[0].get("depreciation_amortization")
                 if not da and total_assets > 0:
                     da = total_assets * 0.03  # fallback: 约3%总资产近似
-                ebitda = operate_profit + da if operate_profit and da else operate_profit
+                # operate_profit可能为None，da可能存在；需要安全加法
+                op = operate_profit or 0
+                da_val = da or 0
+                ebitda = op + da_val if (op or da_val) else None
 
                 if ebitda and ebitda > 0:
                     ev_ebitda = round(ev / ebitda, 2)

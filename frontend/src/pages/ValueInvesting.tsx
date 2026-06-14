@@ -466,8 +466,8 @@ export default function ValueInvesting() {
     }
 
     const validValues = data.filter(d => d[2] !== null).map(d => d[2] as number)
-    const minVal = Math.min(...validValues)
-    const maxVal = Math.max(...validValues)
+    const minVal = validValues.length > 0 ? Math.min(...validValues) : 0
+    const maxVal = validValues.length > 0 ? Math.max(...validValues) : 100
 
     return {
       tooltip: {

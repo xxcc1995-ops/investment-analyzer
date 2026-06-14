@@ -386,7 +386,7 @@ def generate_grid_levels(
 
     if grid_type == 'dynamic' and closes and len(closes) >= 20:
         # ===== 动态网格（布林带自适应）=====
-        # 用最近20天的收盘价计算均值和标准差
+        # 用最近60天的收盘价计算均值和标准差
         lookback = min(60, len(closes))
         recent = closes[-lookback:]
         ma = sum(recent) / len(recent)
@@ -405,10 +405,7 @@ def generate_grid_levels(
         grid_step = (upper - lower) / total_grids if total_grids > 0 else grid_width
         grid_step = max(grid_step, current_price * 0.005)  # 最小保护
 
-        # 找到当前价所在的网格位置
-        base_index = round((current_price - lower) / grid_step) if grid_step > 0 else 0
         for i in range(-num_grids_down, num_grids_up + 1):
-            offset = i - (base_index - num_grids_down) + num_grids_down - base_index
             price = round(current_price + i * grid_step, 2)
             if price <= 0:
                 continue
@@ -495,7 +492,9 @@ def calculate_grid_positions(total_capital: float, num_grids: int,
 
     if sizing_method == 'equal':
         # ===== 等额分配 =====
-        capital_per_grid = total_capital / max(num_grids, 1)
+        # 重要：资金只分配给买入网格，不能除以总网格数（含卖出网格）
+        num_buy_levels = len(buy_levels) if buy_levels else num_grids
+        capital_per_grid = total_capital / max(num_buy_levels, 1)
         if buy_levels:
             # 按每个网格的实际价格计算股数
             positions = []
@@ -836,6 +835,7 @@ def _empty_simulation() -> dict:
         'profit_loss_ratio': 0, 'max_drawdown': 0, 'sharpe_ratio': 0,
         'sortino_ratio': 0, 'calmar_ratio': 0, 'annual_volatility': 0,
         'max_consecutive_losses': 0, 'capital_utilization': 0,
+        'total_fees_paid': 0,
         'equity_curve': [], 'open_positions': 0, 'position_details': [],
         'stop_loss_triggered': False,
     }

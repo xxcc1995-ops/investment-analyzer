@@ -70,12 +70,23 @@ interface MarketAnalysis {
   market: Market
   history: { timestamp: string; price: number }[]
   order_book: any
+  order_book_analysis?: {
+    bid_depth_10: number
+    ask_depth_10: number
+    spread: number
+    midpoint: number
+  }
   analysis: {
     trend: string
     price_change_7d: number
     price_change_30d: number
+    volatility_30d: number
+    trend_threshold: number
     liquidity_score: string
     volume_liquidity_ratio: number
+    estimated_slippage: number
+    risk_factors: string[]
+    risk_count: number
   }
 }
 
@@ -540,7 +551,7 @@ export default function PolymarketPage() {
                   </tr>
                 ))}
                 {arbOpps.length === 0 && (
-                  <tr><td colSpan={7} style={{ textAlign: 'center', padding: 40, color: 'var(--text-muted)' }}>
+                  <tr><td colSpan={9} style={{ textAlign: 'center', padding: 40, color: 'var(--text-muted)' }}>
                     暂无套利机会（阈值: {minProfit}%）
                   </td></tr>
                 )}
@@ -1382,6 +1393,76 @@ export default function PolymarketPage() {
                   <p style={{ fontSize: 13, color: 'var(--text-secondary)', lineHeight: 1.6 }}>
                     {detailData.market.description}
                   </p>
+                </div>
+              )}
+
+              {/* Risk Assessment */}
+              <div style={{ marginTop: 16 }}>
+                <h3 style={{ color: 'var(--text-primary)', marginBottom: 8 }}>风险评估</h3>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 12, marginBottom: 12 }}>
+                  <div style={{ background: 'var(--bg-secondary)', padding: 12, borderRadius: 8 }}>
+                    <div style={{ fontSize: 12, color: 'var(--text-secondary)' }}>30天波动率</div>
+                    <div style={{ fontSize: 16, fontWeight: 700, color: detailData.analysis.volatility_30d > 10 ? '#f85149' : '#3fb950' }}>
+                      {detailData.analysis.volatility_30d.toFixed(2)}%
+                    </div>
+                  </div>
+                  <div style={{ background: 'var(--bg-secondary)', padding: 12, borderRadius: 8 }}>
+                    <div style={{ fontSize: 12, color: 'var(--text-secondary)' }}>预估滑点</div>
+                    <div style={{ fontSize: 16, fontWeight: 700, color: detailData.analysis.estimated_slippage > 1 ? '#f85149' : '#3fb950' }}>
+                      {detailData.analysis.estimated_slippage.toFixed(2)}%
+                    </div>
+                  </div>
+                  <div style={{ background: 'var(--bg-secondary)', padding: 12, borderRadius: 8 }}>
+                    <div style={{ fontSize: 12, color: 'var(--text-secondary)' }}>成交量/流动性比</div>
+                    <div style={{ fontSize: 16, fontWeight: 700 }}>
+                      {detailData.analysis.volume_liquidity_ratio.toFixed(2)}
+                    </div>
+                  </div>
+                </div>
+                {detailData.analysis.risk_factors && detailData.analysis.risk_factors.length > 0 && (
+                  <div style={{ background: '#f8514920', border: '1px solid #f8514940', borderRadius: 8, padding: 12 }}>
+                    <div style={{ fontSize: 13, fontWeight: 600, color: '#f85149', marginBottom: 8 }}>
+                      风险因素 ({detailData.analysis.risk_count})
+                    </div>
+                    <ul style={{ fontSize: 13, lineHeight: 1.8, paddingLeft: 16, margin: 0 }}>
+                      {detailData.analysis.risk_factors.map((f, i) => (
+                        <li key={i} style={{ color: 'var(--text-secondary)' }}>{f}</li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+              </div>
+
+              {/* Order Book Analysis */}
+              {detailData.order_book_analysis && (
+                <div style={{ marginTop: 16 }}>
+                  <h3 style={{ color: 'var(--text-primary)', marginBottom: 8 }}>订单簿深度</h3>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 12 }}>
+                    <div style={{ background: 'var(--bg-secondary)', padding: 12, borderRadius: 8 }}>
+                      <div style={{ fontSize: 12, color: 'var(--text-secondary)' }}>买盘深度(Top10)</div>
+                      <div style={{ fontSize: 16, fontWeight: 700, color: '#3fb950' }}>
+                        ${detailData.order_book_analysis.bid_depth_10.toFixed(2)}
+                      </div>
+                    </div>
+                    <div style={{ background: 'var(--bg-secondary)', padding: 12, borderRadius: 8 }}>
+                      <div style={{ fontSize: 12, color: 'var(--text-secondary)' }}>卖盘深度(Top10)</div>
+                      <div style={{ fontSize: 16, fontWeight: 700, color: '#f85149' }}>
+                        ${detailData.order_book_analysis.ask_depth_10.toFixed(2)}
+                      </div>
+                    </div>
+                    <div style={{ background: 'var(--bg-secondary)', padding: 12, borderRadius: 8 }}>
+                      <div style={{ fontSize: 12, color: 'var(--text-secondary)' }}>买卖价差</div>
+                      <div style={{ fontSize: 16, fontWeight: 700 }}>
+                        {detailData.order_book_analysis.spread.toFixed(4)}
+                      </div>
+                    </div>
+                    <div style={{ background: 'var(--bg-secondary)', padding: 12, borderRadius: 8 }}>
+                      <div style={{ fontSize: 12, color: 'var(--text-secondary)' }}>中间价</div>
+                      <div style={{ fontSize: 16, fontWeight: 700 }}>
+                        {detailData.order_book_analysis.midpoint.toFixed(4)}
+                      </div>
+                    </div>
+                  </div>
                 </div>
               )}
             </>

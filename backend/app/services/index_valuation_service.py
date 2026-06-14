@@ -672,16 +672,27 @@ def _calc_risk_premium(pe: Optional[float], country: str) -> Optional[float]:
 
 def _calc_investment_signal(pe_p: Optional[float], pb_p: Optional[float],
                              div_yield: Optional[float], risk_premium: Optional[float]) -> Dict:
-    """综合投资信号：加权评分（分越低越低估）"""
+    """综合投资信号：加权评分（分越低越低估）
+
+    PE/PB百分位：直接使用百分位值（越低越便宜）
+    股息率：转换为百分位等价分（股息率越高越便宜，分数越低）
+        - 股息率5% -> 分数0，股息率1% -> 分数80，股息率0% -> 分数100
+    风险溢价：转换为百分位等价分（溢价越高越有吸引力，分数越低）
+        - 溢价5% -> 分数10，溢价0% -> 分数50，溢价-3% -> 分数74
+    """
     scores, weights = [], []
     if pe_p is not None:
         scores.append(pe_p); weights.append(0.35)
     if pb_p is not None:
         scores.append(pb_p); weights.append(0.35)
     if div_yield is not None and div_yield > 0:
-        scores.append(max(0, 100 - div_yield * 10)); weights.append(0.15)
+        # 股息率越高 -> 分数越低（越低估）：5%->0, 2%->60, 1%->80
+        div_score = max(0, min(100, 100 - div_yield * 20))
+        scores.append(div_score); weights.append(0.15)
     if risk_premium is not None:
-        scores.append(max(0, 50 - risk_premium * 5)); weights.append(0.15)
+        # 风险溢价越高 -> 分数越低（越有吸引力）：5%->10, 0%->50, -3%->74
+        rp_score = max(0, min(100, 50 - risk_premium * 8))
+        scores.append(rp_score); weights.append(0.15)
 
     if not scores:
         return {"score": None, "signal": "数据不足", "color": "var(--text-muted)"}
@@ -867,7 +878,7 @@ def get_all_indices_data() -> Dict:
         "indices": results,
         "update_time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         "total": len(results),
-        "data_sources": ["中证指数", "multpl.com", "Yahoo Finance", "乐咕乐股", "东方财富"],
+        "data_sources": ["中证指数", "multpl.com", "yfinance", "富途OpenAPI", "乐咕乐股", "东方财富"],
     }
 
     _set_cached(cache_key, result)

@@ -60,9 +60,9 @@ const getValuationLabel = (pe_p: number | null, pb_p: number | null) => {
   const scores = [pe_p, pb_p].filter(v => v !== null) as number[]
   if (scores.length === 0) return { text: '数据不足', color: 'var(--text-muted)' }
   const avg = scores.reduce((a, b) => a + b, 0) / scores.length
-  if (avg < 20) return { text: '极度低估', color: '#3fb950' }
-  if (avg < 30) return { text: '低估', color: '#3fb950' }
-  if (avg <= 50) return { text: '合理', color: 'var(--text-secondary)' }
+  if (avg < 20) return { text: '极度低估', color: '#238636' }
+  if (avg < 35) return { text: '低估', color: '#3fb950' }
+  if (avg <= 55) return { text: '合理', color: 'var(--text-secondary)' }
   if (avg <= 70) return { text: '偏高', color: '#d29922' }
   return { text: '高估', color: '#f85149' }
 }
@@ -268,8 +268,8 @@ export default function IndexValuation() {
                     <td style={{ color: idx.dividend_yield !== null && idx.dividend_yield > 3 ? '#3fb950' : 'var(--text-secondary)', fontWeight: idx.dividend_yield !== null && idx.dividend_yield > 3 ? 600 : 400 }}>
                       {idx.dividend_yield !== null ? `${idx.dividend_yield.toFixed(2)}%` : '--'}
                     </td>
-                    <td style={{ color: idx.risk_premium != null && idx.risk_premium > 0 ? '#3fb950' : idx.risk_premium != null && idx.risk_premium < -2 ? '#f85149' : 'var(--text-secondary)' }}>
-                      {idx.risk_premium != null ? `${idx.risk_premium > 0 ? '+' : ''}${idx.risk_premium.toFixed(1)}%` : '--'}
+                    <td style={{ color: idx.risk_premium !== null && idx.risk_premium > 0 ? '#3fb950' : idx.risk_premium !== null && idx.risk_premium < -2 ? '#f85149' : 'var(--text-secondary)' }}>
+                      {idx.risk_premium !== null ? `${idx.risk_premium > 0 ? '+' : ''}${idx.risk_premium.toFixed(1)}%` : '--'}
                     </td>
                     <td style={{ color: getReturnColor(idx.return_1y), fontWeight: 600 }}>{formatReturn(idx.return_1y)}</td>
                     <td style={{ color: getReturnColor(idx.return_3y), fontWeight: 600 }}>{formatReturn(idx.return_3y)}</td>
@@ -319,7 +319,7 @@ export default function IndexValuation() {
               <div style={{ marginTop: 4, fontSize: 12, color: 'var(--text-muted)' }}>百分位柱状条：绿色&lt;30%低估，灰色30-70%合理，红色&gt;70%高估</div>
             </div>
             <div style={{ marginTop: 8, color: 'var(--text-muted)', fontSize: 12 }}>
-              数据来源：中证指数 · multpl.com · Yahoo Finance · 乐咕乐股 · 东方财富 | 更新：{updateTime}
+              数据来源：中证指数 · multpl.com · yfinance · 富途OpenAPI · 乐咕乐股 · 东方财富 | 更新：{updateTime}
             </div>
           </div>
         </div>

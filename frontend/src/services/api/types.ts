@@ -433,6 +433,7 @@ export interface ConvertibleBond {
   stock_pe: number
   stock_pb: number
   redeem_distance: number
+  convert_ratio: number
   quality_score: number
   verdict: string
   risk_tags: { tag: string; level: string; desc: string }[]
@@ -453,6 +454,13 @@ export interface ConvertibleBond {
     revision_level: string
     revision_factors: string[]
   }
+  // 新增字段
+  next_put_dt: string
+  convert_dt: string
+  orig_iss_amt: number
+  redeem_price: number
+  dividend_yield: number
+  market_cap: number
   data_source?: string
 }
 

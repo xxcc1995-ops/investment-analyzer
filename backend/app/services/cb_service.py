@@ -308,7 +308,7 @@ class CBService:
 
             # 计算：距强赎触发距离（%）— 正股还需涨多少才触发强赎
             redeem_distance = 0
-            if convert_value > 0 and redeem_price > 0:
+            if convert_value > 0 and redeem_price > 0 and convert_price > 0:
                 redeem_distance = round((redeem_price / convert_price * 100 - convert_value) / convert_value * 100, 2)
             elif convert_value > 0:
                 # 一般强赎触发条件：正股价 >= 转股价 * 130%
@@ -412,6 +412,13 @@ class CBService:
 
         纯债价值 = 未来各年利息现值 + 到期面值现值
         折现率：使用到期收益率（市场一致），若YTM<=0则用3%保守折现率
+
+        现金流模型（以year_left=3.5为例）：
+          t=1: coupon (整数年利息)
+          t=2: coupon
+          t=3: coupon * fractional (部分年利息，如0.5年)
+          t=3.5: face (到期兑付面值，含最后一年剩余时间的利息已折算)
+        注意：不重复计算利息。整数年循环到 years_int-1，最后一年按 fractional 比例计算。
         """
         face = 100.0
         year_left = bond.get('year_left', 0)
@@ -430,15 +437,20 @@ class CBService:
         years_int = int(year_left)
         fractional = year_left - years_int
 
-        for t in range(1, years_int + 1):
+        # 前 years_int-1 年：全额利息
+        for t in range(1, years_int):
             pv += face * coupon_rate / (1 + discount_rate) ** t
+
+        # 最后一年：如果 fractional > 0，利息按比例；否则全额利息
+        if fractional > 0:
+            # 部分年利息（例如 year_left=3.5，第3年只拿0.5年利息）
+            pv += face * coupon_rate * fractional / (1 + discount_rate) ** years_int
+        else:
+            # 整数年，最后一年全额利息
+            pv += face * coupon_rate / (1 + discount_rate) ** years_int
 
         # 到期面值
         pv += face / (1 + discount_rate) ** year_left
-
-        # 分数年利息
-        if fractional > 0:
-            pv += face * coupon_rate * fractional / (1 + discount_rate) ** year_left
 
         return round(pv, 2)
 
@@ -448,6 +460,8 @@ class CBService:
 
         个人投资者：利息收入扣20%所得税，面值差额（100-买入价）免税。
         税后YTM = 使税后现金流现值 = 当前价格的折现率
+
+        现金流模型与纯债价值一致，避免 fractional year 利息重复计算。
         """
         price = bond.get('price', 0)
         year_left = bond.get('year_left', 0)
@@ -458,15 +472,26 @@ class CBService:
 
         coupon_rate = CBService._estimate_coupon_rate(bond)
         face = 100.0
+        years_int = int(year_left)
+        fractional = year_left - years_int
 
         def npv_after_tax(rate):
+            if rate <= -1:
+                return float('inf')
             total = 0.0
-            for t in range(1, int(year_left) + 1):
+            # 前 years_int-1 年：全额利息（税后）
+            for t in range(1, years_int):
                 total += face * coupon_rate * (1 - tax_rate) / (1 + rate) ** t
+            # 最后一年：部分或全额利息（税后）
+            if fractional > 0:
+                total += face * coupon_rate * fractional * (1 - tax_rate) / (1 + rate) ** years_int
+            else:
+                total += face * coupon_rate * (1 - tax_rate) / (1 + rate) ** years_int
+            # 到期面值（免税）
             total += face / (1 + rate) ** year_left
             return total - price
 
-        # 二分法求解
+        # 二分法求解，迭代50次精度约2^-50
         low, high = -0.05, 0.20
         for _ in range(50):
             mid = (low + high) / 2
