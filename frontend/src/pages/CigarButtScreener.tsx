@@ -112,6 +112,7 @@ export default function CigarButtScreener() {
   const [activeTab, setActiveTab] = useState<'screener' | 'philosophy' | 'backtest'>('philosophy')
   const [stocks, setStocks] = useState<CigarButtStock[]>([])
   const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
   const [updateTime, setUpdateTime] = useState('')
   const [total, setTotal] = useState(0)
   const [elapsed, setElapsed] = useState(0)
@@ -141,6 +142,7 @@ export default function CigarButtScreener() {
 
   const loadStocks = useCallback(async () => {
     setLoading(true)
+    setError(null)
     try {
       const res = await axios.get(`${API_BASE}/cigar-butt/screener`, {
         params: {
@@ -151,14 +153,20 @@ export default function CigarButtScreener() {
           min_market_cap: minMarketCap,
           include_quality_fail: includeQualityFail,
           top_n: topN,
-        }
+        },
+        timeout: 90000,  // 90秒超时（筛选需要获取财务数据）
       })
       setStocks(res.data.stocks || [])
       setUpdateTime(res.data.update_time || '')
       setTotal(res.data.total || 0)
       setElapsed(res.data.elapsed_seconds || 0)
-    } catch (e) {
+    } catch (e: any) {
       console.error('获取烟蒂股数据失败:', e)
+      if (e.code === 'ECONNABORTED') {
+        setError('筛选超时，请缩小筛选范围（降低PB/PE上限或提高市值下限）')
+      } else {
+        setError(e.message || '获取烟蒂股数据失败')
+      }
     } finally {
       setLoading(false)
     }
@@ -610,6 +618,13 @@ export default function CigarButtScreener() {
           {/* 筛选结果 */}
           {loading ? (
             <LoadingSpinner text="正在获取财务数据、计算NCAV和F-Score（可能需要1-2分钟）..." />
+          ) : error ? (
+            <div style={{ padding: '24px', textAlign: 'center', color: '#ef4444' }}>
+              <div style={{ fontSize: '16px', marginBottom: '8px' }}>⚠️ {error}</div>
+              <button onClick={loadStocks} style={{ padding: '8px 16px', background: '#3b82f6', color: 'white', border: 'none', borderRadius: '6px', cursor: 'pointer' }}>
+                重试
+              </button>
+            </div>
           ) : (
             <DataTable<CigarButtStock>
               columns={stockColumns}

@@ -24,7 +24,7 @@ class StockFinancials(BaseModel):
     net_profit: Optional[float] = None  # 净利润 (亿)
     revenue_growth: Optional[float] = None  # 营收同比增长率 (%)
     profit_growth: Optional[float] = None  # 净利润同比增长率 (%)
-    fcf: Optional[float] = Field(None, description="[已废弃] 自由现金流 (亿)，当前无数据源填充，保留字段以兼容旧版本")
+    fcf: Optional[float] = Field(None, description="自由现金流 (亿)")
     report_date: Optional[str] = None  # 报告期
 
 

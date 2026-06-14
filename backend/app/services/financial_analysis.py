@@ -54,15 +54,19 @@ def analyze_financials(income: list, balance: list, cashflow: list) -> Dict[str,
     dimensions["moat"] = _analyze_moat(annual_income)
     dimensions["management"] = _analyze_management(annual_income, annual_balance, annual_cashflow)
 
+    # 第8维：审计风险（Beneish M-Score + Altman Z-Score）
+    dimensions["audit_risk"] = _analyze_audit_risk(annual_income, annual_balance, annual_cashflow)
+
     # 加权综合评分
     weights = {
-        "earnings": 0.20,
-        "growth": 0.15,
-        "safety": 0.15,
+        "earnings": 0.18,
+        "growth": 0.13,
+        "safety": 0.13,
         "efficiency": 0.10,
-        "cashflow": 0.15,
-        "moat": 0.15,
+        "cashflow": 0.13,
+        "moat": 0.13,
         "management": 0.10,
+        "audit_risk": 0.10,
     }
     total_score = sum(dimensions[k].score * weights[k] for k in weights)
     score = round(total_score)
@@ -667,6 +671,216 @@ def _analyze_management(income: list, balance: list, cashflow: list) -> Dimensio
     # 注：更精确的分红数据应从分红历史API获取
 
     return r
+
+
+# ==================== 维度8：审计风险（Beneish M-Score + Altman Z-Score） ====================
+
+def _analyze_audit_risk(income: list, balance: list, cashflow: list) -> DimensionResult:
+    """财务造假检测 + 破产预警
+
+    Beneish M-Score: 检测财务造假概率
+    Altman Z-Score: 预测破产风险
+    """
+    r = DimensionResult()
+
+    # --- Beneish M-Score ---
+    beneish = _calculate_beneish_m_score(income, balance, cashflow)
+    if beneish is not None:
+        r.metrics["beneish_m_score"] = round(beneish, 2)
+        if beneish > -1.78:
+            r.add_score(-30)
+            r.risks.append(f"Beneish M-Score={beneish:.2f}(>-1.78)，财务造假风险高")
+        elif beneish > -2.22:
+            r.add_score(-10)
+            r.risks.append(f"Beneish M-Score={beneish:.2f}，存在一定操纵嫌疑")
+        else:
+            r.add_score(10)
+            r.strengths.append(f"Beneish M-Score={beneish:.2f}，财务数据可信")
+
+    # --- Altman Z-Score ---
+    altman = _calculate_altman_z_score(income, balance)
+    if altman is not None:
+        r.metrics["altman_z_score"] = round(altman, 2)
+        if altman > 2.99:
+            r.add_score(15)
+            r.strengths.append(f"Altman Z-Score={altman:.2f}(>2.99)，财务安全")
+        elif altman > 1.81:
+            r.add_score(0)
+            r.risks.append(f"Altman Z-Score={altman:.2f}，处于灰色区域")
+        else:
+            r.add_score(-25)
+            r.risks.append(f"Altman Z-Score={altman:.2f}(<1.81)，破产风险高")
+
+    return r
+
+
+def _calculate_beneish_m_score(income: list, balance: list, cashflow: list) -> float | None:
+    """
+    Beneish M-Score 财务造假检测模型
+
+    M = -4.84 + 0.920*DSRI + 0.528*GMI + 0.404*AQI + 0.892*SGI
+        + 0.115*DEPI - 0.172*SGAI + 4.679*TATA - 0.327*LVGI
+
+    M > -1.78 → 高风险（造假概率大）
+    需要至少2年的数据
+    """
+    if len(income) < 2 or len(balance) < 2:
+        return None
+
+    curr_inc = income[0]
+    prev_inc = income[1]
+    curr_bal = balance[0]
+    prev_bal = balance[1]
+
+    # 获取关键数据
+    curr_revenue = curr_inc.get("total_revenue") or curr_inc.get("revenue")
+    prev_revenue = prev_inc.get("total_revenue") or prev_inc.get("revenue")
+    curr_ar = curr_bal.get("accounts_receivable")
+    prev_ar = prev_bal.get("accounts_receivable")
+    curr_gm = curr_inc.get("gross_margin")
+    prev_gm = prev_inc.get("gross_margin")
+    curr_ta = curr_bal.get("total_assets")
+    prev_ta = prev_bal.get("total_assets")
+    curr_ca = curr_bal.get("total_current_assets")
+    prev_ca = prev_bal.get("total_current_assets")
+    curr_ppe = (curr_bal.get("total_assets") or 0) - (curr_bal.get("total_current_assets") or 0) - (curr_bal.get("total_non_current_assets") or 0) if curr_bal.get("total_non_current_assets") else None
+    prev_ppe = (prev_bal.get("total_assets") or 0) - (prev_bal.get("total_current_assets") or 0) - (prev_bal.get("total_non_current_assets") or 0) if prev_bal.get("total_non_current_assets") else None
+    curr_dep = curr_cashflow[0].get("depreciation_amortization") if cashflow else None
+    prev_dep = cashflow[1].get("depreciation_amortization") if len(cashflow) >= 2 else None
+    curr_sell = (curr_inc.get("sell_expense") or 0) + (curr_inc.get("manage_expense") or 0)
+    prev_sell = (prev_inc.get("sell_expense") or 0) + (prev_inc.get("manage_expense") or 0)
+    curr_tl = curr_bal.get("total_liabilities")
+    prev_tl = prev_bal.get("total_liabilities")
+    curr_netcash = None
+    if cashflow:
+        curr_netcash = cashflow[0].get("netcash_operate")
+    curr_np = curr_inc.get("net_profit") or curr_inc.get("parent_net_profit")
+
+    # 检查必要数据
+    required = [curr_revenue, prev_revenue, curr_ar, prev_ar, curr_ta, prev_ta]
+    if any(v is None or v == 0 for v in required):
+        return None
+
+    try:
+        # DSRI = 应收账款天数指数
+        dsri = (curr_ar / curr_revenue) / (prev_ar / prev_revenue) if prev_ar and prev_revenue else 1
+
+        # GMI = 毛利率指数
+        gmi = 1.0
+        if prev_gm and curr_gm and prev_gm > 0:
+            gmi = (100 - prev_gm) / (100 - curr_gm) if curr_gm < 100 else 1
+
+        # AQI = 资产质量指数
+        aqi = 1.0
+        if prev_ta and curr_ta:
+            prev_non_ca = prev_ta - (prev_ca or 0)
+            curr_non_ca = curr_ta - (curr_ca or 0)
+            if prev_non_ca > 0 and curr_non_ca > 0:
+                aqi = (1 - (curr_ca or 0) / curr_ta) / (1 - (prev_ca or 0) / prev_ta) if (1 - (prev_ca or 0) / prev_ta) > 0 else 1
+
+        # SGI = 营收增长指数
+        sgi = curr_revenue / prev_revenue if prev_revenue else 1
+
+        # DEPI = 折旧率指数
+        depi = 1.0
+        if curr_dep and prev_dep and curr_ppe and prev_ppe and prev_ppe > 0 and curr_ppe > 0:
+            prev_dep_rate = prev_dep / prev_ppe
+            curr_dep_rate = curr_dep / curr_ppe
+            if curr_dep_rate > 0:
+                depi = prev_dep_rate / curr_dep_rate
+
+        # SGAI = 销管费用率指数
+        sgai = 1.0
+        if prev_sell > 0 and prev_revenue > 0 and curr_revenue > 0:
+            sgai = (curr_sell / curr_revenue) / (prev_sell / prev_revenue)
+
+        # TATA = 应计项目/总资产
+        tata = 0
+        if curr_np is not None and curr_netcash is not None and curr_ta and curr_ta > 0:
+            tata = (curr_np - curr_netcash) / curr_ta
+
+        # LVGI = 杠杆指数
+        lvgi = 1.0
+        if prev_tl and curr_tl and prev_ta and curr_ta:
+            prev_leverage = prev_tl / prev_ta
+            curr_leverage = curr_tl / curr_ta
+            if prev_leverage > 0:
+                lvgi = curr_leverage / prev_leverage
+
+        # M-Score
+        m = (-4.84
+             + 0.920 * dsri
+             + 0.528 * gmi
+             + 0.404 * aqi
+             + 0.892 * sgi
+             + 0.115 * depi
+             - 0.172 * sgai
+             + 4.679 * tata
+             - 0.327 * lvgi)
+
+        return m
+
+    except (ZeroDivisionError, TypeError):
+        return None
+
+
+def _calculate_altman_z_score(income: list, balance: list) -> float | None:
+    """
+    Altman Z-Score 破产预测模型（制造业版本）
+
+    Z = 1.2*X1 + 1.4*X2 + 3.3*X3 + 0.6*X4 + 1.0*X5
+
+    X1 = 营运资本/总资产
+    X2 = 留存收益/总资产
+    X3 = EBIT/总资产
+    X4 = 股权市值/总负债
+    X5 = 营收/总资产
+
+    Z > 2.99 → 安全区
+    1.81 < Z < 2.99 → 灰色区
+    Z < 1.81 → 危险区
+    """
+    if not income or not balance:
+        return None
+
+    inc = income[0]
+    bal = balance[0]
+
+    ta = bal.get("total_assets")
+    tl = bal.get("total_liabilities")
+    tca = bal.get("total_current_assets")
+    tcl = bal.get("total_current_liabilities")
+    revenue = inc.get("total_revenue") or inc.get("revenue")
+    operate_profit = inc.get("operate_profit")
+    parent_equity = bal.get("parent_equity") or bal.get("total_equity")
+    net_profit = inc.get("net_profit") or inc.get("parent_net_profit")
+
+    # 检查必要数据
+    if not all([ta, ta > 0, tl, tl > 0]):
+        return None
+
+    try:
+        # X1 = 营运资本/总资产
+        wc = (tca or 0) - (tcl or 0)
+        x1 = wc / ta
+
+        # X2 = 留存收益/总资产（用归母权益近似）
+        x2 = (parent_equity or 0) / ta
+
+        # X3 = EBIT/总资产（用营业利润近似）
+        x3 = (operate_profit or 0) / ta
+
+        # X4 = 股权市值/总负债（无私有市值数据，用股东权益代替）
+        x4 = (parent_equity or 0) / tl
+
+        # X5 = 营收/总资产
+        x5 = (revenue or 0) / ta
+
+        z = 1.2 * x1 + 1.4 * x2 + 3.3 * x3 + 0.6 * x4 + 1.0 * x5
+        return z
+
+    except (ZeroDivisionError, TypeError):
+        return None
 
 
 # ==================== 结论生成 ====================

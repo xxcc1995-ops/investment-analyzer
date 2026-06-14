@@ -702,6 +702,23 @@ class DataService:
                 "latest_bps_date": latest_bps_date,
                 "fetch_time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             }
+            # 用现金流量表补充FCF数据
+            try:
+                cashflow = DataService._fetch_cashflow_statement(stock_code)
+                cf_by_date = {}
+                for cf in cashflow:
+                    cf_date = cf.get("report_date", "")[:10]
+                    fcf = cf.get("free_cashflow")
+                    if cf_date and fcf is not None:
+                        cf_by_date[cf_date] = fcf
+                # 将FCF补充到对应的report中
+                for report in all_reports:
+                    rdate = report.get("date", "")
+                    if rdate in cf_by_date:
+                        report["fcf"] = round(cf_by_date[rdate] / 1e8, 2)  # 转为亿
+            except Exception as e2:
+                logger.debug(f"补充FCF数据失败: {e2}")
+
         except Exception as e:
             logger.error(f"get_financial_indicators failed for {stock_code}: {e}")
             return {"code": stock_code, "error": "获取财务数据失败，请稍后重试", "reports": []}

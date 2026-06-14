@@ -479,20 +479,71 @@ export default function ConvertibleBondPage() {
         <h3>可转债策略全景与注意事项</h3>
         <div className="arb-notes-content">
           <div className="arb-risk-section">
-            <h4>可用策略一览</h4>
+            <h4>📚 策略选择决策树（小白必看）</h4>
+            <div style={{ padding: '12px', background: 'var(--bg-secondary)', borderRadius: '8px', marginBottom: '12px', fontSize: '13px', lineHeight: 2 }}>
+              <div><strong>你是小白吗？</strong></div>
+              <div style={{ paddingLeft: '20px' }}>
+                <div>├── <strong>是</strong> → <span style={{ color: '#52c41a' }}>安道全面值策略</span>（最简单，1万起步）</div>
+                <div style={{ paddingLeft: '40px' }}>└── 想更省心？→ <span style={{ color: '#faad14' }}>摊大饼策略</span>（类指数）</div>
+                <div>└── <strong>否</strong> → 你追求什么？</div>
+                <div style={{ paddingLeft: '40px' }}>
+                  ├── 稳健收益 → <span style={{ color: '#1890ff' }}>双低策略</span>（经典量化）<br/>
+                  ├── 绝对保本 → <span style={{ color: '#722ed1' }}>YTM保本策略</span>（最保守）<br/>
+                  ├── 高弹性 → <span style={{ color: '#13c2c2' }}>三低策略</span>（波动大）<br/>
+                  └── 博弈收益 →<br/>
+                  <span style={{ paddingLeft: '40px' }}>
+                    ├── <span style={{ color: '#f5222d' }}>下修博弈</span>（赌公司下修）<br/>
+                    ├── <span style={{ color: '#ff4d4f' }}>强赎博弈</span>（赌公司促转股）<br/>
+                    └── <span style={{ color: '#eb2f96' }}>负溢价套利</span>（高级操作）
+                  </span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div className="arb-risk-section">
+            <h4>📋 8种策略速览</h4>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '12px' }}>
+              {[
+                { name: '安道全面值策略', icon: '🛡️', tag: '入门', risk: '低', desc: '面值附近买入(≤105)，130元卖出', suitable: '完全新手，不想研究', avoid: '强赎公告后不卖' },
+                { name: '双低策略', icon: '📊', tag: '经典', risk: '中', desc: '双低值≤130轮动，年化10-15%', suitable: '有基础，每周1-2小时', avoid: '只看双低值不看质量' },
+                { name: '三低策略', icon: '🔻', tag: '进阶', risk: '中', desc: '低价格+低溢价+低规模，弹性大', suitable: '能承受波动，5万+', avoid: '忽略流动性风险' },
+                { name: '摊大饼策略', icon: '🥞', tag: '懒人', risk: '低-中', desc: '买一篮子低价转债，等权持有', suitable: '不想研究，3万+', avoid: '只买3-5只就说分散' },
+                { name: 'YTM保本策略', icon: '🏦', tag: '保守', risk: '低', desc: '只买YTM>0，持有到期不亏', suitable: '极度保守，1万+', avoid: '以为YTM>0就绝对安全' },
+                { name: '下修博弈策略', icon: '🎯', tag: '博弈', risk: '中-高', desc: '博弈公司下修转股价', suitable: '理解下修逻辑，3万+', avoid: '把可能当下修定' },
+                { name: '强赎博弈策略', icon: '🔥', tag: '博弈', risk: '中', desc: '转股价值接近130时布局', suitable: '能判断公司意图，3万+', avoid: '强赎公告后忘记卖' },
+                { name: '负溢价套利', icon: '💎', tag: '套利', risk: '低-中', desc: '负溢价时转股赚价差', suitable: '理解T+1，10万+', avoid: '以为负溢价=无风险' },
+              ].map((s, i) => (
+                <div key={i} style={{ padding: '10px', background: 'var(--bg-secondary)', borderRadius: '6px', border: '1px solid var(--border)', fontSize: '12px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '6px' }}>
+                    <span>{s.icon}</span>
+                    <strong>{s.name}</strong>
+                    <span style={{ padding: '1px 5px', borderRadius: '6px', fontSize: '9px', background: s.risk === '低' ? 'rgba(82,196,26,0.15)' : s.risk === '中' ? 'rgba(250,173,20,0.15)' : 'rgba(255,77,79,0.15)', color: s.risk === '低' ? '#52c41a' : s.risk === '中' ? '#faad14' : '#ff4d4f' }}>{s.risk}</span>
+                  </div>
+                  <div style={{ color: 'var(--text-muted)', marginBottom: '4px' }}>{s.desc}</div>
+                  <div><span style={{ color: '#52c41a' }}>适合:</span> {s.suitable}</div>
+                  <div><span style={{ color: '#ff4d4f' }}>避坑:</span> {s.avoid}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div className="arb-risk-section">
+            <h4>⚠️ 所有策略通用的避坑清单</h4>
             <ul>
-              <li><strong>安道全面值策略</strong>：面值附近买入(&lt;=105)，130元卖出，规则极简，适合新手</li>
-              <li><strong>双低策略</strong>：经典量化，双低值&lt;=130轮动，历史年化10-15%</li>
-              <li><strong>三低策略</strong>：低价格+低溢价+低规模，小规模转债弹性更大</li>
-              <li><strong>摊大饼策略</strong>：类指数投资，买一篮子低价转债，靠概率取胜</li>
-              <li><strong>YTM保本策略</strong>：只买到期收益率为正的转债，持有到期保证不亏</li>
-              <li><strong>下修博弈策略</strong>：博弈公司下修转股价带来的价格跳跃</li>
-              <li><strong>强赎博弈策略</strong>：博弈公司促转股行为，转股价值接近130时布局</li>
-              <li><strong>负溢价套利</strong>：溢价率为负时买入转债并转股，赚取无风险价差</li>
+              <li><strong>永远不要单只重仓</strong>：再看好也要分散，10只以上</li>
+              <li><strong>强赎公告必须看</strong>：不看就亏钱，设置提醒</li>
+              <li><strong>不要追涨杀跌</strong>：策略纪律比判断更重要</li>
+              <li><strong>理解你的策略</strong>：不理解就不要用</li>
+              <li><strong>用闲钱投资</strong>：可转债可能被锁定很久</li>
+              <li><strong>定期复盘</strong>：每周看看持仓，检查风险标签</li>
+              <li><strong>不要借钱买转债</strong>：杠杆放大风险</li>
+              <li><strong>市场恐慌时是机会</strong>：别人恐惧我贪婪（但要分散）</li>
             </ul>
           </div>
+
           <div className="arb-risk-section">
-            <h4>机构级分析要点</h4>
+            <h4>🏗️ 机构级分析要点</h4>
             <ul>
               <li><strong>纯债价值是真正的底线</strong>：价格低于纯债价值（破净）意味着即使违约也有较高回收率</li>
               <li><strong>税后YTM才是真实收益</strong>：利息扣20%税后，税后YTM为正才真正保本</li>
@@ -501,8 +552,9 @@ export default function ConvertibleBondPage() {
               <li><strong>质量评分 &gt; 双低值</strong>：单纯追求低双低可能踩雷，综合评分更能反映投资价值</li>
             </ul>
           </div>
+
           <div className="arb-risk-section">
-            <h4>轮动操作</h4>
+            <h4>🔄 轮动操作指南</h4>
             <ul>
               <li>每1~2周按最新排名调仓一次（可按质量评分、双低值或三低值排序）</li>
               <li>卖出排名跌出前N的转债，买入新进入前N的转债</li>
@@ -511,8 +563,9 @@ export default function ConvertibleBondPage() {
               <li>遇到高风险标签标的，优先卖出或降低仓位</li>
             </ul>
           </div>
+
           <div className="arb-risk-section">
-            <h4>风险提示</h4>
+            <h4>🚨 风险提示</h4>
             <ul>
               <li><strong>信用风险</strong>：低评级转债可能存在违约风险，建议选择AA-以上评级</li>
               <li><strong>到期赎回风险</strong>：正股长期低迷、转股价值远低于转股价，公司可能选择到期还钱</li>

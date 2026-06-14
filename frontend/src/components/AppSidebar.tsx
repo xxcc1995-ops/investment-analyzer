@@ -55,6 +55,7 @@ function getItem(
 
 const menuItems: MenuItem[] = [
   getItem('行情总览', 'market', <LineChartOutlined />, [
+    getItem('我的持仓', 'portfolio', <PieChartOutlined />),
     getItem('海外资讯', 'dailyInfo', <GlobalOutlined />),
     getItem('我的自选', 'stock', <DashboardOutlined />),
     getItem('指数估值', 'indexVal', <BarChartOutlined />),

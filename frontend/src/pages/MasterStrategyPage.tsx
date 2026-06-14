@@ -18,6 +18,10 @@ interface StrategyInfo {
   expected_return: string
   description: string
   rules: string[]
+  suitable_for?: string[]
+  warnings?: string[]
+  risks?: Array<{ name: string; probability: string; impact: string; solution: string }>
+  pitfalls?: string[]
 }
 
 interface SortConfig {
@@ -391,6 +395,79 @@ export default function MasterStrategyPage() {
               {currentInfo.rules.map((rule, i) => <li key={i}>{rule}</li>)}
             </ul>
           </div>
+
+          {/* 适用人群 */}
+          {currentInfo.suitable_for && currentInfo.suitable_for.length > 0 && (
+            <div style={{ marginTop: '16px', padding: '12px', background: 'rgba(82,196,26,0.06)', borderRadius: '8px', border: '1px solid rgba(82,196,26,0.2)' }}>
+              <div style={{ fontWeight: 600, fontSize: '13px', marginBottom: '8px', color: '#52c41a' }}>
+                ✅ 适合什么样的人？
+              </div>
+              <ul style={{ margin: 0, paddingLeft: '20px', fontSize: '13px', lineHeight: 1.8, color: 'var(--text-secondary)' }}>
+                {currentInfo.suitable_for.map((item, i) => <li key={i}>{item}</li>)}
+              </ul>
+            </div>
+          )}
+
+          {/* 注意事项 */}
+          {currentInfo.warnings && currentInfo.warnings.length > 0 && (
+            <div style={{ marginTop: '12px', padding: '12px', background: 'rgba(250,173,20,0.06)', borderRadius: '8px', border: '1px solid rgba(250,173,20,0.2)' }}>
+              <div style={{ fontWeight: 600, fontSize: '13px', marginBottom: '8px', color: '#faad14' }}>
+                ⚠️ 注意事项（必须知道）
+              </div>
+              <ul style={{ margin: 0, paddingLeft: '20px', fontSize: '13px', lineHeight: 1.8, color: 'var(--text-secondary)' }}>
+                {currentInfo.warnings.map((item, i) => <li key={i}>{item}</li>)}
+              </ul>
+            </div>
+          )}
+
+          {/* 潜在风险 */}
+          {currentInfo.risks && currentInfo.risks.length > 0 && (
+            <div style={{ marginTop: '12px', padding: '12px', background: 'rgba(255,77,79,0.06)', borderRadius: '8px', border: '1px solid rgba(255,77,79,0.2)' }}>
+              <div style={{ fontWeight: 600, fontSize: '13px', marginBottom: '8px', color: '#ff4d4f' }}>
+                🔴 潜在风险
+              </div>
+              <div style={{ display: 'grid', gap: '8px' }}>
+                {currentInfo.risks.map((risk, i) => (
+                  <div key={i} style={{ padding: '8px', background: 'var(--bg-primary)', borderRadius: '6px', fontSize: '12px' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
+                      <span style={{ fontWeight: 600 }}>{risk.name}</span>
+                      <span style={{
+                        padding: '1px 6px', borderRadius: '8px', fontSize: '10px',
+                        background: risk.probability === '高' ? 'rgba(255,77,79,0.15)' : risk.probability === '中等' ? 'rgba(250,173,20,0.15)' : 'rgba(82,196,26,0.15)',
+                        color: risk.probability === '高' ? '#ff4d4f' : risk.probability === '中等' ? '#faad14' : '#52c41a',
+                      }}>
+                        概率: {risk.probability}
+                      </span>
+                    </div>
+                    <div style={{ color: 'var(--text-muted)' }}>
+                      <span>影响: {risk.impact}</span>
+                      <span style={{ marginLeft: '12px' }}>应对: {risk.solution}</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* 小白踩坑点 */}
+          {currentInfo.pitfalls && currentInfo.pitfalls.length > 0 && (
+            <div style={{ marginTop: '12px', padding: '12px', background: 'rgba(114,46,209,0.06)', borderRadius: '8px', border: '1px solid rgba(114,46,209,0.2)' }}>
+              <div style={{ fontWeight: 600, fontSize: '13px', marginBottom: '8px', color: '#722ed1' }}>
+                💀 小白最容易踩的坑
+              </div>
+              <ul style={{ margin: 0, paddingLeft: '20px', fontSize: '13px', lineHeight: 2, color: 'var(--text-secondary)' }}>
+                {currentInfo.pitfalls.map((item, i) => {
+                  const parts = item.split('→')
+                  return (
+                    <li key={i}>
+                      <span style={{ color: '#ff4d4f', fontWeight: 600 }}>{parts[0]}</span>
+                      {parts[1] && <span style={{ color: 'var(--text-muted)' }}> → {parts[1]}</span>}
+                    </li>
+                  )
+                })}
+              </ul>
+            </div>
+          )}
         </div>
       )}
 

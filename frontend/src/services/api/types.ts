@@ -173,6 +173,7 @@ export interface FinancialAnalysisResult {
     cashflow: { score: number; metrics: Record<string, unknown>; strengths: string[]; risks: string[] }
     moat: { score: number; metrics: Record<string, unknown>; strengths: string[]; risks: string[] }
     management: { score: number; metrics: Record<string, unknown>; strengths: string[]; risks: string[] }
+    audit_risk: { score: number; metrics: Record<string, unknown>; strengths: string[]; risks: string[] }
   }
   dimension_scores: {
     earnings: number
@@ -182,6 +183,7 @@ export interface FinancialAnalysisResult {
     cashflow: number
     moat: number
     management: number
+    audit_risk: number
   }
 }
 
@@ -519,4 +521,65 @@ export interface ScreenerResult {
   total: number
   fetch_time?: string
   [key: string]: unknown
+}
+
+// ============ 组合管理类型 ============
+
+export interface PortfolioTransaction {
+  id: string
+  code: string
+  name: string
+  market: string
+  type: 'buy' | 'sell' | 'dividend' | 'split'
+  shares: number
+  price: number
+  amount: number
+  fee: number
+  reason: string
+  decision_id: string
+  created_at: string
+}
+
+export interface PortfolioPosition {
+  code: string
+  name: string
+  market: string
+  shares: number
+  avg_cost: number
+  current_price: number
+  market_value: number
+  unrealized_pnl: number
+  unrealized_pnl_pct: number
+  position_pct: number
+  total_cost: number
+  buy_date: string
+  holding_days: number
+  decision_id: string
+}
+
+export interface PortfolioSummary {
+  total_cost: number
+  total_value: number
+  total_pnl: number
+  total_pnl_pct: number
+  cash: number
+  position_count: number
+  positions: PortfolioPosition[]
+  sector_exposure: Record<string, number>
+  today_pnl: number
+}
+
+export interface PerformancePoint {
+  date: string
+  value: number
+  pnl: number
+  pnl_pct: number
+}
+
+export interface RiskExposure {
+  sector_exposure: Record<string, number>
+  top_holdings: { code: string; name: string; pct: number; value: number }[]
+  concentration_warnings: string[]
+  max_single_pct: number
+  max_sector_pct: number
 }

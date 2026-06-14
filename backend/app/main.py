@@ -5,7 +5,7 @@ import logging
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from app.api import stocks, cb, scraper, bonds, index_valuation, dividend, cigar_butt, cross_analysis, value_investing, reit, macro, futures, jc_screener, polymarket, export_champions, grid, national_team, right_side, fund_holdings, decision, t_trading, backtest, fund_arb, futu_options, drawdown_control, daily_info, tractor, cb_backtest, valuation, quantdinger
+from app.api import stocks, cb, scraper, bonds, index_valuation, dividend, cigar_butt, cross_analysis, value_investing, reit, macro, futures, jc_screener, polymarket, export_champions, grid, national_team, right_side, fund_holdings, decision, t_trading, backtest, fund_arb, futu_options, drawdown_control, daily_info, tractor, cb_backtest, valuation, quantdinger, portfolio
 from app.core.exceptions import register_exception_handlers
 
 logger = logging.getLogger(__name__)
@@ -97,6 +97,7 @@ app.include_router(daily_info.router, prefix="/api/daily-info", tags=["每日信
 app.include_router(tractor.router, prefix="/api/tractor", tags=["拖拉机套利"])
 app.include_router(cb_backtest.router, prefix="/api/cb-backtest", tags=["可转债回测"])
 app.include_router(quantdinger.router, tags=["QuantDinger AI分析"])
+app.include_router(portfolio.router, prefix="/api/portfolio", tags=["组合管理"])
 
 
 @app.get("/")

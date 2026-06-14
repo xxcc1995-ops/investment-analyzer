@@ -847,29 +847,37 @@ def cigar_butt_screener(
 
 def _screen_a_stocks(max_ncav_discount, max_pb, max_pe, min_f_score,
                      min_market_cap, include_quality_fail, top_n) -> List[Dict]:
-    """A股烟蒂股筛选"""
-    # Step 1: 获取全量 A 股数据，做初步筛选
+    """A股烟蒂股筛选 - 快速版本"""
+    # Step 1: 获取全量 A 股数据，做严格初筛
     universe = _fetch_a_share_universe()
     if not universe:
         logger.error("无法获取A股行情数据")
         return []
 
-    # 初筛：PB < 1.5、PE < 20、市值 > min_market_cap
-    # 使用宽松条件，精确计算后再二次筛选
+    # 严格初筛：直接使用用户设定的 PB/PE/市值条件（不再放宽）
+    # 这样大幅减少需要获取详细数据的候选股数量
     candidates = []
     for s in universe:
         pb = s.get("pb")
         pe = s.get("pe")
         mcap = s.get("market_cap")
-        if not pb or pb > 1.5:
+        # PB 必须满足条件（允许 0-10% 容差用于 NCAV 计算）
+        if not pb or pb > max_pb * 1.1:
             continue
-        if pe and pe > 20:
+        # PE 必须满足条件（允许负 PE 用于困境股）
+        if pe is not None and pe > 0 and pe > max_pe:
             continue
+        # 市值必须满足
         if not mcap or mcap < min_market_cap:
             continue
         candidates.append(s)
 
-    logger.info(f"A股初筛: {len(candidates)} 只股票 PB<1.5")
+    # 按 PB 升序排序（PB 越低越可能是烟蒂股），只处理前 60 只
+    candidates.sort(key=lambda x: x.get("pb") or 999)
+    max_candidates = min(len(candidates), 60)
+    candidates = candidates[:max_candidates]
+
+    logger.info(f"A股初筛: {len(candidates)} 只股票（严格筛选，上限60只）")
 
     # Step 2: 并发获取财务数据（限制并发数避免被限流）
     results = []

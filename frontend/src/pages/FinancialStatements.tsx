@@ -1010,7 +1010,7 @@ function ExpenseTab({ data, chartData }: { data: IncomeStatement[]; chartData: I
 
 function AnalysisSummary({ analysis }: { analysis: FinancialAnalysisResult }) {
   const { score, grade, conclusion, strengths, risks, dimension_scores, dimensions } = analysis
-  const scores = dimension_scores || { earnings: 0, growth: 0, safety: 0, efficiency: 0, cashflow: 0, moat: 0, management: 0 }
+  const scores = dimension_scores || { earnings: 0, growth: 0, safety: 0, efficiency: 0, cashflow: 0, moat: 0, management: 0, audit_risk: 0 }
 
   const getGradeColor = (g: string) => {
     switch (g) {
@@ -1038,6 +1038,7 @@ function AnalysisSummary({ analysis }: { analysis: FinancialAnalysisResult }) {
     cashflow: '现金流',
     moat: '护城河',
     management: '管理层',
+    audit_risk: '审计风险',
   }
 
   // 7维雷达图
@@ -1079,6 +1080,19 @@ function AnalysisSummary({ analysis }: { analysis: FinancialAnalysisResult }) {
   if (mgmtMetrics.retention_return) keyMetrics.push({ label: '留存收益回报率', value: `${mgmtMetrics.retention_return}%` })
   const safetyMetrics = dimDetails.safety?.metrics || {}
   if (safetyMetrics.interest_coverage) keyMetrics.push({ label: '利息保障倍数', value: `${safetyMetrics.interest_coverage}x` })
+
+  // 审计风险指标
+  const auditMetrics = dimDetails.audit_risk?.metrics || {}
+  if (auditMetrics.beneish_m_score !== undefined && auditMetrics.beneish_m_score !== null) {
+    const mScore = auditMetrics.beneish_m_score as number
+    const mColor = mScore > -1.78 ? '#f85149' : mScore > -2.22 ? '#d29922' : '#3fb950'
+    keyMetrics.push({ label: 'Beneish M-Score', value: mScore.toFixed(2), color: mColor })
+  }
+  if (auditMetrics.altman_z_score !== undefined && auditMetrics.altman_z_score !== null) {
+    const zScore = auditMetrics.altman_z_score as number
+    const zColor = zScore < 1.81 ? '#f85149' : zScore < 2.99 ? '#d29922' : '#3fb950'
+    keyMetrics.push({ label: 'Altman Z-Score', value: zScore.toFixed(2), color: zColor })
+  }
 
   return (
     <div style={{

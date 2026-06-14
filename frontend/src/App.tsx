@@ -35,6 +35,7 @@ const DailyInfo = lazy(() => import('./pages/DailyInfo'))
 const TractorPage = lazy(() => import('./pages/TractorPage'))
 const MobileSettings = lazy(() => import('./pages/MobileSettings'))
 const CBBacktestPage = lazy(() => import('./pages/CBBacktestPage'))
+const Portfolio = lazy(() => import('./pages/Portfolio'))
 import RationalityGate from './components/RationalityGate'
 
 // ============ 类型定义 ============
@@ -58,7 +59,7 @@ type MainView =
   | 'futuOptionChain' | 'gridTrading' | 'nationalTeam' | 'rightSide'
   | 'decisionGuard' | 'tTrading' | 'backtestReport'
   | 'drawdownControl' | 'masterStrategy' | 'tractorTrading' | 'dailyInfo' | 'mobileSettings'
-  | 'cbBacktest'
+  | 'cbBacktest' | 'portfolio'
 
 // ============ 路由映射 ============
 
@@ -93,6 +94,7 @@ const routeMap: Record<string, React.LazyExoticComponent<any>> = {
   tractorTrading: TractorPage,
   mobileSettings: MobileSettings,
   cbBacktest: CBBacktestPage,
+  portfolio: Portfolio,
 }
 
 // ============ 主组件 ============
