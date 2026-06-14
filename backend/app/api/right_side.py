@@ -1,7 +1,11 @@
 """右侧交易判断 API"""
 
-from fastapi import APIRouter, HTTPException
-from app.services.right_side_service import analyze_right_side, backtest_right_side
+from fastapi import APIRouter, HTTPException, Query
+from app.services.right_side_service import (
+    analyze_right_side, backtest_right_side,
+    batch_scan_right_side, analyze_sector_rotation,
+    get_signal_performance_history,
+)
 
 router = APIRouter()
 

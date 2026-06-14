@@ -1,6 +1,8 @@
 import { LoadingSpinner } from '../components/ui'
 import { useState, useEffect, useCallback } from 'react'
 import axios from 'axios'
+import { useTradingInterceptor } from '../hooks/useTradingInterceptor'
+import RationalCheckpoint from '../components/RationalCheckpoint'
 
 const API_BASE = '/api/polymarket'
 
@@ -200,6 +202,9 @@ export default function PolymarketPage() {
   const [kellyFeeRate, setKellyFeeRate] = useState('1')
   const [kellyResult, setKellyResult] = useState<KellyResult | null>(null)
 
+  // 交易拦截器
+  const { intercept, checkpointOpen, checkpointMeta, handlePass, handleCancel } = useTradingInterceptor()
+
   // Detail
   const [detailData, setDetailData] = useState<MarketAnalysis | null>(null)
   const [detailLoading, setDetailLoading] = useState(false)
@@ -313,7 +318,7 @@ export default function PolymarketPage() {
     }
   }, [allocYesPrice, allocNoPrice, allocBudget, allocYesFee, allocNoFee])
 
-  const calcKelly = useCallback(async () => {
+  const doCalcKelly = useCallback(async () => {
     const price = parseFloat(kellyPrice)
     const prob = parseFloat(kellyProb)
     const bankroll = parseFloat(kellyBankroll) || 1000
@@ -329,6 +334,13 @@ export default function PolymarketPage() {
       console.error('Kelly计算失败:', e)
     }
   }, [kellyPrice, kellyProb, kellyBankroll, kellyFraction, kellyFeeRate])
+
+  const calcKelly = useCallback(() => {
+    intercept(doCalcKelly, {
+      actionType: 'analyze',
+      target: `Kelly仓位计算 (概率${kellyProb}%, 价格${kellyPrice})`,
+    })
+  }, [intercept, doCalcKelly, kellyProb, kellyPrice])
 
   useEffect(() => {
     if (activeTab === 'markets') loadMarkets()
@@ -1473,6 +1485,15 @@ export default function PolymarketPage() {
           )}
         </div>
       )}
+
+      {/* 理性检查点 */}
+      <RationalCheckpoint
+        open={checkpointOpen}
+        actionType={checkpointMeta.actionType}
+        target={checkpointMeta.target}
+        onPass={handlePass}
+        onCancel={handleCancel}
+      />
     </div>
   )
 }

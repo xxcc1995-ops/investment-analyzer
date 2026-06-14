@@ -5,7 +5,7 @@ import logging
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from app.api import stocks, cb, scraper, bonds, index_valuation, dividend, cigar_butt, cross_analysis, value_investing, reit, macro, futures, jc_screener, polymarket, export_champions, grid, national_team, right_side, fund_holdings, decision, t_trading, backtest, fund_arb, futu_options, drawdown_control, daily_info, tractor, cb_backtest, valuation, quantdinger, portfolio
+from app.api import stocks, cb, scraper, bonds, index_valuation, dividend, cigar_butt, cross_analysis, value_investing, reit, macro, futures, jc_screener, polymarket, export_champions, grid, national_team, right_side, fund_holdings, decision, t_trading, backtest, fund_arb, futu_options, drawdown_control, daily_info, tractor, cb_backtest, valuation, quantdinger, portfolio, sector_valuation, crypto_master, quant_backtest
 from app.core.exceptions import register_exception_handlers
 
 logger = logging.getLogger(__name__)
@@ -98,6 +98,9 @@ app.include_router(tractor.router, prefix="/api/tractor", tags=["拖拉机套利
 app.include_router(cb_backtest.router, prefix="/api/cb-backtest", tags=["可转债回测"])
 app.include_router(quantdinger.router, tags=["QuantDinger AI分析"])
 app.include_router(portfolio.router, prefix="/api/portfolio", tags=["组合管理"])
+app.include_router(sector_valuation.router, prefix="/api/sector-valuation", tags=["行业估值"])
+app.include_router(crypto_master.router, prefix="/api/crypto-master", tags=["币圈大师"])
+app.include_router(quant_backtest.router, prefix="/api/quant", tags=["量化回测"])
 
 
 @app.get("/")

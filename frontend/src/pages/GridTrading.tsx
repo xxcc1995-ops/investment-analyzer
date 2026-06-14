@@ -141,7 +141,7 @@ const Tip = ({ text, children }: { text: string; children?: React.ReactNode }) =
 
 export default function GridTrading() {
   // ===== 状态管理 =====
-  const [activeTab, setActiveTab] = useState<'philosophy' | 'analysis' | 'simulation' | 'status' | 'optimize'>('philosophy')
+  const [activeTab, setActiveTab] = useState<'philosophy' | 'analysis' | 'simulation' | 'status' | 'optimize' | 'portfolio' | 'stress'>('philosophy')
   const [philosophy, setPhilosophy] = useState<Philosophy | null>(null)
   const [analysis, setAnalysis] = useState<GridAnalysis | null>(null)
   const [optimizeResult, setOptimizeResult] = useState<OptimizeResult | null>(null)
@@ -165,6 +165,14 @@ export default function GridTrading() {
   const [enableStopLoss, setEnableStopLoss] = useState(true)
   const [stopLossPct, setStopLossPct] = useState('0.10')
   const [atrMultiplier, setAtrMultiplier] = useState('1.0')
+
+  // Portfolio state
+  const [portfolio, setPortfolio] = useState<any>(null)
+  const [portfolioLoading, setPortfolioLoading] = useState(false)
+
+  // Stress test state
+  const [stressResult, setStressResult] = useState<any>(null)
+  const [stressLoading, setStressLoading] = useState(false)
 
   // 货币符号辅助函数
   const getCurrency = (market?: string) => market === 'A' ? '¥' : 'HK$'
@@ -248,10 +256,52 @@ export default function GridTrading() {
 
   useEffect(() => { loadPhilosophy() }, [loadPhilosophy])
 
+  const loadPortfolio = useCallback(async () => {
+    setPortfolioLoading(true)
+    try {
+      const res = await axios.get(`${API_BASE}/grid/portfolio`)
+      setPortfolio(res.data)
+    } catch (e) { console.error(e) }
+    setPortfolioLoading(false)
+  }, [])
+
+  const loadStressTest = useCallback(async () => {
+    if (!stockCode) return
+    setStressLoading(true)
+    try {
+      const res = await axios.get(`${API_BASE}/grid/stress-test`, {
+        params: { stock_code: stockCode, capital: parseFloat(capital), grid_width_pct: parseFloat(gridWidthPct || '2') },
+      })
+      setStressResult(res.data)
+    } catch (e: any) { setStressResult({ error: e?.response?.data?.detail || '测试失败' }) }
+    setStressLoading(false)
+  }, [stockCode, capital, gridWidthPct])
+
+  const addToPortfolio = async () => {
+    if (!analysis || analysis.error) return
+    try {
+      await axios.post(`${API_BASE}/grid/portfolio/add`, {
+        code: analysis.stock_code,
+        name: analysis.stock_name,
+        market: analysis.market,
+        grid_type: gridType,
+        grid_width_pct: analysis.grid_width_pct,
+        num_grids: parseInt(gridsUp) + parseInt(gridsDown),
+        capital: parseFloat(capital),
+        sizing,
+        current_price: analysis.current_price,
+      })
+      alert('已添加到网格组合')
+      loadPortfolio()
+    } catch (e: any) { alert(e?.response?.data?.detail || '添加失败') }
+  }
+
   useEffect(() => {
     if (activeTab === 'analysis' || activeTab === 'simulation' || activeTab === 'status') loadAnalysis()
     if (activeTab === 'optimize') loadOptimize()
-  }, [activeTab, loadAnalysis, loadOptimize])
+    if (activeTab === 'portfolio') loadPortfolio()
+    if (activeTab === 'stress') loadStressTest()
+  }, [activeTab, loadAnalysis, loadOptimize, loadPortfolio, loadStressTest])
 
   // ===== ECharts 图表配置 =====
   const klineOption = useMemo(() => {
@@ -353,6 +403,8 @@ export default function GridTrading() {
     { key: 'simulation', label: '回测模拟' },
     { key: 'status', label: '当前状态' },
     { key: 'optimize', label: '参数优化' },
+    { key: 'portfolio', label: '📊 网格组合' },
+    { key: 'stress', label: '🧪 压力测试' },
   ]
 
   // ===== 渲染 =====
@@ -652,6 +704,140 @@ export default function GridTrading() {
               color={analysis.simulation.open_positions / analysis.total_levels > 0.8 ? '#ff4d4f' : '#d4a76a'}
             />
           </PageSection>
+        </div>
+      )}
+
+      {/* ===== Tab 6: 网格组合 ===== */}
+      {activeTab === 'portfolio' && (
+        <div>
+          {/* Add to portfolio button */}
+          {analysis && !analysis.error && (
+            <div style={{ marginBottom: 16 }}>
+              <button onClick={addToPortfolio} className="grid-btn-primary">
+                + 将当前分析的 {analysis.stock_name} 加入网格组合
+              </button>
+            </div>
+          )}
+
+          {portfolioLoading ? (
+            <LoadingSpinner text="加载网格组合..." />
+          ) : portfolio && portfolio.portfolio && portfolio.portfolio.length > 0 ? (
+            <div>
+              {/* Summary */}
+              <StatCardGroup columns={3} style={{ marginBottom: 16 }}>
+                <StatCard label="活跃网格" value={portfolio.summary.active_grids} color="#52c41a" />
+                <StatCard label="总投入资金" value={`${getCurrency()}${fmt(portfolio.summary.total_capital)}`} color="#d4a76a" />
+                <StatCard label="已实现盈亏" value={`${getCurrency()}${fmt(portfolio.summary.total_realized_pnl)}`}
+                  color={portfolio.summary.total_realized_pnl >= 0 ? '#52c41a' : '#ff4d4f'} />
+              </StatCardGroup>
+
+              {/* Portfolio items */}
+              {portfolio.portfolio.map((g: any, i: number) => (
+                <div key={i} style={{
+                  background: 'var(--bg-secondary)', borderRadius: 8, padding: 16, marginBottom: 12,
+                  border: '1px solid var(--border-primary)',
+                }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                    <div>
+                      <span style={{ fontWeight: 700, fontSize: 15 }}>{g.name}</span>
+                      <span style={{ fontFamily: 'monospace', marginLeft: 8, color: 'var(--text-secondary)' }}>{g.code}</span>
+                      <Tag color={g.market === 'A' ? '#52c41a' : '#1890ff'} style={{ marginLeft: 8 }}>{g.market === 'A' ? 'A股' : '港股'}</Tag>
+                      <span style={{
+                        marginLeft: 8, padding: '2px 8px', borderRadius: 8, fontSize: 11,
+                        background: g.status === 'active' ? '#52c41a20' : '#6b728020',
+                        color: g.status === 'active' ? '#52c41a' : '#6b7280',
+                      }}>{g.status === 'active' ? '运行中' : '已暂停'}</span>
+                    </div>
+                    <div style={{ display: 'flex', gap: 8 }}>
+                      <button onClick={() => { setStockCode(g.code); setActiveTab('analysis') }}
+                        style={{ padding: '4px 12px', borderRadius: 4, background: '#1890ff', color: '#fff', border: 'none', cursor: 'pointer', fontSize: 12 }}>
+                        查看分析
+                      </button>
+                    </div>
+                  </div>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 8, fontSize: 13 }}>
+                    <div><span style={{ color: 'var(--text-secondary)' }}>入场价: </span><span style={{ fontWeight: 600 }}>{fmt(g.entry_price)}</span></div>
+                    <div><span style={{ color: 'var(--text-secondary)' }}>网格类型: </span><span style={{ fontWeight: 600 }}>{g.grid_type === 'equal_distance' ? '等距' : g.grid_type === 'equal_ratio' ? '等比' : '动态'}</span></div>
+                    <div><span style={{ color: 'var(--text-secondary)' }}>网格宽度: </span><span style={{ fontWeight: 600 }}>{g.grid_width_pct}%</span></div>
+                    <div><span style={{ color: 'var(--text-secondary)' }}>投入资金: </span><span style={{ fontWeight: 600 }}>{getCurrency()}{fmt(g.capital)}</span></div>
+                    <div><span style={{ color: 'var(--text-secondary)' }}>入场日期: </span><span style={{ fontWeight: 600 }}>{g.entry_date?.slice(0, 10)}</span></div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <EmptyState title="网格组合为空" description="在「网格分析」Tab中分析完股票后，点击「加入网格组合」" />
+          )}
+        </div>
+      )}
+
+      {/* ===== Tab 7: 压力测试 ===== */}
+      {activeTab === 'stress' && (
+        <div>
+          <PageSection title="蒙特卡洛压力测试">
+            <p style={{ color: 'var(--text-secondary)', fontSize: 13, marginBottom: 12 }}>
+              随机模拟500种市场情景，评估网格策略的风险边界。告诉你"最坏能亏多少"。
+            </p>
+            <button onClick={loadStressTest} disabled={stressLoading} className="grid-btn-primary">
+              {stressLoading ? '压力测试中...' : '运行压力测试'}
+            </button>
+          </PageSection>
+
+          {stressLoading && <LoadingSpinner text="运行500次蒙特卡洛模拟..." />}
+
+          {stressResult && !stressResult.error && (
+            <div>
+              {/* Risk Metrics */}
+              <PageSection title="风险指标">
+                <StatCardGroup columns={3}>
+                  <StatCard label="VaR(95%)" value={`${stressResult.risk_metrics.var_95}%`} color="#ff4d4f"
+                    tip="95%的情况下，最大亏损不会超过这个数" />
+                  <StatCard label="CVaR(95%)" value={`${stressResult.risk_metrics.cvar_95}%`} color="#ff4d4f"
+                    tip="最坏5%情景下的平均亏损" />
+                  <StatCard label="盈利概率" value={`${stressResult.risk_metrics.probability_of_profit}%`}
+                    color={stressResult.risk_metrics.probability_of_profit > 50 ? '#52c41a' : '#ff4d4f'} />
+                  <StatCard label="最差回撤" value={`${stressResult.risk_metrics.max_drawdown_worst}%`} color="#ff4d4f" />
+                  <StatCard label="中位回撤" value={`${stressResult.risk_metrics.max_drawdown_median}%`} color="#faad14" />
+                  <StatCard label="平均夏普" value={stressResult.risk_metrics.sharpe_mean}
+                    color={stressResult.risk_metrics.sharpe_mean > 0 ? '#52c41a' : '#ff4d4f'} />
+                </StatCardGroup>
+              </PageSection>
+
+              {/* Return Distribution */}
+              <PageSection title="收益分布">
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 8 }}>
+                  {[
+                    { label: '最差', value: stressResult.return_distribution.min, color: '#ff4d4f' },
+                    { label: 'P10', value: stressResult.return_distribution.p10, color: '#faad14' },
+                    { label: '中位数', value: stressResult.return_distribution.median, color: '#d4a76a' },
+                    { label: 'P90', value: stressResult.return_distribution.p90, color: '#52c41a' },
+                    { label: '最好', value: stressResult.return_distribution.max, color: '#52c41a' },
+                  ].map((d, i) => (
+                    <div key={i} style={{ background: 'var(--bg-secondary)', borderRadius: 8, padding: 12, textAlign: 'center' }}>
+                      <div style={{ fontSize: 11, color: 'var(--text-secondary)' }}>{d.label}</div>
+                      <div style={{ fontSize: 18, fontWeight: 700, color: d.color }}>{d.value}%</div>
+                    </div>
+                  ))}
+                </div>
+                <div style={{ marginTop: 12, fontSize: 13, color: 'var(--text-secondary)' }}>
+                  均值: {stressResult.return_distribution.mean}% · 标准差: {stressResult.return_distribution.std}%
+                </div>
+              </PageSection>
+
+              {/* Interpretation */}
+              <PageSection title="解读">
+                <div style={{ background: 'var(--bg-secondary)', borderRadius: 8, padding: 16, borderLeft: '3px solid #d4a76a' }}>
+                  <div style={{ fontSize: 14, lineHeight: 2 }}>
+                    <div>📊 {stressResult.interpretation.var_explanation}</div>
+                    <div>📉 {stressResult.interpretation.cvar_explanation}</div>
+                    <div>💰 {stressResult.interpretation.profit_probability}</div>
+                    <div style={{ marginTop: 8, fontWeight: 600, color: '#d4a76a' }}>💡 {stressResult.interpretation.recommendation}</div>
+                  </div>
+                </div>
+              </PageSection>
+            </div>
+          )}
+          {stressResult?.error && <p style={{ color: '#ff4d4f' }}>{stressResult.error}</p>}
         </div>
       )}
 

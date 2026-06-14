@@ -596,6 +596,143 @@ def _get_current_price_and_info(code: str, market: str) -> Optional[dict]:
     return None
 
 
+def calc_support_resistance(highs: list, lows: list, closes: list, lookback: int = 60) -> dict:
+    """
+    计算支撑位和阻力位 — 基于枢轴点和价格聚集区
+
+    专家级实现：
+    1. 枢轴点（Pivot Points）— 基于前一日高低收
+    2. 价格聚集区 — 成交密集的价格区间
+    3. 近期高低点 — 最近N日的关键转折点
+
+    返回：
+    - pivot: 枢轴点
+    - support_1/support_2: 支撑位
+    - resistance_1/resistance_2: 阻力位
+    - key_levels: 所有关键价位（排序后）
+    """
+    if len(closes) < 5:
+        return {"pivot": 0, "support_1": 0, "support_2": 0, "resistance_1": 0, "resistance_2": 0, "key_levels": []}
+
+    # --- 1. 经典枢轴点 ---
+    h = highs[-1]
+    l = lows[-1]
+    c = closes[-1]
+    pivot = round((h + l + c) / 3, 2)
+    s1 = round(2 * pivot - h, 2)
+    s2 = round(pivot - (h - l), 2)
+    r1 = round(2 * pivot - l, 2)
+    r2 = round(pivot + (h - l), 2)
+
+    # --- 2. 近期关键高低点（swing points）---
+    recent_n = min(lookback, len(highs))
+    recent_highs = highs[-recent_n:]
+    recent_lows = lows[-recent_n:]
+    recent_closes = closes[-recent_n:]
+
+    # 找局部高点（比左右2根K线都高的点）
+    swing_highs = []
+    swing_lows = []
+    for i in range(2, len(recent_highs) - 2):
+        if recent_highs[i] > max(recent_highs[i-2:i]) and recent_highs[i] > max(recent_highs[i+1:i+3]):
+            swing_highs.append(recent_highs[i])
+        if recent_lows[i] < min(recent_lows[i-2:i]) and recent_lows[i] < min(recent_lows[i+1:i+3]):
+            swing_lows.append(recent_lows[i])
+
+    # --- 3. 价格聚集区（用分位数找到成交密集区间）---
+    sorted_closes = sorted(recent_closes)
+    n = len(sorted_closes)
+    q25 = sorted_closes[n // 4]
+    q50 = sorted_closes[n // 2]
+    q75 = sorted_closes[3 * n // 4]
+
+    # 合并所有关键价位
+    all_levels = [pivot, s1, s2, r1, r2]
+    all_levels.extend(swing_highs[-3:] if swing_highs else [])
+    all_levels.extend(swing_lows[-3:] if swing_lows else [])
+    all_levels.extend([q25, q50, q75])
+
+    # 去重并排序
+    all_levels = sorted(set(round(lv, 2) for lv in all_levels if lv > 0))
+
+    # 找当前价格最近的支撑和阻力
+    current = closes[-1]
+    supports = [lv for lv in all_levels if lv < current]
+    resistances = [lv for lv in all_levels if lv > current]
+
+    nearest_support = supports[-1] if supports else s1
+    nearest_resistance = resistances[0] if resistances else r1
+
+    return {
+        "pivot": pivot,
+        "support_1": round(nearest_support, 2),
+        "support_2": round(s2, 2),
+        "resistance_1": round(nearest_resistance, 2),
+        "resistance_2": round(r2, 2),
+        "key_levels": all_levels[-10:],  # 最多返回10个关键价位
+        "swing_highs": [round(h, 2) for h in swing_highs[-3:]],
+        "swing_lows": [round(l, 2) for l in swing_lows[-3:]],
+    }
+
+
+def detect_macd_divergence_v2(closes: list, macd_hist: list, lookback: int = 60) -> str:
+    """
+    改进的MACD背离检测 — 使用真正的swing high/low
+
+    原版问题：只用30根K线的简单索引比较
+    改进版：
+    1. 找真正的swing high和swing low（局部极值点）
+    2. 比较价格极值和MACD柱状图极值的方向
+    3. 要求至少间隔10根K线
+    4. 使用更长的lookback窗口(60)
+
+    返回: "bottom" (底背离) / "top" (顶背离) / "none"
+    """
+    if len(closes) < lookback or len(macd_hist) < lookback:
+        return "none"
+
+    recent_closes = closes[-lookback:]
+    recent_macd = macd_hist[-lookback:]
+    n = len(recent_closes)
+
+    # 找价格的swing low（局部最低点）
+    price_lows = []
+    for i in range(3, n - 3):
+        if recent_closes[i] <= min(recent_closes[i-3:i]) and recent_closes[i] <= min(recent_closes[i+1:i+4]):
+            price_lows.append((i, recent_closes[i], recent_macd[i]))
+
+    # 找价格的swing high（局部最高点）
+    price_highs = []
+    for i in range(3, n - 3):
+        if recent_closes[i] >= max(recent_closes[i-3:i]) and recent_closes[i] >= max(recent_closes[i+1:i+4]):
+            price_highs.append((i, recent_closes[i], recent_macd[i]))
+
+    # 检查底背离：价格新低但MACD不新低
+    if len(price_lows) >= 2:
+        for i in range(len(price_lows) - 1, 0, -1):
+            curr = price_lows[i]
+            prev = price_lows[i - 1]
+            # 间隔至少10根K线
+            if curr[0] - prev[0] < 10:
+                continue
+            # 价格新低，MACD不新低 = 底背离
+            if curr[1] < prev[1] and curr[2] > prev[2]:
+                return "bottom"
+
+    # 检查顶背离：价格新高但MACD不新高
+    if len(price_highs) >= 2:
+        for i in range(len(price_highs) - 1, 0, -1):
+            curr = price_highs[i]
+            prev = price_highs[i - 1]
+            if curr[0] - prev[0] < 10:
+                continue
+            # 价格新高，MACD不新高 = 顶背离
+            if curr[1] > prev[1] and curr[2] < prev[2]:
+                return "top"
+
+    return "none"
+
+
 def analyze_t_signal(code: str, market: str, t_capital: float = 300000) -> Optional[TSignal]:
     """
     分析单只股票的做T信号（机构级）
@@ -645,6 +782,7 @@ def analyze_t_signal(code: str, market: str, t_capital: float = 300000) -> Optio
     vol_ratio = calc_volume_ratio(volumes)
     trend = calc_trend_filter(closes)
     atr = calculate_atr(highs, lows, closes, 14)
+    sr = calc_support_resistance(highs, lows, closes, 60)
     atr_pct = round(atr / current_price * 100, 2) if current_price > 0 else 0
 
     # === 加权多指标共振：方向判断 ===
@@ -678,10 +816,12 @@ def analyze_t_signal(code: str, market: str, t_capital: float = 300000) -> Optio
     elif macd["signal"] == "dead_cross":
         sell_signals.append(("MACD死叉", f"DIF={macd['dif']}", "★★"))
 
-    if macd["divergence"] == "bottom":
-        buy_signals.append(("MACD底背离", "价格新低但MACD不新低", "★★★"))
-    elif macd["divergence"] == "top":
-        sell_signals.append(("MACD顶背离", "价格新高但MACD不新高", "★★★"))
+    # 使用改进的背离检测（v2: 基于真正的swing high/low）
+    divergence_v2 = detect_macd_divergence_v2(closes, macd["histogram"], 60)
+    if divergence_v2 == "bottom":
+        buy_signals.append(("MACD底背离", "价格新低但MACD不新低（Swing验证）", "★★★"))
+    elif divergence_v2 == "top":
+        sell_signals.append(("MACD顶背离", "价格新高但MACD不新高（Swing验证）", "★★★"))
 
     # 布林带
     if bollinger["signal"] in ("below_lower", "near_lower"):
@@ -758,14 +898,32 @@ def analyze_t_signal(code: str, market: str, t_capital: float = 300000) -> Optio
     slippage = TRADE_COST.get(market, TRADE_COST["A"])["slippage"]
 
     if signal_type == "buy":
-        buy_point = round(current_price * (1 - slippage) - atr * atr_multiplier, 2)
-        sell_point = round(current_price + atr * 0.5, 2)
+        raw_buy = current_price * (1 - slippage) - atr * atr_multiplier
+        raw_sell = current_price + atr * 0.5
+        # 支撑位优化：如果最近支撑位在合理范围内，用支撑位作为买入点
+        if sr["support_1"] > 0 and abs(sr["support_1"] - raw_buy) / raw_buy < 0.02:
+            buy_point = sr["support_1"]
+        else:
+            buy_point = round(raw_buy, 2)
+        # 阻力位优化：用最近阻力位作为卖出点
+        if sr["resistance_1"] > 0 and sr["resistance_1"] > current_price:
+            sell_point = sr["resistance_1"]
+        else:
+            sell_point = round(raw_sell, 2)
     elif signal_type == "sell":
-        buy_point = round(current_price - atr * 0.5, 2)
-        sell_point = round(current_price * (1 + slippage) + atr * atr_multiplier, 2)
+        raw_buy = current_price - atr * 0.5
+        raw_sell = current_price * (1 + slippage) + atr * atr_multiplier
+        if sr["support_1"] > 0 and sr["support_1"] < current_price:
+            buy_point = sr["support_1"]
+        else:
+            buy_point = round(raw_buy, 2)
+        if sr["resistance_1"] > 0 and abs(sr["resistance_1"] - raw_sell) / raw_sell < 0.02:
+            sell_point = sr["resistance_1"]
+        else:
+            sell_point = round(raw_sell, 2)
     else:
-        buy_point = round(current_price - atr * 0.5, 2)
-        sell_point = round(current_price + atr * 0.5, 2)
+        buy_point = sr["support_1"] if sr["support_1"] > 0 else round(current_price - atr * 0.5, 2)
+        sell_point = sr["resistance_1"] if sr["resistance_1"] > 0 else round(current_price + atr * 0.5, 2)
 
     # === 最低利润门槛（机构级：必须覆盖2倍交易成本）===
     round_trip_cost = calc_round_trip_cost(market)
@@ -809,6 +967,10 @@ def analyze_t_signal(code: str, market: str, t_capital: float = 300000) -> Optio
         reasoning.extend([f"[卖出] {name}: {detail} {weight}" for name, detail, weight in sell_signals])
     if trend_warning:
         reasoning.append(f"[趋势] {trend_warning}")
+    if sr["support_1"] > 0:
+        reasoning.append(f"[支撑] 近支撑位 ¥{sr['support_1']}")
+    if sr["resistance_1"] > 0:
+        reasoning.append(f"[阻力] 近阻力位 ¥{sr['resistance_1']}")
     if not reasoning:
         reasoning.append("无明确信号，建议观望")
 
@@ -837,6 +999,7 @@ def analyze_t_signal(code: str, market: str, t_capital: float = 300000) -> Optio
             "sell_weight": sell_weight,
             "round_trip_cost_pct": round(round_trip_cost * 100, 4),
             "min_profit_threshold": round(min_profit_threshold, 2),
+            "support_resistance": sr,
         },
         reasoning=reasoning,
     )

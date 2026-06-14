@@ -22,7 +22,12 @@
 import time
 import math
 import requests
+import statistics
+import random
+import json
+import os
 from typing import Optional
+from datetime import datetime
 from datetime import datetime, timedelta
 from dataclasses import dataclass
 
@@ -1037,6 +1042,7 @@ def analyze_grid_trading(
     stop_loss_pct: float = 0.10,
     enable_stop_loss: bool = True,
     atr_multiplier: float = 1.0,
+    _klines_override: list = None,
 ) -> dict:
     """
     网格交易完整分析 — 一站式生成所有分析结果
@@ -1081,8 +1087,13 @@ def analyze_grid_trading(
     current_price = stock_data['price']
     market = stock_data.get('market', 'HK')
 
-    # 第2步：获取历史数据
-    hist_data = _fetch_historical(stock_code, hist_days)
+    # 第2步：获取历史数据（支持压力测试覆盖）
+    if _klines_override:
+        hist_data = _klines_override
+        current_price = hist_data[-1]["close"]
+        market = stock_data.get('market', 'HK') if stock_code != "SIM" else "A"
+    else:
+        hist_data = _fetch_historical(stock_code, hist_days)
     if not hist_data:
         return {'error': '无法获取历史数据', 'update_time': datetime.now().isoformat()}
 
@@ -1250,4 +1261,339 @@ def get_philosophy() -> dict:
             '小盘题材股（波动太大，容易突破网格区间）',
             '即将退市或基本面恶化的股票（网格救不了烂公司）',
         ],
+    }
+
+
+# ============================================================
+# 专家级：网格组合管理
+# ============================================================
+
+import json
+import os
+import random
+
+_GRID_PORTFOLIO_FILE = os.path.join(
+    os.path.dirname(__file__), "..", "..", "data", "grid_portfolio.json"
+)
+
+
+def _load_grid_portfolio() -> list:
+    if os.path.exists(_GRID_PORTFOLIO_FILE):
+        try:
+            with open(_GRID_PORTFOLIO_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            pass
+    return []
+
+
+def _save_grid_portfolio(portfolio: list):
+    os.makedirs(os.path.dirname(_GRID_PORTFOLIO_FILE), exist_ok=True)
+    with open(_GRID_PORTFOLIO_FILE, "w", encoding="utf-8") as f:
+        json.dump(portfolio, f, ensure_ascii=False, indent=2)
+
+
+def add_to_grid_portfolio(
+    code: str, name: str, market: str,
+    grid_type: str, grid_width_pct: float, num_grids: int,
+    capital: float, sizing: str, current_price: float,
+) -> dict:
+    """添加网格到组合"""
+    portfolio = _load_grid_portfolio()
+
+    # 检查是否已存在
+    for g in portfolio:
+        if g["code"] == code and g["market"] == market:
+            return {"error": f"{code} 已在网格组合中"}
+
+    entry = {
+        "code": code,
+        "name": name,
+        "market": market,
+        "grid_type": grid_type,
+        "grid_width_pct": grid_width_pct,
+        "num_grids": num_grids,
+        "capital": capital,
+        "sizing": sizing,
+        "entry_price": current_price,
+        "entry_date": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "realized_pnl": 0.0,
+        "trade_count": 0,
+        "status": "active",
+    }
+    portfolio.append(entry)
+    _save_grid_portfolio(portfolio)
+    return {"message": f"已添加 {name}({code}) 到网格组合", "entry": entry}
+
+
+def get_grid_portfolio() -> dict:
+    """获取网格组合及实时状态"""
+    portfolio = _load_grid_portfolio()
+    result = []
+    total_capital = 0
+    total_pnl = 0
+
+    for g in portfolio:
+        total_capital += g.get("capital", 0)
+        total_pnl += g.get("realized_pnl", 0)
+        result.append(g)
+
+    return {
+        "portfolio": result,
+        "summary": {
+            "total_grids": len(result),
+            "active_grids": len([g for g in result if g.get("status") == "active"]),
+            "total_capital": total_capital,
+            "total_realized_pnl": round(total_pnl, 2),
+        },
+        "update_time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+    }
+
+
+def remove_from_grid_portfolio(code: str, market: str) -> dict:
+    """从组合中移除网格"""
+    portfolio = _load_grid_portfolio()
+    new_portfolio = [g for g in portfolio if not (g["code"] == code and g["market"] == market)]
+    if len(new_portfolio) == len(portfolio):
+        return {"error": f"未找到 {code}"}
+    _save_grid_portfolio(new_portfolio)
+    return {"message": f"已移除 {code}"}
+
+
+# ============================================================
+# 专家级：网格衰减检测
+# ============================================================
+
+def detect_grid_decay(closes: list, grid_levels: list, lookback: int = 20) -> dict:
+    """
+    检测网格策略是否在失效
+
+    衰减场景：
+    1. 趋势突破：价格持续突破多层网格 = 趋势市，网格不适合
+    2. 波动率收缩：波动率降到网格宽度以下 = 网格"空转"
+    3. 区间漂移：震荡中心偏离网格中心
+
+    返回：
+    - decay_score: 0-100 (0=正常, 100=完全失效)
+    - decay_type: "trending" / "low_vol" / "drift" / "healthy"
+    - recommendation: 建议操作
+    - signals: 具体信号列表
+    """
+    if len(closes) < lookback or not grid_levels:
+        return {"decay_score": 0, "decay_type": "healthy", "recommendation": "数据不足", "signals": []}
+
+    recent = closes[-lookback:]
+    prices = [lv["price"] for lv in grid_levels if "price" in lv]
+    if not prices:
+        return {"decay_score": 0, "decay_type": "healthy", "recommendation": "无网格数据", "signals": []}
+
+    grid_min = min(prices)
+    grid_max = max(prices)
+    grid_width = (grid_max - grid_min) / len(prices) if prices else 1
+
+    signals = []
+    decay_score = 0
+
+    # --- 1. 趋势突破检测 ---
+    # 检查价格是否持续向一个方向突破多层网格
+    price_direction = recent[-1] - recent[0]
+    price_move_pct = abs(price_direction) / recent[0] * 100
+
+    if recent[-1] > grid_max:
+        decay_score += 40
+        signals.append(f"价格突破上方网格边界 (当前{recent[-1]:.2f} > 网格上限{grid_max:.2f})")
+    elif recent[-1] < grid_min:
+        decay_score += 40
+        signals.append(f"价格跌破下方网格边界 (当前{recent[-1]:.2f} < 网格下限{grid_min:.2f})")
+
+    # 连续单方向移动
+    up_count = sum(1 for i in range(1, len(recent)) if recent[i] > recent[i-1])
+    down_count = sum(1 for i in range(1, len(recent)) if recent[i] < recent[i-1])
+    if up_count > len(recent) * 0.75:
+        decay_score += 20
+        signals.append(f"近{lookback}日有{up_count}日上涨，单边上涨趋势")
+    elif down_count > len(recent) * 0.75:
+        decay_score += 20
+        signals.append(f"近{lookback}日有{down_count}日下跌，单边下跌趋势")
+
+    # --- 2. 波动率收缩检测 ---
+    daily_ranges = [abs(recent[i] - recent[i-1]) for i in range(1, len(recent))]
+    avg_range = sum(daily_ranges) / len(daily_ranges) if daily_ranges else 0
+
+    if avg_range < grid_width * 0.3:
+        decay_score += 25
+        signals.append(f"日均波动({avg_range:.2f})仅为网格宽度({grid_width:.2f})的{avg_range/grid_width*100:.0f}%，网格空转")
+    elif avg_range < grid_width * 0.5:
+        decay_score += 10
+        signals.append(f"日均波动({avg_range:.2f})偏低，网格触发频率降低")
+
+    # --- 3. 区间漂移检测 ---
+    mid_price = (grid_min + grid_max) / 2
+    current_price = recent[-1]
+    drift_pct = (current_price - mid_price) / mid_price * 100
+
+    if abs(drift_pct) > 20:
+        decay_score += 15
+        signals.append(f"价格偏离网格中心{drift_pct:.1f}%，网格可能需要重新调整")
+
+    # 判定衰减类型
+    decay_score = min(decay_score, 100)
+
+    if decay_score >= 60:
+        if up_count > len(recent) * 0.75 or down_count > len(recent) * 0.75:
+            decay_type = "trending"
+            recommendation = "价格进入单边趋势，建议暂停网格，切换为趋势策略或等待回调"
+        elif avg_range < grid_width * 0.3:
+            decay_type = "low_vol"
+            recommendation = "波动率过低，网格几乎不触发。建议收窄网格宽度或切换标的"
+        else:
+            decay_type = "drift"
+            recommendation = "价格偏离网格中心，建议重新设置网格参数"
+    elif decay_score >= 30:
+        decay_type = "warning"
+        recommendation = "网格效率下降，建议观察或微调参数"
+    else:
+        decay_type = "healthy"
+        recommendation = "网格运行正常，继续执行"
+
+    return {
+        "decay_score": decay_score,
+        "decay_type": decay_type,
+        "recommendation": recommendation,
+        "signals": signals,
+        "metrics": {
+            "avg_daily_range": round(avg_range, 4),
+            "grid_width": round(grid_width, 4),
+            "range_to_width_ratio": round(avg_range / grid_width, 2) if grid_width > 0 else 0,
+            "price_vs_grid_center": round(drift_pct, 2),
+            "above_grid": recent[-1] > grid_max,
+            "below_grid": recent[-1] < grid_min,
+        },
+    }
+
+
+# ============================================================
+# 专家级：蒙特卡洛压力测试
+# ============================================================
+
+def stress_test_grid(
+    klines: list,
+    grid_type: str = "equal_distance",
+    num_grids_up: int = 10,
+    num_grids_down: int = 10,
+    grid_width_pct: float = 2.0,
+    capital: float = 1000000,
+    sizing: str = "equal",
+    num_simulations: int = 500,
+) -> dict:
+    """
+    蒙特卡洛压力测试
+
+    随机打乱K线顺序，模拟多种市场情景：
+    - 收益分布（中位数、均值、标准差）
+    - VaR(95%) — 95%概率不会亏超过多少
+    - CVaR(95%) — 最坏5%情况的平均亏损
+    - 最差情景
+    - 最好情景
+    """
+    if len(klines) < 30:
+        return {"error": "需要至少30个交易日数据"}
+
+    closes = [k["close"] for k in klines]
+    current_price = closes[-1]
+
+    # 计算日收益率
+    returns = []
+    for i in range(1, len(closes)):
+        if closes[i-1] > 0:
+            returns.append((closes[i] - closes[i-1]) / closes[i-1])
+
+    if not returns:
+        return {"error": "无法计算收益率"}
+
+    # 运行蒙特卡洛模拟
+    simulation_results = []
+
+    for _ in range(num_simulations):
+        # 随机生成与原始数据等长的价格序列
+        sim_closes = [current_price]
+        for _ in range(len(returns) - 1):
+            r = random.choice(returns)
+            sim_closes.append(sim_closes[-1] * (1 + r))
+
+        # 用模拟价格运行网格回测
+        sim_klines = [{"date": f"sim_{i}", "open": c, "high": c * 1.005, "low": c * 0.995, "close": c, "volume": 1000000}
+                      for i, c in enumerate(sim_closes)]
+
+        try:
+            result = analyze_grid_trading(
+                stock_code="SIM",
+                grid_type=grid_type,
+                num_grids_up=num_grids_up,
+                num_grids_down=num_grids_down,
+                grid_width_pct=grid_width_pct,
+                total_capital=capital,
+                hist_days=len(sim_klines),
+                sizing_method=sizing,
+                stop_loss_pct=0.10,
+                enable_stop_loss=True,
+                atr_multiplier=1.0,
+                _klines_override=sim_klines,
+            )
+            if "error" not in result and "simulation" in result:
+                simulation_results.append({
+                    "total_return": result["simulation"].get("total_return_pct", 0),
+                    "max_drawdown": result["simulation"].get("max_drawdown", 0),
+                    "sharpe": result["simulation"].get("sharpe_ratio", 0),
+                    "win_rate": result["simulation"].get("win_rate", 0),
+                })
+        except Exception:
+            continue
+
+    if not simulation_results:
+        return {"error": "压力测试失败，无法生成有效模拟"}
+
+    # 统计分析
+    returns_list = [s["total_return"] for s in simulation_results]
+    drawdowns = [s["max_drawdown"] for s in simulation_results]
+    sharpes = [s["sharpe"] for s in simulation_results]
+
+    returns_list.sort()
+    drawdowns.sort(reverse=True)  # 最大回撤从大到小
+
+    n = len(returns_list)
+    var_95 = returns_list[int(n * 0.05)] if n > 20 else returns_list[0]
+    cvar_95 = sum(returns_list[:int(n * 0.05)]) / max(int(n * 0.05), 1) if n > 20 else var_95
+
+    return {
+        "num_simulations": len(simulation_results),
+        "return_distribution": {
+            "mean": round(statistics.mean(returns_list), 2),
+            "median": round(statistics.median(returns_list), 2),
+            "std": round(statistics.stdev(returns_list), 2) if len(returns_list) > 1 else 0,
+            "min": round(min(returns_list), 2),
+            "max": round(max(returns_list), 2),
+            "p10": round(returns_list[int(n * 0.1)], 2),
+            "p25": round(returns_list[int(n * 0.25)], 2),
+            "p75": round(returns_list[int(n * 0.75)], 2),
+            "p90": round(returns_list[int(n * 0.9)], 2),
+        },
+        "risk_metrics": {
+            "var_95": round(var_95, 2),
+            "cvar_95": round(cvar_95, 2),
+            "max_drawdown_worst": round(max(drawdowns), 2),
+            "max_drawdown_median": round(statistics.median(drawdowns), 2),
+            "sharpe_mean": round(statistics.mean(sharpes), 2),
+            "probability_of_profit": round(len([r for r in returns_list if r > 0]) / n * 100, 1),
+        },
+        "interpretation": {
+            "var_explanation": f"95%的情况下，最大亏损不会超过{abs(round(var_95, 1))}%",
+            "cvar_explanation": f"最坏5%情景下，平均亏损为{abs(round(cvar_95, 1))}%",
+            "profit_probability": f"盈利概率为{round(len([r for r in returns_list if r > 0]) / n * 100, 1)}%",
+            "recommendation": (
+                "网格策略风险可控，可以执行" if var_95 > -15
+                else "存在一定风险，建议降低仓位或加宽网格" if var_95 > -25
+                else "风险较高，不建议使用当前参数的网格策略"
+            ),
+        },
     }

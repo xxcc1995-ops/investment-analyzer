@@ -9,10 +9,12 @@
 - GET /optimize     → 参数优化（自动找最优参数组合）
 """
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Query, Body
 from app.services.grid_service import (
     analyze_grid_trading, get_philosophy, generate_grid_levels,
-    get_grid_status, optimize_parameters
+    get_grid_status, optimize_parameters,
+    add_to_grid_portfolio, get_grid_portfolio, remove_from_grid_portfolio,
+    detect_grid_decay, stress_test_grid,
 )
 
 router = APIRouter()
@@ -107,4 +109,90 @@ def optimize(
         stock_code=stock_code,
         total_capital=capital,
         hist_days=hist_days,
+    )
+
+
+@router.post("/portfolio/add")
+def portfolio_add(
+    code: str = Body(..., embed=True),
+    name: str = Body(..., embed=True),
+    market: str = Body(..., embed=True),
+    grid_type: str = Body(..., embed=True),
+    grid_width_pct: float = Body(..., embed=True),
+    num_grids: int = Body(..., embed=True),
+    capital: float = Body(..., embed=True),
+    sizing: str = Body(..., embed=True),
+    current_price: float = Body(..., embed=True),
+):
+    """添加网格到组合"""
+    return add_to_grid_portfolio(
+        code=code, name=name, market=market,
+        grid_type=grid_type, grid_width_pct=grid_width_pct,
+        num_grids=num_grids, capital=capital, sizing=sizing,
+        current_price=current_price,
+    )
+
+
+@router.get("/portfolio")
+def portfolio():
+    """获取网格组合"""
+    return get_grid_portfolio()
+
+
+@router.delete("/portfolio/{code}")
+def portfolio_remove(
+    code: str,
+    market: str = Query(..., description="市场"),
+):
+    """从组合中移除网格"""
+    return remove_from_grid_portfolio(code, market)
+
+
+@router.get("/decay")
+def decay(
+    stock_code: str = Query(..., description="股票代码"),
+    lookback: int = Query(20, description="回看天数"),
+):
+    """检测网格衰减"""
+    from app.services.grid_service import _fetch_historical, generate_grid_levels, calculate_atr
+
+    hist_data = _fetch_historical(stock_code, 60)
+    if not hist_data:
+        return {"error": "无法获取历史数据"}
+
+    closes = [d["close"] for d in hist_data]
+    highs = [d["high"] for d in hist_data]
+    lows = [d["low"] for d in hist_data]
+    atr = calculate_atr(highs, lows, closes, 14)
+    current_price = closes[-1]
+
+    levels = generate_grid_levels(current_price, "equal_distance", 10, 10, atr)
+    levels_with_price = [{"price": lv["price"]} for lv in levels] if isinstance(levels, list) and levels and "price" in levels[0] else levels
+
+    return detect_grid_decay(closes, levels_with_price, lookback)
+
+
+@router.get("/stress-test")
+def stress(
+    stock_code: str = Query(..., description="股票代码"),
+    capital: float = Query(1000000, description="总资金"),
+    grid_width_pct: float = Query(2.0, description="网格宽度%"),
+    num_simulations: int = Query(500, description="模拟次数"),
+):
+    """蒙特卡洛压力测试"""
+    from app.services.grid_service import _fetch_historical
+
+    hist_data = _fetch_historical(stock_code, 252)
+    if not hist_data:
+        return {"error": "无法获取历史数据"}
+
+    return stress_test_grid(
+        klines=hist_data,
+        grid_type="equal_distance",
+        num_grids_up=10,
+        num_grids_down=10,
+        grid_width_pct=grid_width_pct,
+        capital=capital,
+        sizing="equal",
+        num_simulations=min(num_simulations, 1000),
     )

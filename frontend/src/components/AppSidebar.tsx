@@ -30,6 +30,7 @@ import {
   AlertOutlined,
   SettingOutlined,
   LinkOutlined,
+  FireOutlined,
 } from '@ant-design/icons'
 import type { MenuProps } from 'antd'
 
@@ -56,7 +57,7 @@ function getItem(
 const menuItems: MenuItem[] = [
   getItem('行情总览', 'market', <LineChartOutlined />, [
     getItem('我的持仓', 'portfolio', <PieChartOutlined />),
-    getItem('海外资讯', 'dailyInfo', <GlobalOutlined />),
+    getItem('每日资讯', 'dailyInfo', <DashboardOutlined />),
     getItem('我的自选', 'stock', <DashboardOutlined />),
     getItem('指数估值', 'indexVal', <BarChartOutlined />),
 
@@ -90,6 +91,7 @@ const menuItems: MenuItem[] = [
   getItem('另类投资', 'alternative', <GlobalOutlined />, [
     getItem('Polymarket', 'polymarket', <GlobalOutlined />),
     getItem('港股打新', 'hki', <RocketOutlined />),
+    getItem('币圈大师', 'cryptoMaster', <FireOutlined />),
   ]),
   getItem('辅助工具', 'tools', <ToolOutlined />, [
     getItem('国家队监控', 'nationalTeam', <SafetyOutlined />),
@@ -97,7 +99,7 @@ const menuItems: MenuItem[] = [
     getItem('决策卫士', 'decisionGuard', <SafetyCertificateOutlined />),
     getItem('APP设置', 'mobileSettings', <SettingOutlined />),
   ]),
-  getItem('推荐工具', 'recommend', <LinkOutlined />, [
+  getItem('量化工具', 'recommend', <LinkOutlined />, [
     getItem(
       <span>QuantDinger <span style={{ fontSize: 10, color: '#8b949e' }}>AI量化平台</span></span>,
       'ext_quantdinger',

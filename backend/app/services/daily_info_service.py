@@ -930,8 +930,26 @@ class DailyInfoService:
         return result
 
     def get_global_market_overview(self) -> Dict[str, Any]:
-        """获取全球市场概览"""
-        return {"indices": [], "currencies": [], "update_time": datetime.now().isoformat()}
+        """获取全球市场概览（A股+港股+美股指数汇总）"""
+        cache_key = "daily_global_market"
+        cached = get_cache(cache_key, 300)
+        if cached:
+            return cached
+        data = _fetch_sina_indices()
+        # 合并所有指数为统一列表
+        all_indices = []
+        for idx in data.get("a_share", []):
+            idx["market"] = "A股"
+            all_indices.append(idx)
+        for idx in data.get("hk", []):
+            idx["market"] = "港股"
+            all_indices.append(idx)
+        for idx in data.get("us", []):
+            idx["market"] = "美股"
+            all_indices.append(idx)
+        result = {"indices": all_indices, "update_time": datetime.now().isoformat()}
+        set_cache(cache_key, result)
+        return result
 
     def get_macro_indicators(self) -> Dict[str, Any]:
         """获取中国宏观数据（低频更新，24小时缓存）"""
@@ -986,8 +1004,57 @@ class DailyInfoService:
         return result
 
     def get_investment_insights(self) -> List[Dict[str, Any]]:
-        """获取投资观点"""
-        return []
+        """获取投资观点（基于市场数据自动生成）"""
+        cache_key = "daily_insights"
+        cached = get_cache(cache_key, 300)
+        if cached:
+            return cached
+        try:
+            indices = _fetch_sina_indices()
+            sectors = _fetch_eastmoney_sectors()
+            fund_flow = _fetch_eastmoney_fund_flow()
+            insights = []
+
+            # 基于指数表现生成观点
+            for idx in indices.get("a_share", []) + indices.get("us", []):
+                pct = idx.get("change_pct", 0)
+                if abs(pct) >= 2:
+                    direction = "大涨" if pct > 0 else "大跌"
+                    insights.append({
+                        "type": "market", "level": "high",
+                        "title": f"{idx['name']}{direction}{abs(pct):.2f}%",
+                        "detail": f"关注{'追高' if pct > 0 else '抄底'}风险",
+                    })
+
+            # 基于板块分化
+            if sectors:
+                top = max(sectors, key=lambda s: s.get("change_pct", 0))
+                bottom = min(sectors, key=lambda s: s.get("change_pct", 0))
+                spread = top.get("change_pct", 0) - bottom.get("change_pct", 0)
+                if spread > 5:
+                    insights.append({
+                        "type": "sector", "level": "medium",
+                        "title": f"板块分化：{top['name']} vs {bottom['name']}（差{spread:.1f}pct）",
+                        "detail": "市场风格切换频繁，短线操作难度大",
+                    })
+
+            # 基于资金流向
+            if fund_flow:
+                total_net = sum(f.get("main_net_inflow", 0) for f in fund_flow[:10])
+                net_yi = total_net / 1e8
+                if abs(net_yi) > 50:
+                    direction = "流入" if net_yi > 0 else "流出"
+                    insights.append({
+                        "type": "fund_flow", "level": "high",
+                        "title": f"主力资金{direction}{abs(net_yi):.0f}亿",
+                        "detail": "关注市场主力意图",
+                    })
+
+            set_cache(cache_key, insights)
+            return insights
+        except Exception as e:
+            logger.warning(f"投资观点生成失败: {e}")
+            return []
 
     def get_market_sentiment(self) -> Dict[str, Any]:
         """获取市场情绪（v3: 含多维评分）"""

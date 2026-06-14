@@ -3,6 +3,8 @@ import axios from 'axios'
 import ReactECharts from 'echarts-for-react'
 import { Tooltip } from 'antd'
 import { PageSection, TabBar, StatCard, StatCardGroup, LoadingSpinner, EmptyState, ProgressBar } from '../components/ui'
+import { useTradingInterceptor } from '../hooks/useTradingInterceptor'
+import RationalCheckpoint from '../components/RationalCheckpoint'
 
 const API_BASE = '/api'
 
@@ -220,6 +222,9 @@ export default function RightSideTrading() {
   const [backtestLoading, setBacktestLoading] = useState(false)
   const [activeTab, setActiveTab] = useState<'analysis' | 'backtest'>('analysis')
 
+  // 交易拦截器
+  const { intercept, checkpointOpen, checkpointMeta, handlePass, handleCancel } = useTradingInterceptor()
+
   const handleSearch = useCallback(async (keyword: string) => {
     if (!keyword.trim()) { setSearchResults([]); return }
     try {
@@ -246,10 +251,10 @@ export default function RightSideTrading() {
     setStockSearch('')
     setShowSearch(false)
     setBacktest(null)
-    loadAnalysis(code)
+    doLoadAnalysis(code) // 直接分析，不触发拦截器（选择股票不是交易决策）
   }
 
-  const loadAnalysis = async (code: string) => {
+  const doLoadAnalysis = async (code: string) => {
     if (!code) return
     setLoading(true)
     setError('')
@@ -262,6 +267,13 @@ export default function RightSideTrading() {
     } finally {
       setLoading(false)
     }
+  }
+
+  const loadAnalysis = (code: string) => {
+    intercept(() => doLoadAnalysis(code), {
+      actionType: 'analyze',
+      target: code,
+    })
   }
 
   const loadBacktest = async () => {
@@ -1071,6 +1083,15 @@ export default function RightSideTrading() {
           <div style={{ fontSize: 13 }}>支持A股和港股 · 多时间框架 · ADX环境判断 · Weinstein阶段分析</div>
         </div>
       )}
+
+      {/* 理性检查点 */}
+      <RationalCheckpoint
+        open={checkpointOpen}
+        actionType={checkpointMeta.actionType}
+        target={checkpointMeta.target}
+        onPass={handlePass}
+        onCancel={handleCancel}
+      />
     </div>
   )
 }

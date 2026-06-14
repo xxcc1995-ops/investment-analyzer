@@ -49,7 +49,7 @@ STRATEGIES = {
         'name': '安道全面值策略',
         'description': '面值附近买入，130元卖出。规则极简，适合新手。',
         'filter': lambda b: (
-            b['price'] <= 105
+            b['price'] <= 110
             and b.get('rating_order', 0) >= 3  # AA-及以上
         ),
         'sort_key': lambda b: b['price'],  # 价格越低越优先
@@ -58,8 +58,8 @@ STRATEGIES = {
     },
     'dual_low': {
         'name': '双低策略',
-        'description': '低价格+低溢价率，经典量化轮动。回测用 price≤115 近似 double_low≤130。',
-        'filter': lambda b: b['price'] <= 115,
+        'description': '低价格+低溢价率，经典量化轮动。回测用 price≤125 近似 double_low≤130。',
+        'filter': lambda b: b['price'] <= 125,
         'sort_key': lambda b: b['price'],
         'reverse': False,
         'sell_rule': 'price >= 130 or not in top_n',
@@ -68,23 +68,23 @@ STRATEGIES = {
         'name': '摊大饼策略',
         'description': '不选股，买一篮子低价转债，靠概率取胜。',
         'filter': lambda b: (
-            b['price'] <= 120
+            b['price'] <= 130
             and b.get('rating_order', 0) >= 1  # A-及以上
         ),
         'sort_key': lambda b: b['price'],
         'reverse': False,
-        'sell_rule': 'price >= 130 or not in top_n',
+        'sell_rule': 'price >= 140 or not in top_n',
     },
     'ytm_defense': {
         'name': 'YTM保本策略',
-        'description': '只买到期收益率为正的转债，持有到期保证不亏。回测用 price≤105 近似 YTM>0。',
+        'description': '只买到期收益率为正的转债，持有到期保证不亏。回测用 price≤110 近似 YTM>0。',
         'filter': lambda b: (
-            b['price'] <= 105
+            b['price'] <= 110
             and b.get('rating_order', 0) >= 4  # AA及以上
         ),
         'sort_key': lambda b: b['price'],
         'reverse': False,
-        'sell_rule': 'price >= 120 or rating_downgrade',
+        'sell_rule': 'price >= 125 or rating_downgrade',
     },
     'revision_game': {
         'name': '下修博弈策略',
@@ -393,25 +393,24 @@ def run_cb_backtest(
         if filtered_codes:
             all_codes = filtered_codes
 
-    # 限制数量（按发行规模排序取前MAX_BONDS只）
+    # 限制数量（优先选择上市时间早的转债，确保有足够历史数据）
     MAX_BONDS = 200
     if len(all_codes) > MAX_BONDS:
-        # 优先选择发行规模大的转债
-        size_map = {}
+        # 优先选择上市时间早的转债（有更长的历史数据）
+        list_date_map = {}
         for _, row in universe.iterrows():
             code = str(row.get('code', ''))
-            size = 0
-            for col in universe.columns:
-                if 'iss' in str(col).lower() or '规模' in str(col) or '模' in str(col):
-                    try:
-                        size = float(row.get(col, 0) or 0)
-                    except (ValueError, TypeError):
-                        pass
-                    break
-            size_map[code] = size
-        all_codes.sort(key=lambda c: size_map.get(c, 0), reverse=True)
+            list_date = row.get('list_date')
+            if pd.notna(list_date):
+                try:
+                    list_date_map[code] = pd.to_datetime(list_date)
+                except Exception:
+                    list_date_map[code] = pd.Timestamp.max
+            else:
+                list_date_map[code] = pd.Timestamp.max
+        all_codes.sort(key=lambda c: list_date_map.get(c, pd.Timestamp.max))
         all_codes = all_codes[:MAX_BONDS]
-        logger.info(f"转债数量过多，按发行规模选取前 {MAX_BONDS} 只")
+        logger.info(f"转债数量过多，按上市时间选取前 {MAX_BONDS} 只（优先选择历史数据长的）")
 
     logger.info(f"开始获取 {len(all_codes)} 只转债的历史价格数据...")
 

@@ -3010,3 +3010,177 @@ def backtest_right_side(stock_code: str) -> dict:
     except Exception as e:
         logger.error(f"backtest_right_side failed for {stock_code}: {e}")
         return {'error': f'回测失败: {str(e)}', 'code': stock_code}
+
+
+# ============================================================
+# 专家级：批量扫描
+# ============================================================
+
+def batch_scan_right_side(
+    market: str = "all",
+    min_score: float = 0,
+    limit: int = 50,
+) -> dict:
+    """
+    批量扫描全市场股票的右侧信号
+
+    返回按分数排序的列表，用于快速发现机会。
+    """
+    from app.services.jc_service import A_STOCKS_LIST, HK_STOCKS_LIST
+
+    stocks = []
+    if market in ("A", "all"):
+        stocks.extend([(c, "A") for c in A_STOCKS_LIST])
+    if market in ("HK", "all"):
+        stocks.extend([(c, "HK") for c in HK_STOCKS_LIST])
+
+    results = []
+    for code, mkt in stocks:
+        try:
+            result = analyze_right_side(code)
+            if "error" in result:
+                continue
+            score = result.get("score", 0)
+            if score >= min_score:
+                results.append({
+                    "code": code,
+                    "name": result.get("code", code),
+                    "market": mkt,
+                    "score": score,
+                    "verdict": result.get("verdict", ""),
+                    "market_regime": result.get("market_regime", {}).get("regime", ""),
+                    "weinstein_stage": result.get("weinstein_stage", {}).get("stage", 0),
+                    "risk_reward": result.get("risk_management", {}).get("risk_reward", {}),
+                    "entry_type": result.get("entry_plan", {}).get("entry_type", "none"),
+                })
+        except Exception:
+            continue
+
+    # 按分数排序
+    results.sort(key=lambda x: x["score"], reverse=True)
+    results = results[:limit]
+
+    return {
+        "results": results,
+        "total": len(results),
+        "market": market,
+        "min_score": min_score,
+        "update_time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+    }
+
+
+# ============================================================
+# 专家级：板块轮动分析
+# ============================================================
+
+def analyze_sector_rotation() -> dict:
+    """
+    板块轮动分析
+
+    使用东方财富行业分类API获取板块数据，计算各板块近5/10/20日涨跌幅，
+    返回板块强度排名和轮动方向。
+    """
+    try:
+        # 东方财富行业板块API
+        url = "https://push2.eastmoney.com/api/qt/clist/get"
+        params = {
+            "pn": 1,
+            "pz": 50,
+            "po": 1,
+            "np": 1,
+            "fltt": 2,
+            "invt": 2,
+            "fid": "f3",
+            "fs": "m:90+t:2",  # 行业板块
+            "fields": "f2,f3,f4,f12,f14,f104,f105,f128,f136,f140",
+        }
+        r = requests.get(url, params=params, timeout=10)
+        data = r.json()
+
+        sectors = []
+        if data.get("data") and data["data"].get("diff"):
+            for item in data["data"]["diff"]:
+                sectors.append({
+                    "code": item.get("f12", ""),
+                    "name": item.get("f14", ""),
+                    "change_pct": item.get("f3", 0),
+                    "up_count": item.get("f104", 0),
+                    "down_count": item.get("f105", 0),
+                    "lead_stock": item.get("f140", ""),
+                    "lead_change": item.get("f136", 0),
+                })
+
+        # 按涨跌幅排序
+        sectors.sort(key=lambda x: x.get("change_pct", 0), reverse=True)
+
+        # 板块强度分类
+        strong = [s for s in sectors if s.get("change_pct", 0) > 1]
+        weak = [s for s in sectors if s.get("change_pct", 0) < -1]
+
+        return {
+            "sectors": sectors[:30],
+            "total": len(sectors),
+            "strong_sectors": strong[:5],
+            "weak_sectors": weak[-5:] if weak else [],
+            "market_mood": (
+                "强势" if len(strong) > len(sectors) * 0.6
+                else "偏弱" if len(weak) > len(sectors) * 0.6
+                else "分化"
+            ),
+            "update_time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        }
+    except Exception as e:
+        logger.error(f"analyze_sector_rotation failed: {e}")
+        return {"error": f"板块轮动分析失败: {str(e)}", "sectors": []}
+
+
+# ============================================================
+# 专家级：信号表现跟踪
+# ============================================================
+
+def get_signal_performance_history(stock_code: str) -> dict:
+    """
+    获取某只股票的历史信号及后续表现
+
+    用于评估该股票的右侧信号是否可靠。
+    """
+    result = backtest_right_side(stock_code)
+    if "error" in result:
+        return result
+
+    signals = result.get("signals", [])
+    stats = result.get("stats", {})
+
+    # 为每个信号添加质量标签
+    for s in signals:
+        ret_20d = s.get("returns", {}).get("20d")
+        if ret_20d is not None:
+            if ret_20d > 5:
+                s["quality"] = "excellent"
+                s["quality_label"] = "🏆 优秀信号"
+            elif ret_20d > 0:
+                s["quality"] = "good"
+                s["quality_label"] = "✅ 盈利信号"
+            elif ret_20d > -3:
+                s["quality"] = "neutral"
+                s["quality_label"] = "➖ 持平"
+            else:
+                s["quality"] = "bad"
+                s["quality_label"] = "❌ 亏损信号"
+
+    return {
+        "stock_code": stock_code,
+        "signals": signals,
+        "stats": stats,
+        "reliability": (
+            "高可靠" if stats.get("win_rate_20d", 0) > 60
+            else "中等可靠" if stats.get("win_rate_20d", 0) > 45
+            else "低可靠"
+        ),
+        "recommendation": (
+            f"该股票右侧信号胜率{stats.get('win_rate_20d', 0)}%，"
+            f"平均20日收益{stats.get('avg_return_20d', 0)}%，"
+            + ("信号可靠，可以参考" if stats.get("win_rate_20d", 0) > 55 else "信号不太可靠，需谨慎")
+        ),
+        "update_time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+    }

@@ -119,7 +119,7 @@ interface PyramidOrder {
 // ============================================================
 
 export default function TTrading() {
-  const [activeTab, setActiveTab] = useState<'signals' | 'position' | 'cost' | 'backtest' | 'risk' | 'philosophy'>('signals')
+  const [activeTab, setActiveTab] = useState<'signals' | 'position' | 'cost' | 'backtest' | 'risk' | 'analytics' | 'journal' | 'philosophy'>('signals')
 
   // Signals state
   const [signals, setSignals] = useState<TSignalItem[]>([])
@@ -145,6 +145,15 @@ export default function TTrading() {
 
   // Philosophy state
   const [philosophy, setPhilosophy] = useState<any>(null)
+
+  // Analytics state
+  const [analytics, setAnalytics] = useState<any>(null)
+  const [analyticsLoading, setAnalyticsLoading] = useState(false)
+
+  // Journal state
+  const [journal, setJournal] = useState<any>(null)
+  const [journalLoading, setJournalLoading] = useState(false)
+  const [journalFilter, setJournalFilter] = useState<'all' | 'win' | 'lose'>('all')
 
   // 交易拦截器
   const { intercept, checkpointOpen, checkpointMeta, handlePass, handleCancel } = useTradingInterceptor()
@@ -232,7 +241,35 @@ export default function TTrading() {
     if (activeTab === 'philosophy' && !philosophy) loadPhilosophy()
     if (activeTab === 'backtest') { /* user triggers manually */ }
     if (activeTab === 'risk') loadRisk()
+    if (activeTab === 'analytics') loadAnalytics()
+    if (activeTab === 'journal') loadJournal()
   }, [activeTab, loadSignals, loadPositions, loadPhilosophy, loadRisk])
+
+  const loadAnalytics = useCallback(async () => {
+    setAnalyticsLoading(true)
+    try {
+      const res = await axios.get(`${API_BASE}/analytics`)
+      setAnalytics(res.data)
+    } catch (e) {
+      console.error('加载盈亏分析失败:', e)
+    } finally {
+      setAnalyticsLoading(false)
+    }
+  }, [])
+
+  const loadJournal = useCallback(async () => {
+    setJournalLoading(true)
+    try {
+      const params: any = { limit: 50 }
+      if (journalFilter !== 'all') params.pnl_filter = journalFilter
+      const res = await axios.get(`${API_BASE}/journal`, { params })
+      setJournal(res.data)
+    } catch (e) {
+      console.error('加载交易日志失败:', e)
+    } finally {
+      setJournalLoading(false)
+    }
+  }, [journalFilter])
 
   // ============================================================
   // Handlers
@@ -404,6 +441,8 @@ export default function TTrading() {
           { key: 'cost', label: '成本追踪' },
           { key: 'backtest', label: '回测验证' },
           { key: 'risk', label: '风险监控' },
+          { key: 'analytics', label: '📊 盈亏分析' },
+          { key: 'journal', label: '📋 交易日志' },
           { key: 'philosophy', label: '做T方法论' },
         ]}
         style={{ marginBottom: 16 }}
@@ -567,6 +606,21 @@ export default function TTrading() {
 
                             {/* Trend & Weighted Score Row */}
                             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12, marginBottom: 12 }}>
+                              {/* Support/Resistance */}
+                              {sig.indicators.support_resistance && (
+                                <div style={{ padding: 10, background: 'var(--bg-primary)', borderRadius: 6, border: '1px solid var(--border-primary)' }}>
+                                  <div style={{ fontSize: 11, color: 'var(--text-secondary)', marginBottom: 4 }}>支撑/阻力</div>
+                                  <div style={{ fontSize: 12 }}>
+                                    <span style={{ color: '#3fb950' }}>支撑: ¥{sig.indicators.support_resistance.support_1}</span>
+                                  </div>
+                                  <div style={{ fontSize: 12 }}>
+                                    <span style={{ color: '#f85149' }}>阻力: ¥{sig.indicators.support_resistance.resistance_1}</span>
+                                  </div>
+                                  <div style={{ fontSize: 11, color: 'var(--text-secondary)' }}>
+                                    枢轴: ¥{sig.indicators.support_resistance.pivot}
+                                  </div>
+                                </div>
+                              )}
                               {sig.indicators.trend && (
                                 <div style={{ padding: 10, background: 'var(--bg-primary)', borderRadius: 6, border: '1px solid var(--border-primary)' }}>
                                   <div style={{ fontSize: 11, color: 'var(--text-secondary)', marginBottom: 4 }}>趋势过滤器</div>
@@ -1093,7 +1147,244 @@ export default function TTrading() {
         </div>
       )}
 
-      {/* ==================== Tab 6: 做T方法论 ==================== */}
+      {/* ==================== Tab 7: 盈亏分析 ==================== */}
+      {activeTab === 'analytics' && (
+        <div>
+          {analyticsLoading ? (
+            <LoadingSpinner text="计算盈亏分析..." />
+          ) : analytics && analytics.summary ? (
+            <div>
+              {/* 综合评分 */}
+              <div style={{
+                background: 'var(--bg-secondary)', borderRadius: 12, padding: 20, marginBottom: 16,
+                border: `2px solid ${analytics.summary.quality_score >= 70 ? '#3fb950' : analytics.summary.quality_score >= 40 ? '#d29922' : '#f85149'}`,
+                textAlign: 'center',
+              }}>
+                <div style={{ fontSize: 13, color: 'var(--text-secondary)', marginBottom: 4 }}>交易质量评分</div>
+                <div style={{
+                  fontSize: 56, fontWeight: 800,
+                  color: analytics.summary.quality_score >= 70 ? '#3fb950' : analytics.summary.quality_score >= 40 ? '#d29922' : '#f85149',
+                }}>
+                  {analytics.summary.quality_score}
+                </div>
+                <div style={{ fontSize: 12, color: 'var(--text-secondary)' }}>/ 100分</div>
+                <div style={{ marginTop: 8, fontSize: 13, color: 'var(--text-secondary)' }}>
+                  {analytics.summary.quality_score >= 70 ? '🏆 优秀交易者' :
+                   analytics.summary.quality_score >= 50 ? '✅ 合格交易者' :
+                   analytics.summary.quality_score >= 30 ? '⚠️ 需要改进' : '❌ 需要重新审视策略'}
+                </div>
+              </div>
+
+              {/* 核心指标 */}
+              <StatCardGroup columns={5} style={{ marginBottom: 16 }}>
+                <StatCard label="总交易次数" value={analytics.summary.sell_trades} />
+                <StatCard label="胜率" value={`${analytics.summary.win_rate}%`}
+                  color={analytics.summary.win_rate > 50 ? '#3fb950' : '#f85149'} />
+                <StatCard label="总盈亏" value={`¥${analytics.summary.total_pnl.toLocaleString()}`}
+                  color={analytics.summary.total_pnl >= 0 ? '#3fb950' : '#f85149'} />
+                <StatCard label="盈亏比" value={String(analytics.summary.profit_factor)}
+                  color={analytics.summary.profit_factor > 1 ? '#3fb950' : '#f85149'} />
+                <StatCard label="累计手续费" value={`¥${analytics.summary.total_fees.toLocaleString()}`} color="#d29922" />
+              </StatCardGroup>
+
+              {/* 连续盈亏 */}
+              {analytics.streaks && (
+                <div style={{ background: 'var(--bg-secondary)', borderRadius: 8, padding: 14, marginBottom: 16, border: '1px solid var(--border-primary)' }}>
+                  <div style={{ display: 'flex', gap: 24, alignItems: 'center' }}>
+                    <div>
+                      <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>当前状态: </span>
+                      <span style={{ fontSize: 15, fontWeight: 700, color: analytics.streaks.current_type === 'win' ? '#3fb950' : '#f85149' }}>
+                        {analytics.streaks.current_label}
+                      </span>
+                    </div>
+                    <div>
+                      <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>最长连胜: </span>
+                      <span style={{ fontSize: 15, fontWeight: 700, color: '#3fb950' }}>{analytics.streaks.max_win_streak}笔</span>
+                    </div>
+                    <div>
+                      <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>最长连亏: </span>
+                      <span style={{ fontSize: 15, fontWeight: 700, color: '#f85149' }}>{analytics.streaks.max_lose_streak}笔</span>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* 按星期几分析 */}
+              {analytics.weekday_analysis && analytics.weekday_analysis.length > 0 && (
+                <div style={{ background: 'var(--bg-secondary)', borderRadius: 8, padding: 16, marginBottom: 16, border: '1px solid var(--border-primary)' }}>
+                  <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 12 }}>📅 星期几做T效果最好？</div>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 8 }}>
+                    {analytics.weekday_analysis.map((w: any) => (
+                      <div key={w.weekday_num} style={{
+                        background: 'var(--bg-primary)', borderRadius: 8, padding: 12, textAlign: 'center',
+                        border: w.total_pnl > 0 ? '1px solid #3fb95040' : w.total_pnl < 0 ? '1px solid #f8514940' : '1px solid var(--border-primary)',
+                      }}>
+                        <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 4 }}>{w.weekday}</div>
+                        <div style={{ fontSize: 11, color: 'var(--text-secondary)' }}>{w.trade_count}笔</div>
+                        <div style={{ fontSize: 13, fontWeight: 600, color: w.win_rate > 50 ? '#3fb950' : '#f85149' }}>
+                          {w.win_rate}%
+                        </div>
+                        <div style={{ fontSize: 12, fontWeight: 600, color: w.total_pnl >= 0 ? '#3fb950' : '#f85149' }}>
+                          ¥{w.total_pnl.toLocaleString()}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* 上午 vs 下午 */}
+              {analytics.session_analysis && (
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 16 }}>
+                  {Object.entries(analytics.session_analysis).map(([key, s]: [string, any]) => (
+                    <div key={key} style={{ background: 'var(--bg-secondary)', borderRadius: 8, padding: 14, border: '1px solid var(--border-primary)' }}>
+                      <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 8 }}>{s.label}</div>
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+                        <div><span style={{ color: 'var(--text-secondary)', fontSize: 12 }}>交易: </span><span style={{ fontWeight: 600 }}>{s.trade_count}笔</span></div>
+                        <div><span style={{ color: 'var(--text-secondary)', fontSize: 12 }}>胜率: </span><span style={{ fontWeight: 600, color: s.win_rate > 50 ? '#3fb950' : '#f85149' }}>{s.win_rate}%</span></div>
+                        <div><span style={{ color: 'var(--text-secondary)', fontSize: 12 }}>总盈亏: </span><span style={{ fontWeight: 600, color: s.total_pnl >= 0 ? '#3fb950' : '#f85149' }}>¥{s.total_pnl.toLocaleString()}</span></div>
+                        <div><span style={{ color: 'var(--text-secondary)', fontSize: 12 }}>平均: </span><span style={{ fontWeight: 600, color: s.avg_pnl >= 0 ? '#3fb950' : '#f85149' }}>¥{s.avg_pnl}</span></div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* 频率分析 */}
+              {analytics.frequency_analysis && (
+                <div style={{ background: 'var(--bg-secondary)', borderRadius: 8, padding: 14, marginBottom: 16, border: '1px solid var(--border-primary)' }}>
+                  <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 8 }}>⚡ 交易频率分析</div>
+                  <div style={{ display: 'flex', gap: 24, fontSize: 13 }}>
+                    <div>日均交易: <span style={{ fontWeight: 700 }}>{analytics.frequency_analysis.avg_daily_trades}笔</span></div>
+                    <div>高频日均盈亏: <span style={{ fontWeight: 700, color: analytics.frequency_analysis.high_freq_avg_pnl >= 0 ? '#3fb950' : '#f85149' }}>¥{analytics.frequency_analysis.high_freq_avg_pnl}</span></div>
+                    <div>低频日均盈亏: <span style={{ fontWeight: 700, color: analytics.frequency_analysis.low_freq_avg_pnl >= 0 ? '#3fb950' : '#f85149' }}>¥{analytics.frequency_analysis.low_freq_avg_pnl}</span></div>
+                  </div>
+                  <div style={{ marginTop: 6, fontSize: 12, color: '#58a6ff' }}>💡 {analytics.frequency_analysis.insight}</div>
+                </div>
+              )}
+
+              {/* 按股票分析 */}
+              {analytics.stock_analysis && analytics.stock_analysis.length > 0 && (
+                <div style={{ background: 'var(--bg-secondary)', borderRadius: 8, padding: 16, marginBottom: 16, border: '1px solid var(--border-primary)' }}>
+                  <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 8 }}>📈 哪些股票做T效果好？</div>
+                  <table style={{ width: '100%', fontSize: 12 }}>
+                    <thead>
+                      <tr style={{ color: 'var(--text-secondary)' }}>
+                        <th style={{ textAlign: 'left', padding: '4px 8px' }}>代码</th>
+                        <th style={{ textAlign: 'right', padding: '4px 8px' }}>交易次数</th>
+                        <th style={{ textAlign: 'right', padding: '4px 8px' }}>胜率</th>
+                        <th style={{ textAlign: 'right', padding: '4px 8px' }}>总盈亏</th>
+                        <th style={{ textAlign: 'right', padding: '4px 8px' }}>平均盈亏</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {analytics.stock_analysis.map((s: any) => (
+                        <tr key={s.code}>
+                          <td style={{ padding: '4px 8px', fontFamily: 'monospace' }}>{s.code}</td>
+                          <td style={{ padding: '4px 8px', textAlign: 'right' }}>{s.trade_count}</td>
+                          <td style={{ padding: '4px 8px', textAlign: 'right', color: s.win_rate > 50 ? '#3fb950' : '#f85149' }}>{s.win_rate}%</td>
+                          <td style={{ padding: '4px 8px', textAlign: 'right', color: s.total_pnl >= 0 ? '#3fb950' : '#f85149', fontWeight: 600 }}>¥{s.total_pnl.toLocaleString()}</td>
+                          <td style={{ padding: '4px 8px', textAlign: 'right', color: s.avg_pnl >= 0 ? '#3fb950' : '#f85149' }}>¥{s.avg_pnl}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+
+              {/* 最佳/最差交易 */}
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 16 }}>
+                <div style={{ background: 'var(--bg-secondary)', borderRadius: 8, padding: 14, border: '1px solid var(--border-primary)' }}>
+                  <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 8, color: '#3fb950' }}>🏆 最佳交易</div>
+                  {(analytics.best_trades || []).map((t: any, i: number) => (
+                    <div key={i} style={{ display: 'flex', justifyContent: 'space-between', padding: '4px 0', borderBottom: '1px solid var(--border-primary)', fontSize: 12 }}>
+                      <span>{t.code} · {t.time?.slice(5, 16)}</span>
+                      <span style={{ color: '#3fb950', fontWeight: 600 }}>+¥{(t.pnl || 0).toLocaleString()}</span>
+                    </div>
+                  ))}
+                </div>
+                <div style={{ background: 'var(--bg-secondary)', borderRadius: 8, padding: 14, border: '1px solid var(--border-primary)' }}>
+                  <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 8, color: '#f85149' }}>❌ 最差交易</div>
+                  {(analytics.worst_trades || []).map((t: any, i: number) => (
+                    <div key={i} style={{ display: 'flex', justifyContent: 'space-between', padding: '4px 0', borderBottom: '1px solid var(--border-primary)', fontSize: 12 }}>
+                      <span>{t.code} · {t.time?.slice(5, 16)}</span>
+                      <span style={{ color: '#f85149', fontWeight: 600 }}>¥{(t.pnl || 0).toLocaleString()}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          ) : (
+            <EmptyState title="暂无分析数据" description="执行几笔做T交易后，这里会显示详细的盈亏分析" />
+          )}
+        </div>
+      )}
+
+      {/* ==================== Tab 8: 交易日志 ==================== */}
+      {activeTab === 'journal' && (
+        <div>
+          {/* 筛选栏 */}
+          <div style={{ display: 'flex', gap: 12, marginBottom: 16, alignItems: 'center' }}>
+            <select value={journalFilter} onChange={e => setJournalFilter(e.target.value as any)}
+              style={{ padding: '6px 10px', borderRadius: 6, background: 'var(--bg-secondary)', color: 'var(--text-primary)', border: '1px solid var(--border-primary)' }}>
+              <option value="all">全部交易</option>
+              <option value="win">仅盈利</option>
+              <option value="lose">仅亏损</option>
+            </select>
+            <button onClick={loadJournal}
+              style={{ padding: '6px 16px', borderRadius: 6, background: '#58a6ff', color: '#fff', border: 'none', cursor: 'pointer', fontWeight: 600 }}>
+              刷新
+            </button>
+            {journal && (
+              <span style={{ color: 'var(--text-secondary)', fontSize: 12 }}>共 {journal.total} 笔</span>
+            )}
+          </div>
+
+          {journalLoading ? (
+            <LoadingSpinner text="加载交易日志..." />
+          ) : journal && journal.journal && journal.journal.length > 0 ? (
+            <div>
+              {journal.journal.map((t: any, i: number) => (
+                <div key={i} style={{
+                  background: 'var(--bg-secondary)', borderRadius: 8, padding: 14, marginBottom: 8,
+                  border: `1px solid ${t.pnl > 0 ? '#3fb95030' : t.pnl < 0 ? '#f8514930' : 'var(--border-primary)'}`,
+                }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
+                      <span style={{
+                        padding: '2px 8px', borderRadius: 8, fontSize: 11, fontWeight: 600,
+                        background: t.quality === 'great' ? '#3fb95020' : t.quality === 'good' ? '#3fb95015' : t.quality === 'bad' ? '#f8514920' : '#d2992220',
+                        color: t.quality === 'great' ? '#3fb950' : t.quality === 'good' ? '#3fb950' : t.quality === 'bad' ? '#f85149' : '#d29922',
+                      }}>
+                        {t.quality_label}
+                      </span>
+                      <span style={{ fontFamily: 'monospace', fontWeight: 600 }}>{t.code}</span>
+                      <span style={{ color: 'var(--text-secondary)', fontSize: 12 }}>{t.market}</span>
+                    </div>
+                    <div style={{ display: 'flex', gap: 16, alignItems: 'center' }}>
+                      <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>{t.time}</span>
+                      <span style={{ fontSize: 16, fontWeight: 700, color: t.pnl >= 0 ? '#3fb950' : '#f85149' }}>
+                        {t.pnl >= 0 ? '+' : ''}¥{(t.pnl || 0).toLocaleString()}
+                      </span>
+                    </div>
+                  </div>
+                  <div style={{ display: 'flex', gap: 16, marginTop: 6, fontSize: 12, color: 'var(--text-secondary)' }}>
+                    <span>{t.shares}股 × ¥{t.price}</span>
+                    <span>手续费 ¥{t.fee}</span>
+                    {t.hold_hours != null && <span>持有 {t.hold_hours}h</span>}
+                    {t.pnl_pct !== 0 && <span>收益率 {t.pnl_pct}%</span>}
+                    {t.note && <span style={{ color: '#58a6ff' }}>📝 {t.note}</span>}
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <EmptyState title="暂无交易日志" description="执行做T操作后，交易记录会显示在这里" />
+          )}
+        </div>
+      )}
+
+      {/* ==================== Tab 9: 做T方法论 ==================== */}
       {activeTab === 'philosophy' && philosophy && (
         <div>
           <div className="arb-notes" style={{ marginBottom: 16 }}>
