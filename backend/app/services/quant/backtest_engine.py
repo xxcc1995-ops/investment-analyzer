@@ -33,6 +33,7 @@ from .strategy_multi_factor import MultiFactorStrategy
 from .strategy_mean_reversion import MeanReversionStrategy
 from .strategy_trend_following import TrendFollowingStrategy
 from .strategy_pairs_trading import PairsTradingStrategy
+from .strategy_reversal import ReversalStrategy
 
 logger = logging.getLogger(__name__)
 
@@ -41,6 +42,7 @@ STRATEGY_REGISTRY = {
     'mean_reversion': MeanReversionStrategy,
     'trend_following': TrendFollowingStrategy,
     'pairs_trading': PairsTradingStrategy,
+    'reversal': ReversalStrategy,
 }
 
 

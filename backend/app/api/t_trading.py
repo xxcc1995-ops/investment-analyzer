@@ -28,7 +28,7 @@ from app.services.t_position_service import (
     init_position, get_all_positions, get_position,
     execute_t_trade, get_trade_history, calc_cost_analysis,
     delete_position, reset_all, get_risk_summary,
-    get_trade_analytics, get_trade_journal,
+    get_trade_analytics, get_trade_journal, check_trading_alerts,
 )
 from app.services.grid_service import calculate_atr
 
@@ -302,6 +302,22 @@ def journal(
         start_date=start_date, end_date=end_date,
         pnl_filter=pnl_filter, limit=limit,
     )
+
+
+@router.get("/alerts")
+def alerts():
+    """
+    自动告警系统 — 检查所有持仓的告警条件
+
+    告警类型：
+    - 止损预警 — 价格接近止损位
+    - 做T仓超限 — 做T仓占比过高
+    - 连续亏损 — 连续亏损达到阈值
+    - 手续费过高 — 累计手续费占比过大
+    - 今日交易频次 — 接近或达到每日上限
+    - 负成本达成 — 做T回收超过投入
+    """
+    return check_trading_alerts()
 
 
 @router.delete("/position/{code}")

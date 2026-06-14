@@ -1175,9 +1175,24 @@
       "impact_reason": "一般资讯",
       "tags": [],
       "collected_at": "2026-06-14T23:28:07.961219"
+    },
+    {
+      "hash": "8a39d652011a",
+      "source": "The Block",
+      "source_tier": 1,
+      "source_lang": "en",
+      "source_category": "news",
+      "title": "Trump-backed World Liberty Financial to fund UFC fighter bonuses in USD1 stablecoin at White House event",
+      "url": "https://www.theblock.co/post/404697/trump-backed-world-liberty-financial-to-fund-ufc-fighter-bonuses-in-usd1-stablecoin-at-white-house-event?utm_source=rss&utm_medium=rss",
+      "summary": "<p>The deal puts USD1 branding inside the Octagon at an event held on the White House South Lawn, on President Trump's 80th birthday.</p>",
+      "published": "Sun, 14 Jun 2026 11:44:41 -0400",
+      "impact": "low",
+      "impact_reason": "一般资讯",
+      "tags": [],
+      "collected_at": "2026-06-14T23:58:38.507558"
     }
   ],
-  "last_crawl": "2026-06-14T23:28:25.020825",
+  "last_crawl": "2026-06-15T00:29:55.661217",
   "sources": {
     "CoinDesk": {
       "status": "ok",
@@ -1187,27 +1202,27 @@
     "The Block": {
       "status": "ok",
       "fetched": 19,
-      "new": 15
+      "new": 0
     },
     "CoinTelegraph": {
       "status": "ok",
       "fetched": 20,
-      "new": 15
+      "new": 0
     },
     "Decrypt": {
       "status": "ok",
       "fetched": 20,
-      "new": 15
+      "new": 0
     },
     "Bitcoin Magazine": {
       "status": "ok",
       "fetched": 10,
-      "new": 10
+      "new": 0
     },
     "The Defiant": {
       "status": "ok",
       "fetched": 20,
-      "new": 15
+      "new": 0
     },
     "Bankless": {
       "status": "ok",

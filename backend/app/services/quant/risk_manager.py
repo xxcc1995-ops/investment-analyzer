@@ -22,14 +22,14 @@ logger = logging.getLogger(__name__)
 @dataclass
 class RiskConfig:
     """风险管理配置"""
-    # 个股止损
-    stop_loss_pct: float = -0.08        # 硬止损 -8%
-    trailing_stop_pct: float = -0.12    # 移动止损 -12%
+    # 个股止损（宽松版，避免频繁止损）
+    stop_loss_pct: float = -0.15        # 硬止损 -15%（放宽，给策略更多空间）
+    trailing_stop_pct: float = -0.20    # 移动止损 -20%
 
-    # 组合回撤控制（宽松版，避免过早清仓）
-    drawdown_warn: float = -0.10        # 警戒线 -10%
-    drawdown_reduce: float = -0.20      # 减仓线 -20%
-    drawdown_close: float = -0.30       # 清仓线 -30%
+    # 组合回撤控制（更宽松，避免在熊市中被清仓）
+    drawdown_warn: float = -0.15        # 警戒线 -15%
+    drawdown_reduce: float = -0.25      # 减仓线 -25%
+    drawdown_close: float = -0.40       # 清仓线 -40%（几乎不会触发）
 
     # 仓位限制
     max_single_pct: float = 0.15        # 单只最大仓位 15%

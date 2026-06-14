@@ -165,6 +165,10 @@ export default function TTrading() {
   const [calcLoading, setCalcLoading] = useState(false)
   const [calcForm, setCalcForm] = useState({ code: '', market: 'A', account_balance: '1000000', risk_pct: '2' })
 
+  // Alerts state
+  const [alerts, setAlerts] = useState<any>(null)
+  const [alertsLoading, setAlertsLoading] = useState(false)
+
   // 交易拦截器
   const { intercept, checkpointOpen, checkpointMeta, handlePass, handleCancel } = useTradingInterceptor()
 
@@ -250,7 +254,7 @@ export default function TTrading() {
     if (activeTab === 'position' || activeTab === 'cost') loadPositions()
     if (activeTab === 'philosophy' && !philosophy) loadPhilosophy()
     if (activeTab === 'backtest') { /* user triggers manually */ }
-    if (activeTab === 'risk') loadRisk()
+    if (activeTab === 'risk') { loadRisk(); loadAlerts() }
     if (activeTab === 'analytics') loadAnalytics()
     if (activeTab === 'journal') loadJournal()
     if (activeTab === 'compare') { /* user triggers manually */ }
@@ -315,6 +319,18 @@ export default function TTrading() {
       setCalcLoading(false)
     }
   }, [calcForm])
+
+  const loadAlerts = useCallback(async () => {
+    setAlertsLoading(true)
+    try {
+      const res = await axios.get(`${API_BASE}/alerts`)
+      setAlerts(res.data)
+    } catch (e) {
+      console.error('加载告警失败:', e)
+    } finally {
+      setAlertsLoading(false)
+    }
+  }, [])
 
   // ============================================================
   // Handlers
@@ -1215,6 +1231,45 @@ export default function TTrading() {
                 </div>
               ) : (
                 <EmptyState title="暂无持仓风险数据" description="请先初始化持仓" />
+              )}
+
+              {/* 自动告警 */}
+              {alerts && alerts.alerts && alerts.alerts.length > 0 && (
+                <div style={{ marginTop: 16 }}>
+                  <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 8 }}>
+                    🔔 自动告警 ({alerts.total}条)
+                    {alerts.has_critical && <span style={{ color: '#f85149', marginLeft: 8 }}>⚠️ 有高危告警</span>}
+                  </div>
+                  {alerts.alerts.map((alert: any, i: number) => (
+                    <div key={i} style={{
+                      display: 'flex', alignItems: 'flex-start', gap: 10, padding: '10px 12px', marginBottom: 6,
+                      background: alert.severity === 'high' ? '#f8514910' : alert.severity === 'medium' ? '#d2992210' : '#3fb95010',
+                      borderRadius: 6,
+                      border: `1px solid ${alert.severity === 'high' ? '#f8514930' : alert.severity === 'medium' ? '#d2992230' : '#3fb95030'}`,
+                    }}>
+                      <span style={{
+                        padding: '2px 8px', borderRadius: 4, fontSize: 11, fontWeight: 600, flexShrink: 0,
+                        background: alert.severity === 'high' ? '#f85149' : alert.severity === 'medium' ? '#d29922' : '#3fb950',
+                        color: '#fff',
+                      }}>
+                        {alert.severity === 'high' ? '高危' : alert.severity === 'medium' ? '中危' : '信息'}
+                      </span>
+                      <div>
+                        <div style={{ fontSize: 13, fontWeight: 600 }}>
+                          {alert.name}({alert.code}) — {alert.message}
+                        </div>
+                        <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginTop: 2 }}>
+                          💡 {alert.action}
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+              {alerts && alerts.total === 0 && (
+                <div style={{ marginTop: 16, padding: 12, background: '#3fb95010', borderRadius: 6, border: '1px solid #3fb95030' }}>
+                  <div style={{ fontSize: 13, color: '#3fb950' }}>✅ 无告警，所有持仓状态正常</div>
+                </div>
               )}
             </div>
           ) : (

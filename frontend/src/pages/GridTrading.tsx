@@ -785,50 +785,6 @@ export default function GridTrading() {
                   </div>
                 </PageSection>
               )}
-                <PageSection title="💓 网格健康监控">
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 2fr', gap: 12, marginBottom: 12 }}>
-                    <div style={{
-                      background: 'var(--bg-secondary)', borderRadius: 8, padding: 14, textAlign: 'center',
-                      border: `2px solid ${health.health_score >= 70 ? '#52c41a' : health.health_score >= 50 ? '#faad14' : '#ff4d4f'}`,
-                    }}>
-                      <div style={{ fontSize: 12, color: 'var(--text-secondary)' }}>健康评分</div>
-                      <div style={{
-                        fontSize: 36, fontWeight: 800,
-                        color: health.health_score >= 70 ? '#52c41a' : health.health_score >= 50 ? '#faad14' : '#ff4d4f',
-                      }}>{health.health_score}</div>
-                      <div style={{ fontSize: 12, color: health.health_score >= 70 ? '#52c41a' : '#faad14' }}>{health.health_label}</div>
-                    </div>
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
-                      <div style={{ background: 'var(--bg-secondary)', borderRadius: 6, padding: 10 }}>
-                        <div style={{ fontSize: 11, color: 'var(--text-secondary)' }}>触发频率</div>
-                        <div style={{ fontSize: 16, fontWeight: 700 }}>{health.metrics.touch_rate}%</div>
-                      </div>
-                      <div style={{ background: 'var(--bg-secondary)', borderRadius: 6, padding: 10 }}>
-                        <div style={{ fontSize: 11, color: 'var(--text-secondary)' }}>波动趋势</div>
-                        <div style={{ fontSize: 16, fontWeight: 700, color: health.metrics.vol_trend === 'contracting' ? '#ff4d4f' : '#52c41a' }}>{health.metrics.vol_trend_label}</div>
-                      </div>
-                      <div style={{ background: 'var(--bg-secondary)', borderRadius: 6, padding: 10 }}>
-                        <div style={{ fontSize: 11, color: 'var(--text-secondary)' }}>价格趋势</div>
-                        <div style={{ fontSize: 16, fontWeight: 700, color: health.metrics.price_trend === 'down' ? '#ff4d4f' : '#52c41a' }}>{health.metrics.price_trend_label}</div>
-                      </div>
-                      <div style={{ background: 'var(--bg-secondary)', borderRadius: 6, padding: 10 }}>
-                        <div style={{ fontSize: 11, color: 'var(--text-secondary)' }}>ATR%</div>
-                        <div style={{ fontSize: 16, fontWeight: 700 }}>{health.metrics.atr_pct}%</div>
-                      </div>
-                    </div>
-                  </div>
-                  {health.warnings.length > 0 && (
-                    <div style={{ marginBottom: 8 }}>
-                      {health.warnings.map((w: string, i: number) => (
-                        <div key={i} style={{ fontSize: 12, color: '#faad14', padding: '2px 0' }}>⚠️ {w}</div>
-                      ))}
-                    </div>
-                  )}
-                  <div style={{ padding: '8px 12px', background: 'rgba(88,166,255,0.08)', borderRadius: 6, borderLeft: '3px solid #58a6ff', fontSize: 13, color: '#58a6ff' }}>
-                    💡 <strong>{health.action}</strong>：{health.action_detail}
-                  </div>
-                </PageSection>
-              )}
 
               {/* 网格 vs 买入持有 */}
               {comparison && !comparison.error && (

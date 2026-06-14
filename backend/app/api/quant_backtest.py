@@ -27,6 +27,7 @@ async def list_quant_strategies():
     from ..services.quant.strategy_mean_reversion import MeanReversionStrategy
     from ..services.quant.strategy_trend_following import TrendFollowingStrategy
     from ..services.quant.strategy_pairs_trading import PairsTradingStrategy
+    from ..services.quant.strategy_reversal import ReversalStrategy
     from ..services.quant.strategy_ensemble import run_ensemble_backtest
 
     strategies = [
@@ -61,6 +62,14 @@ async def list_quant_strategies():
             "version": "1.0",
             "params": PairsTradingStrategy.DEFAULT_PARAMS,
             "inspiration": "D.E. Shaw (Statistical Arbitrage)",
+        },
+        {
+            "name": "reversal",
+            "display_name": "短期反转",
+            "description": "A股最强因子：买入过去1周跌幅最大的股票，持有1-2周反弹",
+            "version": "1.0",
+            "params": ReversalStrategy.DEFAULT_PARAMS,
+            "inspiration": "Liu, Stambaugh, Yuan (2019) - A股短期反转效应",
         },
         {
             "name": "ensemble",
