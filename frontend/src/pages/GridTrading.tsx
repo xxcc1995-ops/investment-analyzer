@@ -16,7 +16,7 @@ import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import axios from 'axios'
 import ReactECharts from 'echarts-for-react'
 import { Tooltip } from 'antd'
-import { StatCard, StatCardGroup, PageSection, DataTable, TabBar, ProgressBar, LoadingSpinner, Tag } from '../components/ui'
+import { StatCard, StatCardGroup, PageSection, DataTable, TabBar, ProgressBar, LoadingSpinner, EmptyState, Tag } from '../components/ui'
 import type { Column } from '../components/ui'
 
 const API_BASE = '/api'
