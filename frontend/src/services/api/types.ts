@@ -185,6 +185,12 @@ export interface FinancialAnalysisResult {
     management: number
     audit_risk: number
   }
+  piotroski_f_score?: {
+    total: number
+    max: number
+    grade: string
+    details: Record<string, { pass: boolean; [key: string]: unknown }>
+  }
 }
 
 // ============ 交叉分析类型 ============

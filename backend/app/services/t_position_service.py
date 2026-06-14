@@ -17,9 +17,10 @@
 import json
 import os
 from typing import Optional
-from datetime import datetime
+from datetime import datetime, timedelta
 from dataclasses import dataclass, field, asdict
 from collections import defaultdict
+import statistics
 
 from app.core.cache import get_cache as _base_get_cache, set_cache as _set_cached
 
@@ -600,6 +601,343 @@ def get_risk_summary() -> dict:
             "max_daily_trades": MAX_DAILY_TRADES,
             "max_t_ratio": 40,
             "slippage_model": SLIPPAGE_MODEL,
+        },
+        "update_time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+    }
+
+
+# ============================================================
+# 专家级：盈亏分析引擎
+# ============================================================
+
+def get_trade_analytics() -> dict:
+    """
+    盈亏分析仪表盘 — 专家级交易复盘
+
+    分析维度：
+    1. 按星期几统计胜率和盈亏
+    2. 按时间段（上午/下午）统计
+    3. 按股票统计
+    4. 连续亏损/盈利统计
+    5. 交易频率 vs 收益率
+    6. 最佳/最差交易排名
+    7. 累计P&L曲线
+    8. 交易质量评分
+    """
+    trades = _load_trades()
+    if not trades:
+        return {"error": "暂无交易记录", "analytics": None}
+
+    sell_trades = [t for t in trades if t["action"] == "sell_t"]
+    all_trades = trades
+
+    # --- 1. 按星期几统计 ---
+    weekday_stats = defaultdict(lambda: {"count": 0, "wins": 0, "losses": 0, "total_pnl": 0.0, "pnls": []})
+    weekday_names = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"]
+
+    for t in sell_trades:
+        try:
+            dt = datetime.strptime(t["time"], "%Y-%m-%d %H:%M:%S")
+            wd = dt.weekday()
+            pnl = t.get("pnl", 0) or 0
+            weekday_stats[wd]["count"] += 1
+            weekday_stats[wd]["total_pnl"] += pnl
+            weekday_stats[wd]["pnls"].append(pnl)
+            if pnl > 0:
+                weekday_stats[wd]["wins"] += 1
+            elif pnl < 0:
+                weekday_stats[wd]["losses"] += 1
+        except Exception:
+            pass
+
+    weekday_analysis = []
+    for wd in range(5):
+        s = weekday_stats[wd]
+        wr = round(s["wins"] / s["count"] * 100, 1) if s["count"] > 0 else 0
+        avg_pnl = round(s["total_pnl"] / s["count"], 2) if s["count"] > 0 else 0
+        weekday_analysis.append({
+            "weekday": weekday_names[wd],
+            "weekday_num": wd,
+            "trade_count": s["count"],
+            "win_rate": wr,
+            "total_pnl": round(s["total_pnl"], 2),
+            "avg_pnl": avg_pnl,
+        })
+
+    # --- 2. 按时间段统计 ---
+    session_stats = {"morning": {"pnls": [], "count": 0}, "afternoon": {"pnls": [], "count": 0}}
+    for t in sell_trades:
+        try:
+            dt = datetime.strptime(t["time"], "%Y-%m-%d %H:%M:%S")
+            pnl = t.get("pnl", 0) or 0
+            if dt.hour < 12:
+                session_stats["morning"]["pnls"].append(pnl)
+                session_stats["morning"]["count"] += 1
+            else:
+                session_stats["afternoon"]["pnls"].append(pnl)
+                session_stats["afternoon"]["count"] += 1
+        except Exception:
+            pass
+
+    session_analysis = {}
+    for session_name, data in session_stats.items():
+        pnls = data["pnls"]
+        wins = len([p for p in pnls if p > 0])
+        session_analysis[session_name] = {
+            "label": "上午(9:30-12:00)" if session_name == "morning" else "下午(13:00-15:00)",
+            "trade_count": data["count"],
+            "win_rate": round(wins / len(pnls) * 100, 1) if pnls else 0,
+            "total_pnl": round(sum(pnls), 2),
+            "avg_pnl": round(statistics.mean(pnls), 2) if pnls else 0,
+        }
+
+    # --- 3. 按股票统计 ---
+    stock_stats = defaultdict(lambda: {"count": 0, "wins": 0, "total_pnl": 0.0, "name": ""})
+    for t in sell_trades:
+        pnl = t.get("pnl", 0) or 0
+        stock_stats[t["code"]]["count"] += 1
+        stock_stats[t["code"]]["total_pnl"] += pnl
+        stock_stats[t["code"]]["name"] = t.get("code", "")
+        if pnl > 0:
+            stock_stats[t["code"]]["wins"] += 1
+
+    stock_analysis = []
+    for code, s in stock_stats.items():
+        stock_analysis.append({
+            "code": code,
+            "trade_count": s["count"],
+            "win_rate": round(s["wins"] / s["count"] * 100, 1) if s["count"] > 0 else 0,
+            "total_pnl": round(s["total_pnl"], 2),
+            "avg_pnl": round(s["total_pnl"] / s["count"], 2) if s["count"] > 0 else 0,
+        })
+    stock_analysis.sort(key=lambda x: x["total_pnl"], reverse=True)
+
+    # --- 4. 连续盈亏统计 ---
+    streaks = _calc_streaks(sell_trades)
+
+    # --- 5. 交易频率分析 ---
+    daily_counts = defaultdict(int)
+    daily_pnl = defaultdict(float)
+    for t in sell_trades:
+        day = t["time"][:10]
+        daily_counts[day] += 1
+        daily_pnl[day] += (t.get("pnl", 0) or 0)
+
+    freq_analysis = []
+    for day in sorted(daily_counts.keys()):
+        freq_analysis.append({
+            "date": day,
+            "trades": daily_counts[day],
+            "pnl": round(daily_pnl[day], 2),
+        })
+
+    if len(freq_analysis) >= 3:
+        avg_freq = statistics.mean([f["trades"] for f in freq_analysis])
+        high_freq_days = [f for f in freq_analysis if f["trades"] >= avg_freq]
+        low_freq_days = [f for f in freq_analysis if f["trades"] < avg_freq]
+        high_freq_avg_pnl = statistics.mean([f["pnl"] for f in high_freq_days]) if high_freq_days else 0
+        low_freq_avg_pnl = statistics.mean([f["pnl"] for f in low_freq_days]) if low_freq_days else 0
+    else:
+        avg_freq = 0
+        high_freq_avg_pnl = 0
+        low_freq_avg_pnl = 0
+
+    # --- 6. 最佳/最差交易排名 ---
+    all_sell_with_pnl = [t for t in sell_trades if (t.get("pnl") or 0) != 0]
+    all_sell_with_pnl.sort(key=lambda t: t.get("pnl", 0), reverse=True)
+    best_trades = all_sell_with_pnl[:5]
+    worst_trades = sorted(all_sell_with_pnl[-5:], key=lambda t: t.get("pnl", 0)) if len(all_sell_with_pnl) >= 5 else []
+
+    # --- 7. 累计P&L曲线 ---
+    cumulative_pnl = []
+    running = 0.0
+    for t in sorted(sell_trades, key=lambda x: x["time"]):
+        running += (t.get("pnl", 0) or 0)
+        cumulative_pnl.append({
+            "date": t["time"][:10],
+            "trade_pnl": round(t.get("pnl", 0) or 0, 2),
+            "cumulative_pnl": round(running, 2),
+        })
+
+    # --- 8. 综合评分 ---
+    total_sell = len(sell_trades)
+    total_wins = len([t for t in sell_trades if (t.get("pnl", 0) or 0) > 0])
+    total_losses = len([t for t in sell_trades if (t.get("pnl", 0) or 0) < 0])
+    overall_wr = round(total_wins / total_sell * 100, 1) if total_sell > 0 else 0
+    total_pnl = sum(t.get("pnl", 0) or 0 for t in sell_trades)
+    avg_win = statistics.mean([t["pnl"] for t in sell_trades if (t.get("pnl", 0) or 0) > 0]) if total_wins > 0 else 0
+    avg_loss = statistics.mean([t["pnl"] for t in sell_trades if (t.get("pnl", 0) or 0) < 0]) if total_losses > 0 else 0
+    profit_factor = round(avg_win / abs(avg_loss), 2) if avg_loss != 0 else float("inf")
+
+    # 交易质量评分 (0-100)
+    quality_score = 0
+    if total_sell >= 10:
+        quality_score += min(overall_wr, 70) * 0.4
+        quality_score += min(max(profit_factor, 0), 3) / 3 * 30
+        quality_score += min(streaks.get("max_win_streak", 0), 5) / 5 * 15
+        quality_score += max(0, 15 - streaks.get("max_lose_streak", 0) * 3)
+    quality_score = round(min(max(quality_score, 0), 100), 1)
+
+    return {
+        "summary": {
+            "total_trades": len(all_trades),
+            "sell_trades": total_sell,
+            "win_rate": overall_wr,
+            "total_pnl": round(total_pnl, 2),
+            "avg_win": round(avg_win, 2),
+            "avg_loss": round(avg_loss, 2),
+            "profit_factor": profit_factor,
+            "quality_score": quality_score,
+            "total_fees": round(sum(t.get("fee", 0) for t in all_trades), 2),
+        },
+        "weekday_analysis": weekday_analysis,
+        "session_analysis": session_analysis,
+        "stock_analysis": stock_analysis,
+        "streaks": streaks,
+        "frequency_analysis": {
+            "avg_daily_trades": round(avg_freq, 1) if freq_analysis else 0,
+            "high_freq_avg_pnl": round(high_freq_avg_pnl, 2),
+            "low_freq_avg_pnl": round(low_freq_avg_pnl, 2),
+            "insight": (
+                "高频交易日收益更优" if high_freq_avg_pnl > low_freq_avg_pnl
+                else "低频交易日收益更优（减少交易频率可能提升收益）"
+            ) if freq_analysis else "数据不足",
+            "daily_data": freq_analysis[-30:],
+        },
+        "best_trades": best_trades,
+        "worst_trades": worst_trades,
+        "cumulative_pnl": cumulative_pnl[-60:],
+        "update_time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+    }
+
+
+def _calc_streaks(sell_trades: list) -> dict:
+    """计算连续盈亏统计"""
+    if not sell_trades:
+        return {"max_win_streak": 0, "max_lose_streak": 0, "current_streak": 0, "current_type": "none"}
+
+    sorted_trades = sorted(sell_trades, key=lambda t: t["time"])
+    max_win = 0
+    max_lose = 0
+    current_win = 0
+    current_lose = 0
+
+    for t in sorted_trades:
+        pnl = t.get("pnl", 0) or 0
+        if pnl > 0:
+            current_win += 1
+            current_lose = 0
+            max_win = max(max_win, current_win)
+        elif pnl < 0:
+            current_lose += 1
+            current_win = 0
+            max_lose = max(max_lose, current_lose)
+        else:
+            current_win = 0
+            current_lose = 0
+
+    last_pnl = sorted_trades[-1].get("pnl", 0) or 0
+    if last_pnl > 0:
+        current_streak = current_win
+        current_type = "win"
+    elif last_pnl < 0:
+        current_streak = current_lose
+        current_type = "lose"
+    else:
+        current_streak = 0
+        current_type = "none"
+
+    return {
+        "max_win_streak": max_win,
+        "max_lose_streak": max_lose,
+        "current_streak": current_streak,
+        "current_type": current_type,
+        "current_label": (
+            f"连赢{current_streak}笔 🔥" if current_type == "win"
+            else f"连亏{current_streak}笔 ⚠️" if current_type == "lose"
+            else "无连续"
+        ),
+    }
+
+
+def get_trade_journal(
+    code: str = None,
+    market: str = None,
+    start_date: str = None,
+    end_date: str = None,
+    pnl_filter: str = None,
+    limit: int = 50,
+) -> dict:
+    """
+    交易日志 — 带筛选的详细交易记录
+
+    每笔交易附加：
+    - 交易质量标签
+    - 持有时间
+    - 盈亏百分比
+    """
+    trades = _load_trades()
+    sell_trades = [t for t in trades if t["action"] == "sell_t"]
+
+    if code:
+        sell_trades = [t for t in sell_trades if t["code"] == code]
+    if market:
+        sell_trades = [t for t in sell_trades if t["market"] == market]
+    if start_date:
+        sell_trades = [t for t in sell_trades if t["time"][:10] >= start_date]
+    if end_date:
+        sell_trades = [t for t in sell_trades if t["time"][:10] <= end_date]
+    if pnl_filter == "win":
+        sell_trades = [t for t in sell_trades if (t.get("pnl", 0) or 0) > 0]
+    elif pnl_filter == "lose":
+        sell_trades = [t for t in sell_trades if (t.get("pnl", 0) or 0) < 0]
+
+    sell_trades.sort(key=lambda t: t["time"], reverse=True)
+    sell_trades = sell_trades[:limit]
+
+    journal = []
+    for t in sell_trades:
+        pnl = t.get("pnl", 0) or 0
+        if pnl > 0:
+            quality = "great" if pnl > 500 else "good"
+            quality_label = "🏆 优秀交易" if pnl > 500 else "✅ 盈利交易"
+        elif pnl < 0:
+            quality = "bad" if pnl < -500 else "small_loss"
+            quality_label = "❌ 重大亏损" if pnl < -500 else "⚠️ 小幅亏损"
+        else:
+            quality = "breakeven"
+            quality_label = "➖ 持平"
+
+        # 计算持有时间
+        hold_hours = None
+        positions = _load_positions()
+        pos_key = f"{t.get('market', '')}_{t['code']}"
+        pos = positions.get(pos_key, {})
+        prev_buys = [bt for bt in pos.get("t_trades", [])
+                     if bt["action"] == "buy_t" and bt["time"] < t["time"]]
+        if prev_buys:
+            try:
+                buy_time = datetime.strptime(prev_buys[-1]["time"], "%Y-%m-%d %H:%M:%S")
+                sell_time = datetime.strptime(t["time"], "%Y-%m-%d %H:%M:%S")
+                hold_hours = round((sell_time - buy_time).total_seconds() / 3600, 1)
+            except Exception:
+                pass
+
+        journal.append({
+            **t,
+            "quality": quality,
+            "quality_label": quality_label,
+            "hold_hours": hold_hours,
+            "pnl_pct": round(pnl / (t.get("amount", 1) - pnl) * 100, 2) if t.get("amount") and pnl else 0,
+        })
+
+    return {
+        "journal": journal,
+        "total": len(journal),
+        "filters": {
+            "code": code, "market": market,
+            "start_date": start_date, "end_date": end_date,
+            "pnl_filter": pnl_filter,
         },
         "update_time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
     }

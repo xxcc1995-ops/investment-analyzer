@@ -27,6 +27,7 @@ from app.services.t_position_service import (
     init_position, get_all_positions, get_position,
     execute_t_trade, get_trade_history, calc_cost_analysis,
     delete_position, reset_all, get_risk_summary,
+    get_trade_analytics, get_trade_journal,
 )
 from app.services.grid_service import calculate_atr
 
@@ -215,6 +216,48 @@ def risk_summary():
     - 整体风险等级
     """
     return get_risk_summary()
+
+
+@router.get("/analytics")
+def analytics():
+    """
+    盈亏分析仪表盘 — 专家级交易复盘
+
+    返回：
+    - 综合评分（胜率、盈亏比、质量评分）
+    - 按星期几统计（哪天做T最赚钱）
+    - 按时间段统计（上午 vs 下午）
+    - 按股票统计（哪些股票做T效果好）
+    - 连续盈亏统计
+    - 交易频率 vs 收益率分析
+    - 最佳/最差交易排名
+    - 累计P&L曲线数据
+    """
+    return get_trade_analytics()
+
+
+@router.get("/journal")
+def journal(
+    code: str = Query(None, description="股票代码筛选"),
+    market: str = Query(None, description="市场筛选"),
+    start_date: str = Query(None, description="起始日期 (YYYY-MM-DD)"),
+    end_date: str = Query(None, description="结束日期 (YYYY-MM-DD)"),
+    pnl_filter: str = Query(None, description="盈亏筛选: win/lose/all"),
+    limit: int = Query(50, description="返回条数"),
+):
+    """
+    交易日志 — 带筛选的详细交易记录
+
+    每笔交易附加：
+    - 交易质量标签（优秀/盈利/小幅亏损/重大亏损）
+    - 持有时间
+    - 盈亏百分比
+    """
+    return get_trade_journal(
+        code=code, market=market,
+        start_date=start_date, end_date=end_date,
+        pnl_filter=pnl_filter, limit=limit,
+    )
 
 
 @router.delete("/position/{code}")

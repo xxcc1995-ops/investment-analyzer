@@ -1094,6 +1094,13 @@ function AnalysisSummary({ analysis }: { analysis: FinancialAnalysisResult }) {
     keyMetrics.push({ label: 'Altman Z-Score', value: zScore.toFixed(2), color: zColor })
   }
 
+  // Piotroski F-Score
+  const piotroski = analysis.piotroski_f_score
+  if (piotroski) {
+    const fColor = piotroski.total >= 7 ? '#3fb950' : piotroski.total >= 5 ? '#58a6ff' : piotroski.total >= 3 ? '#d29922' : '#f85149'
+    keyMetrics.push({ label: 'Piotroski F-Score', value: `${piotroski.total}/9 ${piotroski.grade}`, color: fColor })
+  }
+
   return (
     <div style={{
       background: 'var(--bg-secondary)',

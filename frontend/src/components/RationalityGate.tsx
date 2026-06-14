@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect, useRef } from 'react';
 import axios from 'axios';
 
 const API_BASE = '/api';
@@ -9,7 +9,7 @@ interface RationalityGateProps {
   onFullCheck: (intention: string, target: string, thought: string) => void;  // 进入完整检查
 }
 
-type GateStep = 'intention' | 'details' | 'scanning' | 'result';
+type GateStep = 'intention' | 'details' | 'breathing' | 'scanning' | 'result';
 
 const INTENTION_OPTIONS = [
   { value: 'browse', label: '👀 随便看看', desc: '看看行情、研究数据', color: '#3fb950', needCheck: false },
@@ -21,6 +21,14 @@ const TRADE_TYPES = [
   { value: 'buy', label: '买入', color: '#f85149' },
   { value: 'sell', label: '卖出', color: '#3fb950' },
   { value: 'adjust', label: '调仓', color: '#d29922' },
+];
+
+// 箱式呼吸阶段
+const BREATH_PHASES = [
+  { label: '吸气', duration: 4, instruction: '慢慢吸气...' },
+  { label: '屏住', duration: 4, instruction: '屏住呼吸...' },
+  { label: '呼气', duration: 4, instruction: '慢慢呼气...' },
+  { label: '屏住', duration: 4, instruction: '屏住呼吸...' },
 ];
 
 interface ScanResult {
@@ -39,15 +47,68 @@ export default function RationalityGate({ onPass, onSkip, onFullCheck }: Rationa
   const [scanResult, setScanResult] = useState<ScanResult | null>(null);
   const [scanning, setScanning] = useState(false);
 
+  // 呼吸状态
+  const [breathSecond, setBreathSecond] = useState(0);
+  const [breathDone, setBreathDone] = useState(false);
+  const breathTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const TOTAL_BREATH = 16; // 一个完整周期
+
   const handleIntentionSelect = (value: string) => {
     setIntention(value);
     const opt = INTENTION_OPTIONS.find(o => o.value === value);
     if (opt && !opt.needCheck) {
-      // 不需要检查，直接通过
       onPass();
     } else {
       setStep('details');
     }
+  };
+
+  const handleStartBreathing = () => {
+    setStep('breathing');
+    setBreathSecond(0);
+    setBreathDone(false);
+  };
+
+  // 呼吸计时器
+  useEffect(() => {
+    if (step !== 'breathing') return;
+
+    breathTimerRef.current = setInterval(() => {
+      setBreathSecond(prev => {
+        const next = prev + 1;
+        if (next >= TOTAL_BREATH) {
+          clearInterval(breathTimerRef.current!);
+          setBreathDone(true);
+          return next;
+        }
+        return next;
+      });
+    }, 1000);
+
+    return () => {
+      if (breathTimerRef.current) clearInterval(breathTimerRef.current);
+    };
+  }, [step]);
+
+  // 计算当前呼吸阶段
+  const getCurrentBreathPhase = () => {
+    let elapsed = breathSecond;
+    for (const p of BREATH_PHASES) {
+      if (elapsed < p.duration) return { ...p, progress: elapsed / p.duration };
+      elapsed -= p.duration;
+    }
+    return { ...BREATH_PHASES[0], progress: 0 };
+  };
+
+  const currentBreath = getCurrentBreathPhase();
+
+  // 呼吸动画圆圈大小
+  const getCircleScale = () => {
+    const label = currentBreath.label;
+    const progress = currentBreath.progress;
+    if (label === '吸气') return 0.5 + progress * 0.5;
+    if (label === '呼气') return 1.0 - progress * 0.5;
+    return breathSecond < 8 ? 1.0 : 0.5;
   };
 
   const handleScan = useCallback(async () => {
@@ -61,7 +122,6 @@ export default function RationalityGate({ onPass, onSkip, onFullCheck }: Rationa
       setScanResult(res.data);
       setStep('result');
     } catch {
-      // 扫描失败时直接通过
       onPass();
     } finally {
       setScanning(false);
@@ -138,18 +198,8 @@ export default function RationalityGate({ onPass, onSkip, onFullCheck }: Rationa
         </div>
       </div>
 
-      <div style={{ textAlign: 'center' }}>
-        <button
-          onClick={onSkip}
-          style={{
-            background: 'none', border: 'none',
-            color: 'var(--text-muted)', fontSize: 13, cursor: 'pointer',
-            textDecoration: 'underline',
-          }}
-        >
-          跳过自检，直接进入
-        </button>
-      </div>
+      {/* 只有浏览/研究才有跳过选项，交易意图不显示跳过 */}
+      <div style={{ textAlign: 'center', height: 20 }} />
     </div>
   );
 
@@ -220,9 +270,9 @@ export default function RationalityGate({ onPass, onSkip, onFullCheck }: Rationa
           </div>
         </div>
 
-        {/* 开始扫描按钮 */}
+        {/* 开始呼吸按钮 */}
         <button
-          onClick={handleScan}
+          onClick={handleStartBreathing}
           style={{
             width: '100%', padding: '14px',
             background: '#58a6ff', border: 'none',
@@ -230,24 +280,105 @@ export default function RationalityGate({ onPass, onSkip, onFullCheck }: Rationa
             fontSize: 16, fontWeight: 700, cursor: 'pointer',
           }}
         >
-          🧠 开始自检
-        </button>
-      </div>
-
-      <div style={{ textAlign: 'center' }}>
-        <button
-          onClick={onSkip}
-          style={{
-            background: 'none', border: 'none',
-            color: 'var(--text-muted)', fontSize: 13, cursor: 'pointer',
-            textDecoration: 'underline',
-          }}
-        >
-          跳过自检，直接进入
+          🧘 先做呼吸练习 →
         </button>
       </div>
     </div>
   );
+
+  const renderBreathing = () => {
+    const circleScale = getCircleScale();
+
+    return (
+      <div style={{ textAlign: 'center' }}>
+        <div style={{ fontSize: 14, color: 'var(--text-muted)', marginBottom: 24 }}>
+          在做交易决定之前，先让理性上线
+        </div>
+
+        {/* 呼吸动画圆圈 */}
+        <div style={{
+          width: 180, height: 180, margin: '0 auto 20px',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          position: 'relative',
+        }}>
+          <div style={{
+            width: 180, height: 180, borderRadius: '50%',
+            border: '2px solid var(--border-primary)',
+            position: 'absolute',
+          }} />
+          <div style={{
+            width: 180 * circleScale, height: 180 * circleScale,
+            borderRadius: '50%',
+            background: `radial-gradient(circle, ${breathDone ? '#3fb95040' : '#58a6ff40'} 0%, transparent 70%)`,
+            border: `3px solid ${breathDone ? '#3fb950' : '#58a6ff'}`,
+            transition: 'all 0.8s ease-in-out',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+          }}>
+            <div style={{
+              fontSize: 18, fontWeight: 700,
+              color: breathDone ? '#3fb950' : 'var(--text-primary)',
+            }}>
+              {breathDone ? '✓' : currentBreath.label}
+            </div>
+          </div>
+        </div>
+
+        <div style={{
+          fontSize: 16, fontWeight: 600,
+          color: breathDone ? '#3fb950' : 'var(--text-primary)',
+          marginBottom: 10,
+        }}>
+          {breathDone ? '呼吸练习完成' : currentBreath.instruction}
+        </div>
+
+        {!breathDone && (
+          <div style={{ color: 'var(--text-muted)', fontSize: 13, marginBottom: 20 }}>
+            {breathSecond} / {TOTAL_BREATH} 秒
+          </div>
+        )}
+
+        {/* 进度条 */}
+        <div style={{
+          height: 4, borderRadius: 2, background: 'var(--bg-tertiary)',
+          marginBottom: 20, overflow: 'hidden',
+        }}>
+          <div style={{
+            height: '100%',
+            background: breathDone ? '#3fb950' : '#58a6ff',
+            width: breathDone ? '100%' : `${(breathSecond / TOTAL_BREATH) * 100}%`,
+            transition: 'width 0.3s',
+          }} />
+        </div>
+
+        <button
+          onClick={handleScan}
+          disabled={!breathDone}
+          style={{
+            width: '100%', padding: '14px',
+            background: breathDone ? '#58a6ff' : 'var(--bg-tertiary)',
+            border: 'none', borderRadius: 8,
+            color: breathDone ? '#fff' : 'var(--text-muted)',
+            fontSize: 16, fontWeight: 700,
+            cursor: breathDone ? 'pointer' : 'not-allowed',
+            opacity: breathDone ? 1 : 0.5,
+          }}
+        >
+          {breathDone ? '🧠 开始情绪扫描' : '请完成呼吸练习...'}
+        </button>
+
+        <button
+          onClick={() => setStep('details')}
+          style={{
+            width: '100%', padding: '10px', marginTop: 8,
+            background: 'none', border: 'none',
+            color: 'var(--text-muted)', fontSize: 13, cursor: 'pointer',
+          }}
+        >
+          ← 返回修改
+        </button>
+      </div>
+    );
+  };
 
   const renderScanning = () => (
     <div style={{ textAlign: 'center', padding: '40px 0' }}>
@@ -409,6 +540,7 @@ export default function RationalityGate({ onPass, onSkip, onFullCheck }: Rationa
       }}>
         {step === 'intention' && renderIntention()}
         {step === 'details' && renderDetails()}
+        {step === 'breathing' && renderBreathing()}
         {step === 'scanning' && renderScanning()}
         {step === 'result' && renderResult()}
       </div>

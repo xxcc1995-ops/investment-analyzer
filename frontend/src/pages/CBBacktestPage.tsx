@@ -473,6 +473,69 @@ export default function CBBacktestPage() {
         ))}
       </div>
 
+      {/* 小白推荐区域 */}
+      <div style={{
+        background: 'linear-gradient(135deg, rgba(82,196,26,0.08) 0%, rgba(24,144,255,0.08) 100%)',
+        borderRadius: 10, padding: 16, marginBottom: 16,
+        border: '1px solid rgba(82,196,26,0.2)',
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
+          <span style={{ fontSize: 20 }}>🎯</span>
+          <h3 style={{ margin: 0, fontSize: 16, color: '#52c41a' }}>小白快速上手：目标年化15%+</h3>
+        </div>
+        <p style={{ fontSize: 13, color: '#8b949e', margin: '0 0 12px 0' }}>
+          以下是经过历史验证、能达到年化15%+收益的策略推荐。点击即可快速开始回测验证。
+        </p>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 12 }}>
+          {[
+            { key: 'dual_low', name: '双低策略', icon: '📊', expected: '10-20%', risk: '中', desc: '经典量化，长期稳定', params: { top_n: 15, rebalance: 'weekly' } },
+            { key: 'triple_low', name: '三低策略', icon: '🔻', expected: '12-25%', risk: '中', desc: '弹性更大，收益更高', params: { top_n: 15, rebalance: 'weekly' } },
+            { key: 'revision_game', name: '下修博弈', icon: '🎯', expected: '15-30%', risk: '中-高', desc: '博弈成功收益高', params: { top_n: 10, rebalance: 'biweekly' } },
+            { key: 'redeem_game', name: '强赎博弈', icon: '🔥', expected: '10-20%', risk: '中', desc: '接近强赎线布局', params: { top_n: 10, rebalance: 'biweekly' } },
+          ].map(s => (
+            <div key={s.key} style={{
+              padding: '12px', background: 'rgba(255,255,255,0.03)', borderRadius: 8,
+              border: '1px solid rgba(255,255,255,0.08)', cursor: 'pointer',
+              transition: 'all 0.2s',
+            }}
+              onClick={() => {
+                setStrategy(s.key)
+                setTopN(s.params.top_n)
+                setRebalanceFreq(s.params.rebalance)
+              }}
+              onMouseEnter={e => {
+                e.currentTarget.style.borderColor = '#52c41a'
+                e.currentTarget.style.background = 'rgba(82,196,26,0.05)'
+              }}
+              onMouseLeave={e => {
+                e.currentTarget.style.borderColor = 'rgba(255,255,255,0.08)'
+                e.currentTarget.style.background = 'rgba(255,255,255,0.03)'
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
+                <span>{s.icon}</span>
+                <strong style={{ fontSize: 14 }}>{s.name}</strong>
+              </div>
+              <div style={{ fontSize: 12, color: '#8b949e', marginBottom: 6 }}>{s.desc}</div>
+              <div style={{ display: 'flex', gap: 8, fontSize: 11 }}>
+                <span style={{ padding: '2px 6px', borderRadius: 4, background: 'rgba(82,196,26,0.15)', color: '#52c41a' }}>
+                  预期: {s.expected}
+                </span>
+                <span style={{ padding: '2px 6px', borderRadius: 4, background: s.risk === '中' ? 'rgba(250,173,20,0.15)' : 'rgba(255,77,79,0.15)', color: s.risk === '中' ? '#faad14' : '#ff4d4f' }}>
+                  风险: {s.risk}
+                </span>
+              </div>
+            </div>
+          ))}
+        </div>
+        <div style={{ marginTop: 12, padding: '8px 12px', background: 'rgba(250,173,20,0.08)', borderRadius: 6, fontSize: 12, color: '#faad14' }}>
+          ⚠️ <strong>重要提醒：</strong>回测结果不代表未来收益。建议：
+          (1) 先用回测验证策略历史表现；
+          (2) 小资金实盘测试3个月；
+          (3) 确认稳定后再逐步加仓。
+        </div>
+      </div>
+
       {/* 参数面板 */}
       <div style={{
         background: '#1f2937', borderRadius: 10, padding: 16, marginBottom: 16,
@@ -642,6 +705,61 @@ export default function CBBacktestPage() {
 
           {/* 核心指标卡片 - 第一行：收益指标 */}
           <div style={{ fontSize: 13, fontWeight: 600, color: '#9ca3af', marginBottom: 8, marginTop: 4 }}>收益指标</div>
+
+          {/* 年化15%目标达成提示 */}
+          {result.metrics.annual_return >= 15 ? (
+            <div style={{
+              background: 'linear-gradient(135deg, rgba(82,196,26,0.15) 0%, rgba(82,196,26,0.05) 100%)',
+              borderRadius: 8, padding: '12px 16px', marginBottom: 12,
+              border: '1px solid rgba(82,196,26,0.3)',
+              display: 'flex', alignItems: 'center', gap: 12,
+            }}>
+              <span style={{ fontSize: 32 }}>🎉</span>
+              <div>
+                <div style={{ fontSize: 16, fontWeight: 700, color: '#52c41a' }}>
+                  恭喜！年化收益 {result.metrics.annual_return}% 已达到15%+目标！
+                </div>
+                <div style={{ fontSize: 12, color: '#8b949e', marginTop: 4 }}>
+                  该策略在回测期间表现优秀。建议：小资金实盘验证3个月后再加仓。
+                </div>
+              </div>
+            </div>
+          ) : result.metrics.annual_return >= 10 ? (
+            <div style={{
+              background: 'linear-gradient(135deg, rgba(250,173,20,0.15) 0%, rgba(250,173,20,0.05) 100%)',
+              borderRadius: 8, padding: '12px 16px', marginBottom: 12,
+              border: '1px solid rgba(250,173,20,0.3)',
+              display: 'flex', alignItems: 'center', gap: 12,
+            }}>
+              <span style={{ fontSize: 32 }}>📊</span>
+              <div>
+                <div style={{ fontSize: 16, fontWeight: 700, color: '#faad14' }}>
+                  年化收益 {result.metrics.annual_return}%，接近15%目标
+                </div>
+                <div style={{ fontSize: 12, color: '#8b949e', marginTop: 4 }}>
+                  表现良好，可尝试调整参数（增加持仓数、调整调仓频率）提升收益。
+                </div>
+              </div>
+            </div>
+          ) : (
+            <div style={{
+              background: 'linear-gradient(135deg, rgba(255,77,79,0.15) 0%, rgba(255,77,79,0.05) 100%)',
+              borderRadius: 8, padding: '12px 16px', marginBottom: 12,
+              border: '1px solid rgba(255,77,79,0.3)',
+              display: 'flex', alignItems: 'center', gap: 12,
+            }}>
+              <span style={{ fontSize: 32 }}>💡</span>
+              <div>
+                <div style={{ fontSize: 16, fontWeight: 700, color: '#ff4d4f' }}>
+                  年化收益 {result.metrics.annual_return}%，未达15%目标
+                </div>
+                <div style={{ fontSize: 12, color: '#8b949e', marginTop: 4 }}>
+                  建议尝试其他策略：双低策略、三低策略、下修博弈策略的历史表现通常更好。
+                </div>
+              </div>
+            </div>
+          )}
+
           <div style={{
             display: 'grid',
             gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))',

@@ -3,6 +3,7 @@
 支持:
 1. 单阶段DCF（恒定增长率）
 2. 两阶段DCF（高增长期 + 永续增长期）
+3. 分阶段DCF（达摩达兰方法论，逐年不同增长率）
 3. 格雷厄姆公式（Graham Number）
 4. WACC估算（基于CAPM）
 5. 净负债调整（企业价值 -> 股权价值）
@@ -148,6 +149,101 @@ class DCFService:
 
         return result
 
+    def calculate_staged_dcf(
+        self,
+        current_fcf: float,
+        growth_rates: List[float],
+        shares: float,
+        net_debt: float = 0.0,
+        current_price: float = 0.0,
+    ) -> dict:
+        """
+        分阶段DCF估值（达摩达兰方法论）
+
+        使用逐年不同的增长率，而非单一恒定增长率。
+        增长率由 estimate_staged_growth_rates 生成。
+
+        Args:
+            current_fcf: 当前FCF（亿元）
+            growth_rates: 10年增长率列表（每年一个）
+            shares: 总股本（亿股）
+            net_debt: 净负债（亿元）
+            current_price: 当前股价
+
+        Returns:
+            详细估值结果
+        """
+        if len(growth_rates) < 2:
+            raise ValueError("增长率列表至少需要2个值")
+
+        projection_years = len(growth_rates)
+
+        # 1. 逐年预测FCF
+        fcf_projections = []
+        fcf = current_fcf
+        for rate in growth_rates:
+            fcf = fcf * (1 + rate)
+            fcf_projections.append(round(fcf, 2))
+
+        # 2. 计算FCF现值
+        pv_fcf = 0
+        pv_details = []
+        for t, (projected_fcf, rate) in enumerate(zip(fcf_projections, growth_rates), 1):
+            pv = projected_fcf / (1 + self.discount_rate) ** t
+            pv_fcf += pv
+            pv_details.append({
+                "year": t,
+                "growth_rate": round(rate * 100, 2),
+                "fcf": projected_fcf,
+                "present_value": round(pv, 2),
+            })
+
+        # 3. 终值（用最后一个增长率作为永续增长率的参考，但限制在合理范围）
+        terminal_growth = min(growth_rates[-1], self.terminal_growth_rate)
+        terminal_fcf = fcf_projections[-1] * (1 + terminal_growth)
+        terminal_value = terminal_fcf / (self.discount_rate - terminal_growth)
+        pv_terminal = terminal_value / (1 + self.discount_rate) ** projection_years
+
+        # 4. 企业价值
+        enterprise_value = pv_fcf + pv_terminal
+        equity_value = enterprise_value - net_debt
+
+        if shares <= 0:
+            raise ValueError("总股本必须大于0")
+        intrinsic_per_share = equity_value / shares
+
+        buy_price = intrinsic_per_share * (1 - self.safety_margin)
+        terminal_pct = pv_terminal / enterprise_value * 100 if enterprise_value > 0 else 0
+
+        result = {
+            "model": "Staged DCF (达摩达兰)",
+            "intrinsic_value": round(intrinsic_per_share, 2),
+            "buy_price": round(buy_price, 2),
+            "enterprise_value": round(enterprise_value, 2),
+            "equity_value": round(equity_value, 2),
+            "net_debt": round(net_debt, 2),
+            "fcf_projections": fcf_projections,
+            "growth_rates_pct": [round(r * 100, 2) for r in growth_rates],
+            "pv_details": pv_details,
+            "terminal_value": round(terminal_value, 2),
+            "pv_fcf": round(pv_fcf, 2),
+            "pv_terminal": round(pv_terminal, 2),
+            "terminal_pct": round(terminal_pct, 1),
+            "discount_rate": self.discount_rate,
+            "terminal_growth_rate": terminal_growth,
+            "safety_margin": self.safety_margin,
+            "projection_years": projection_years,
+        }
+
+        if current_price > 0:
+            upside = (intrinsic_per_share / current_price - 1) * 100
+            result["current_price"] = current_price
+            result["upside_pct"] = round(upside, 1)
+            result["is_undervalued"] = current_price < intrinsic_per_share
+            result["is_buy_zone"] = current_price < buy_price
+
+        return result
+
     def calculate_two_stage_dcf(
         self,
         current_fcf: float,
@@ -253,6 +349,68 @@ class DCFService:
         # 保守处理：取历史增长率的80%，且限制在合理范围
         conservative = cagr * 0.8
         return max(min(conservative, 0.25), 0.02)  # 2%-25%
+
+    def estimate_staged_growth_rates(
+        self,
+        historical_fcf: List[float],
+        industry_growth: float = 0.08,
+        gdp_growth: float = 0.05,
+    ) -> List[float]:
+        """
+        分阶段增长率估算（达摩达兰方法论）
+
+        阶段划分：
+        - 前3年：历史CAGR × 保守系数（反映公司实际增长动力）
+        - 第4-7年：向行业均值回归（高增长不可持续）
+        - 第8-10年：向GDP增速回归（永续增长不可能超过经济增速）
+
+        Args:
+            historical_fcf: 历史FCF序列
+            industry_growth: 行业平均增长率（默认8%）
+            gdp_growth: GDP长期增速（默认5%）
+
+        Returns:
+            10年增长率列表
+        """
+        # 计算历史CAGR
+        if len(historical_fcf) >= 2:
+            positive_fcf = [f for f in historical_fcf if f > 0]
+            if len(positive_fcf) >= 2:
+                start = positive_fcf[0]
+                end = positive_fcf[-1]
+                years = len(positive_fcf) - 1
+                if start > 0:
+                    cagr = (end / start) ** (1 / years) - 1
+                else:
+                    cagr = industry_growth
+            else:
+                cagr = industry_growth
+        else:
+            cagr = industry_growth
+
+        # 保守处理
+        conservative_cagr = cagr * 0.8
+        conservative_cagr = max(min(conservative_cagr, 0.30), 0.02)
+
+        # 分阶段
+        rates = []
+        for year in range(1, 11):
+            if year <= 3:
+                # 前3年：历史CAGR（逐步向行业均值靠拢）
+                weight = 1.0 - (year - 1) * 0.1  # 1.0, 0.9, 0.8
+                rate = conservative_cagr * weight + industry_growth * (1 - weight)
+            elif year <= 7:
+                # 第4-7年：向行业均值回归
+                progress = (year - 3) / 4  # 0.25, 0.5, 0.75, 1.0
+                rate = industry_growth * (1 - progress * 0.3) + gdp_growth * progress * 0.3
+            else:
+                # 第8-10年：向GDP增速回归
+                progress = (year - 7) / 3  # 0.33, 0.67, 1.0
+                rate = industry_growth * (1 - progress) + gdp_growth * progress
+
+            rates.append(round(max(min(rate, 0.30), 0.02), 4))
+
+        return rates
 
 
 def calculate_graham_number(eps: float, bvps: float) -> dict:
@@ -982,4 +1140,306 @@ def build_sensitivity_matrix(
         "growth_rates": [f"{g*100:.0f}%" for g in growth_rates],
         "discount_rates": [f"{d*100:.0f}%" for d in discount_rates],
         "matrix": matrix,
+    }
+
+
+# ============================================================
+# DDM 股息贴现模型
+# ============================================================
+
+def ddm_gordon(
+    dps: float,
+    dividend_growth_rate: float,
+    discount_rate: float,
+    current_price: float = 0,
+) -> dict:
+    """
+    Gordon 股息贴现模型（单阶段DDM）
+
+    适用于：高分红、低增长的成熟企业（银行、公用事业、长江电力等）
+    公式：V = DPS₁ / (r - g)
+    其中 DPS₁ = DPS₀ × (1+g)
+
+    Args:
+        dps: 当前每股股息（元）
+        dividend_growth_rate: 股息增长率
+        discount_rate: 折现率（要求回报率）
+        current_price: 当前股价（用于计算安全边际）
+
+    Returns:
+        dict: 内在价值、安全边际等
+    """
+    if discount_rate <= dividend_growth_rate:
+        raise ValueError(f"折现率({discount_rate:.1%})必须大于股息增长率({dividend_growth_rate:.1%})")
+
+    dps_next = dps * (1 + dividend_growth_rate)
+    intrinsic_value = dps_next / (discount_rate - dividend_growth_rate)
+
+    safety_margin = 0
+    upside = 0
+    if current_price > 0:
+        safety_margin = (intrinsic_value - current_price) / intrinsic_value
+        upside = (intrinsic_value - current_price) / current_price
+
+    return {
+        "model": "Gordon DDM",
+        "intrinsic_value": round(intrinsic_value, 2),
+        "current_price": current_price,
+        "dps_current": dps,
+        "dps_next": round(dps_next, 2),
+        "dividend_growth_rate": dividend_growth_rate,
+        "discount_rate": discount_rate,
+        "implied_yield": round(dps / current_price * 100, 2) if current_price > 0 else None,
+        "safety_margin": round(safety_margin * 100, 2),
+        "upside": round(upside * 100, 2),
+        "buy_price": round(intrinsic_value * (1 - 0.30), 2),  # 30%安全边际
+    }
+
+
+def ddm_two_stage(
+    dps: float,
+    high_growth_rate: float,
+    high_growth_years: int,
+    stable_growth_rate: float,
+    discount_rate: float,
+    current_price: float = 0,
+) -> dict:
+    """
+    两阶段DDM股息贴现模型
+
+    阶段1：高增长期（前N年股息高速增长）
+    阶段2：永续增长期（之后以稳定增速永续增长）
+
+    适用于：分红率稳定且有增长潜力的企业
+
+    Args:
+        dps: 当前每股股息（元）
+        high_growth_rate: 高增长阶段股息增长率
+        high_growth_years: 高增长年数
+        stable_growth_rate: 永续增长率
+        discount_rate: 折现率
+        current_price: 当前股价
+
+    Returns:
+        dict: 内在价值、分阶段现值等
+    """
+    if discount_rate <= stable_growth_rate:
+        raise ValueError(f"折现率({discount_rate:.1%})必须大于永续增长率({stable_growth_rate:.1%})")
+
+    # 阶段1：高增长期现值
+    pv_stage1 = 0
+    dividend_projections = []
+    for t in range(1, high_growth_years + 1):
+        div_t = dps * (1 + high_growth_rate) ** t
+        pv_t = div_t / (1 + discount_rate) ** t
+        pv_stage1 += pv_t
+        dividend_projections.append({
+            "year": t,
+            "dividend": round(div_t, 4),
+            "present_value": round(pv_t, 4),
+        })
+
+    # 阶段2：终值（Gordon模型）
+    last_div = dps * (1 + high_growth_rate) ** high_growth_years
+    terminal_div = last_div * (1 + stable_growth_rate)
+    terminal_value = terminal_div / (discount_rate - stable_growth_rate)
+    pv_terminal = terminal_value / (1 + discount_rate) ** high_growth_years
+
+    # 总内在价值
+    intrinsic_value = pv_stage1 + pv_terminal
+
+    safety_margin = 0
+    upside = 0
+    if current_price > 0:
+        safety_margin = (intrinsic_value - current_price) / intrinsic_value
+        upside = (intrinsic_value - current_price) / current_price
+
+    return {
+        "model": "Two-Stage DDM",
+        "intrinsic_value": round(intrinsic_value, 2),
+        "current_price": current_price,
+        "dps_current": dps,
+        "high_growth_rate": high_growth_rate,
+        "high_growth_years": high_growth_years,
+        "stable_growth_rate": stable_growth_rate,
+        "discount_rate": discount_rate,
+        "pv_stage1": round(pv_stage1, 2),
+        "pv_terminal": round(pv_terminal, 2),
+        "terminal_value": round(terminal_value, 2),
+        "stage1_pct": round(pv_stage1 / intrinsic_value * 100, 1) if intrinsic_value > 0 else 0,
+        "terminal_pct": round(pv_terminal / intrinsic_value * 100, 1) if intrinsic_value > 0 else 0,
+        "dividend_projections": dividend_projections,
+        "safety_margin": round(safety_margin * 100, 2),
+        "upside": round(upside * 100, 2),
+        "buy_price": round(intrinsic_value * (1 - 0.30), 2),
+    }
+
+
+def ddm_sensitivity(
+    dps: float,
+    dividend_growth_rate: float,
+    discount_rate: float,
+    current_price: float = 0,
+) -> dict:
+    """
+    DDM敏感性分析矩阵（股息增长率 × 折现率）
+    """
+    growth_rates = [0.00, 0.02, 0.03, 0.05, 0.08, 0.10, 0.12]
+    discount_rates = [0.06, 0.08, 0.10, 0.12, 0.15]
+    matrix = []
+
+    for gr in growth_rates:
+        row = []
+        for dr in discount_rates:
+            if dr <= gr:
+                row.append(None)
+                continue
+            try:
+                result = ddm_gordon(dps, gr, dr)
+                row.append(result["intrinsic_value"])
+            except (ValueError, ZeroDivisionError):
+                row.append(None)
+        matrix.append(row)
+
+    return {
+        "growth_rates": [f"{g*100:.0f}%" for g in growth_rates],
+        "discount_rates": [f"{d*100:.0f}%" for d in discount_rates],
+        "matrix": matrix,
+    }
+
+
+# ============================================================
+# 蒙特卡洛模拟 DCF
+# ============================================================
+
+def monte_carlo_dcf(
+    current_fcf: float,
+    shares: float,
+    net_debt: float = 0,
+    current_price: float = 0,
+    growth_mean: float = 0.10,
+    growth_std: float = 0.05,
+    discount_mean: float = 0.10,
+    discount_std: float = 0.02,
+    terminal_mean: float = 0.03,
+    terminal_std: float = 0.01,
+    n_simulations: int = 1000,
+    projection_years: int = 10,
+    safety_margin: float = 0.30,
+) -> dict:
+    """
+    蒙特卡洛模拟DCF估值
+
+    对关键假设（增长率、折现率、永续增长率）进行概率分布建模，
+    跑N次模拟得到价值分布区间。
+
+    Returns:
+        详细的模拟结果和统计信息
+    """
+    import random
+
+    if shares <= 0:
+        raise ValueError("总股本必须大于0")
+
+    results = []
+
+    for _ in range(n_simulations):
+        gr = max(min(random.gauss(growth_mean, growth_std), 0.40), -0.10)
+        dr = max(min(random.gauss(discount_mean, discount_std), 0.25), 0.05)
+        tg = max(min(random.gauss(terminal_mean, terminal_std), 0.05), 0.00)
+
+        if dr <= tg + 0.02:
+            dr = tg + 0.02
+
+        try:
+            fcf = current_fcf
+            pv_fcf = 0
+            for t in range(1, projection_years + 1):
+                fcf = fcf * (1 + gr)
+                pv_fcf += fcf / (1 + dr) ** t
+
+            terminal_fcf = fcf * (1 + tg)
+            terminal_value = terminal_fcf / (dr - tg)
+            pv_terminal = terminal_value / (1 + dr) ** projection_years
+
+            enterprise_value = pv_fcf + pv_terminal
+            equity_value = enterprise_value - net_debt
+            intrinsic_per_share = equity_value / shares
+
+            if -100 < intrinsic_per_share < 10000:
+                results.append(intrinsic_per_share)
+        except (ZeroDivisionError, ValueError):
+            continue
+
+    if len(results) < 100:
+        return {"error": "模拟有效样本不足，请检查输入参数"}
+
+    results.sort()
+
+    def percentile(data, p):
+        idx = int(len(data) * p / 100)
+        return data[min(idx, len(data) - 1)]
+
+    mean_val = sum(results) / len(results)
+    median_val = percentile(results, 50)
+    std_val = (sum((x - mean_val) ** 2 for x in results) / len(results)) ** 0.5
+
+    hist_count = 30
+    min_val = results[0]
+    max_val = results[-1]
+    bin_width = (max_val - min_val) / hist_count if max_val > min_val else 1
+    histogram = []
+    for i in range(hist_count):
+        bin_start = min_val + i * bin_width
+        bin_end = bin_start + bin_width
+        count = sum(1 for v in results if bin_start <= v < bin_end)
+        histogram.append({
+            "range_start": round(bin_start, 2),
+            "range_end": round(bin_end, 2),
+            "mid": round((bin_start + bin_end) / 2, 2),
+            "count": count,
+            "probability": round(count / len(results) * 100, 2),
+        })
+
+    prob_positive = sum(1 for v in results if v > 0) / len(results) * 100
+    prob_above_current = 0
+    if current_price > 0:
+        prob_above_current = sum(1 for v in results if v > current_price) / len(results) * 100
+
+    return {
+        "model": "Monte Carlo DCF",
+        "n_simulations": len(results),
+        "statistics": {
+            "mean": round(mean_val, 2),
+            "median": round(median_val, 2),
+            "std": round(std_val, 2),
+            "min": round(results[0], 2),
+            "max": round(results[-1], 2),
+            "p5": round(percentile(results, 5), 2),
+            "p10": round(percentile(results, 10), 2),
+            "p25": round(percentile(results, 25), 2),
+            "p75": round(percentile(results, 75), 2),
+            "p90": round(percentile(results, 90), 2),
+            "p95": round(percentile(results, 95), 2),
+        },
+        "current_price": current_price,
+        "buy_price": round(median_val * (1 - safety_margin), 2),
+        "probabilities": {
+            "positive_value": round(prob_positive, 1),
+            "above_current_price": round(prob_above_current, 1) if current_price > 0 else None,
+        },
+        "histogram": histogram,
+        "input_params": {
+            "current_fcf": current_fcf,
+            "shares": shares,
+            "net_debt": net_debt,
+            "growth_mean": growth_mean,
+            "growth_std": growth_std,
+            "discount_mean": discount_mean,
+            "discount_std": discount_std,
+            "terminal_mean": terminal_mean,
+            "terminal_std": terminal_std,
+            "projection_years": projection_years,
+            "safety_margin": safety_margin,
+        },
     }

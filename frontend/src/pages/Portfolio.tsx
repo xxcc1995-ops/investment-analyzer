@@ -4,6 +4,8 @@ import { portfolioApi } from '../services/api'
 import type { PortfolioSummary, PortfolioTransaction, PortfolioPosition, RiskExposure, PerformancePoint } from '../services/api'
 import { StatCard, StatCardGroup, PageSection, DataTable, TabBar, LoadingSpinner, EmptyState, Tag } from '../components/ui'
 import type { Column } from '../components/ui'
+import { useTradingInterceptor } from '../hooks/useTradingInterceptor'
+import RationalCheckpoint from '../components/RationalCheckpoint'
 
 // ============ 辅助函数 ============
 
@@ -40,6 +42,9 @@ export default function Portfolio() {
   const [showAddTxn, setShowAddTxn] = useState(false)
   const [addLoading, setAddLoading] = useState(false)
 
+  // 交易拦截器
+  const { intercept, checkpointOpen, checkpointMeta, handlePass, handleCancel } = useTradingInterceptor()
+
   // 加载数据
   const loadData = useCallback(async () => {
     setLoading(true)
@@ -63,8 +68,8 @@ export default function Portfolio() {
 
   useEffect(() => { loadData() }, [loadData])
 
-  // 添加交易
-  const handleAddTransaction = async (form: {
+  // 添加交易（实际执行）
+  const doAddTransaction = async (form: {
     code: string; name: string; type: string; shares: number; price: number; fee: number; reason: string
   }) => {
     setAddLoading(true)
@@ -85,6 +90,16 @@ export default function Portfolio() {
     } finally {
       setAddLoading(false)
     }
+  }
+
+  // 添加交易（带拦截）
+  const handleAddTransaction = (form: {
+    code: string; name: string; type: string; shares: number; price: number; fee: number; reason: string
+  }) => {
+    intercept(() => doAddTransaction(form), {
+      actionType: form.type === 'sell' ? 'sell' : 'buy',
+      target: form.name || form.code,
+    })
   }
 
   // 删除交易
@@ -152,6 +167,15 @@ export default function Portfolio() {
           onClose={() => setShowAddTxn(false)}
         />
       )}
+
+      {/* 理性检查点 */}
+      <RationalCheckpoint
+        open={checkpointOpen}
+        actionType={checkpointMeta.actionType}
+        target={checkpointMeta.target}
+        onPass={handlePass}
+        onCancel={handleCancel}
+      />
     </div>
   )
 }

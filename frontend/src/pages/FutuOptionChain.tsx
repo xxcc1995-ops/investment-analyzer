@@ -2,6 +2,8 @@ import { useState, useEffect, useCallback, useRef, Fragment } from 'react'
 import axios from 'axios'
 import ReactECharts from 'echarts-for-react'
 import { PageSection, TabBar, StatCard, StatCardGroup, LoadingSpinner, EmptyState } from '../components/ui'
+import { useTradingInterceptor } from '../hooks/useTradingInterceptor'
+import RationalCheckpoint from '../components/RationalCheckpoint'
 
 const API_BASE = '/api'
 
@@ -197,6 +199,9 @@ export default function FutuOptionChain() {
 
   useEffect(() => { checkConnection() }, [checkConnection])
 
+  // 交易拦截器
+  const { intercept, checkpointOpen, checkpointMeta, handlePass, handleCancel } = useTradingInterceptor()
+
   // Load philosophy
   useEffect(() => {
     axios.get(`${API_BASE}/futu-options/philosophy`)
@@ -273,8 +278,8 @@ export default function FutuOptionChain() {
     setRollLoading(false)
   }, [rollSpot, rollStrike, rollPremium, rollDteLeft, rollEntryDte, rollType, rollHv])
 
-  // Strategy analysis
-  const runStrategy = useCallback(async (strategy: string, extra: Record<string, string> = {}) => {
+  // Strategy analysis（实际执行）
+  const doRunStrategy = useCallback(async (strategy: string, extra: Record<string, string> = {}) => {
     if (!connectionStatus?.connected) return
     setStrategyLoading(true)
     setStrategyResult(null)
@@ -298,6 +303,23 @@ export default function FutuOptionChain() {
     }
     setStrategyLoading(false)
   }, [stockCode, connectionStatus])
+
+  // Strategy analysis（带拦截）
+  const STRATEGY_LABELS: Record<string, string> = {
+    covered_call: 'Covered Call',
+    csp: 'Cash Secured Put',
+    credit_spread: 'Credit Spread',
+    straddle: 'Straddle',
+    strangle: 'Strangle',
+    iron_condor: 'Iron Condor',
+  }
+
+  const runStrategy = useCallback((strategy: string, extra: Record<string, string> = {}) => {
+    intercept(() => doRunStrategy(strategy, extra), {
+      actionType: 'analyze',
+      target: `${STRATEGY_LABELS[strategy] || strategy} (HK.${stockCode})`,
+    })
+  }, [intercept, doRunStrategy, stockCode])
 
   const loadPnl = useCallback(async (strategy: string, extra: Record<string, string> = {}) => {
     setPnlLoading(true)
@@ -1435,6 +1457,15 @@ export default function FutuOptionChain() {
           )}
         </div>
       )}
+
+      {/* 理性检查点 */}
+      <RationalCheckpoint
+        open={checkpointOpen}
+        actionType={checkpointMeta.actionType}
+        target={checkpointMeta.target}
+        onPass={handlePass}
+        onCancel={handleCancel}
+      />
     </div>
   )
 }

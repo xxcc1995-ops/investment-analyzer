@@ -92,6 +92,9 @@ def analyze_financials(income: list, balance: list, cashflow: list) -> Dict[str,
 
     conclusion = _generate_conclusion(grade, dimensions)
 
+    # Piotroski F-Score（独立计算，不影响维度评分）
+    piotroski = calculate_piotroski_f_score(income, balance, cashflow)
+
     return {
         "score": score,
         "grade": grade,
@@ -103,6 +106,7 @@ def analyze_financials(income: list, balance: list, cashflow: list) -> Dict[str,
             for k, v in dimensions.items()
         },
         "dimension_scores": {k: v.score for k, v in dimensions.items()},
+        "piotroski_f_score": piotroski,
     }
 
 
@@ -881,6 +885,167 @@ def _calculate_altman_z_score(income: list, balance: list) -> float | None:
 
     except (ZeroDivisionError, TypeError):
         return None
+
+
+def calculate_piotroski_f_score(income: list, balance: list, cashflow: list) -> dict | None:
+    """
+    Piotroski F-Score (0-9) 财务质量评分
+
+    9个二元指标，每满足一个得1分：
+
+    盈利能力 (4分):
+    1. ROA > 0（净利润/总资产 > 0）
+    2. 经营现金流 > 0
+    3. ROA 同比增长
+    4. 经营现金流 > 净利润（应计质量）
+
+    杠杆/流动性 (3分):
+    5. 长期负债/总资产 同比下降
+    6. 流动比率同比上升
+    7. 本期未发行新股（总股本未增加）
+
+    运营效率 (2分):
+    8. 毛利率同比上升
+    9. 资产周转率同比上升
+
+    Returns:
+        dict: {total, details, grade} 或 None
+    """
+    if len(income) < 2 or len(balance) < 2:
+        return None
+
+    curr_inc = income[0]
+    prev_inc = income[1]
+    curr_bal = balance[0]
+    prev_bal = balance[1]
+
+    score = 0
+    details = {}
+
+    # 获取关键数据
+    curr_np = curr_inc.get("parent_net_profit") or curr_inc.get("net_profit")
+    prev_np = prev_inc.get("parent_net_profit") or prev_inc.get("net_profit")
+    curr_ta = curr_bal.get("total_assets")
+    prev_ta = prev_bal.get("total_assets")
+    curr_ocf = cashflow[0].get("netcash_operate") if cashflow else None
+    prev_ocf = cashflow[1].get("netcash_operate") if len(cashflow) >= 2 else None
+    curr_lt_liab = curr_bal.get("total_non_current_liabilities")
+    prev_lt_liab = prev_bal.get("total_non_current_liabilities")
+    curr_ca = curr_bal.get("total_current_assets")
+    prev_ca = prev_bal.get("total_current_assets")
+    curr_cl = curr_bal.get("total_current_liabilities")
+    prev_cl = prev_bal.get("total_current_liabilities")
+    curr_gm = curr_inc.get("gross_margin")
+    prev_gm = prev_inc.get("gross_margin")
+    curr_revenue = curr_inc.get("total_revenue") or curr_inc.get("revenue")
+    prev_revenue = prev_inc.get("total_revenue") or prev_inc.get("revenue")
+
+    # 1. ROA > 0
+    if curr_np is not None and curr_ta and curr_ta > 0:
+        roa = curr_np / curr_ta
+        if roa > 0:
+            score += 1
+            details["roa_positive"] = {"pass": True, "value": round(roa * 100, 2)}
+        else:
+            details["roa_positive"] = {"pass": False, "value": round(roa * 100, 2)}
+
+    # 2. 经营现金流 > 0
+    if curr_ocf is not None:
+        if curr_ocf > 0:
+            score += 1
+            details["ocf_positive"] = {"pass": True, "value": curr_ocf}
+        else:
+            details["ocf_positive"] = {"pass": False, "value": curr_ocf}
+
+    # 3. ROA 同比增长
+    if (curr_np is not None and curr_ta and curr_ta > 0 and
+        prev_np is not None and prev_ta and prev_ta > 0):
+        curr_roa = curr_np / curr_ta
+        prev_roa = prev_np / prev_ta
+        if curr_roa > prev_roa:
+            score += 1
+            details["roa_improving"] = {"pass": True, "curr": round(curr_roa * 100, 2), "prev": round(prev_roa * 100, 2)}
+        else:
+            details["roa_improving"] = {"pass": False, "curr": round(curr_roa * 100, 2), "prev": round(prev_roa * 100, 2)}
+
+    # 4. 经营现金流 > 净利润（应计质量）
+    if curr_ocf is not None and curr_np is not None:
+        if curr_ocf > curr_np:
+            score += 1
+            details["accrual_quality"] = {"pass": True, "ocf": curr_ocf, "np": curr_np}
+        else:
+            details["accrual_quality"] = {"pass": False, "ocf": curr_ocf, "np": curr_np}
+
+    # 5. 长期负债/总资产 同比下降
+    if (curr_lt_liab is not None and curr_ta and curr_ta > 0 and
+        prev_lt_liab is not None and prev_ta and prev_ta > 0):
+        curr_lev = curr_lt_liab / curr_ta
+        prev_lev = prev_lt_liab / prev_ta
+        if curr_lev < prev_lev:
+            score += 1
+            details["leverage_decreasing"] = {"pass": True}
+        else:
+            details["leverage_decreasing"] = {"pass": False}
+
+    # 6. 流动比率同比上升
+    if (curr_ca is not None and curr_cl and curr_cl > 0 and
+        prev_ca is not None and prev_cl and prev_cl > 0):
+        curr_cr = curr_ca / curr_cl
+        prev_cr = prev_ca / prev_cl
+        if curr_cr > prev_cr:
+            score += 1
+            details["current_ratio_improving"] = {"pass": True, "curr": round(curr_cr, 2), "prev": round(prev_cr, 2)}
+        else:
+            details["current_ratio_improving"] = {"pass": False, "curr": round(curr_cr, 2), "prev": round(prev_cr, 2)}
+
+    # 7. 未发行新股（用归母权益变化近似，权益增长<=利润增长说明没大规模融资）
+    curr_equity = curr_bal.get("parent_equity") or curr_bal.get("total_equity")
+    prev_equity = prev_bal.get("parent_equity") or prev_bal.get("total_equity")
+    if curr_equity and prev_equity and prev_equity > 0 and curr_np:
+        equity_growth = (curr_equity - prev_equity) / prev_equity
+        profit_contribution = curr_np / prev_equity if prev_equity > 0 else 0
+        # 如果权益增长主要来自利润留存，说明没发行新股
+        if equity_growth <= profit_contribution + 0.05:  # 5%容差
+            score += 1
+            details["no_dilution"] = {"pass": True}
+        else:
+            details["no_dilution"] = {"pass": False}
+
+    # 8. 毛利率同比上升
+    if curr_gm is not None and prev_gm is not None:
+        if curr_gm > prev_gm:
+            score += 1
+            details["gross_margin_improving"] = {"pass": True, "curr": round(curr_gm, 2), "prev": round(prev_gm, 2)}
+        else:
+            details["gross_margin_improving"] = {"pass": False, "curr": round(curr_gm, 2), "prev": round(prev_gm, 2)}
+
+    # 9. 资产周转率同比上升
+    if (curr_revenue and curr_ta and curr_ta > 0 and
+        prev_revenue and prev_ta and prev_ta > 0):
+        curr_turnover = curr_revenue / curr_ta
+        prev_turnover = prev_revenue / prev_ta
+        if curr_turnover > prev_turnover:
+            score += 1
+            details["asset_turnover_improving"] = {"pass": True}
+        else:
+            details["asset_turnover_improving"] = {"pass": False}
+
+    # 评级
+    if score >= 7:
+        grade = "优秀"
+    elif score >= 5:
+        grade = "良好"
+    elif score >= 3:
+        grade = "一般"
+    else:
+        grade = "较差"
+
+    return {
+        "total": score,
+        "max": 9,
+        "grade": grade,
+        "details": details,
+    }
 
 
 # ==================== 结论生成 ====================

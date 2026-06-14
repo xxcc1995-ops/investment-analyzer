@@ -944,8 +944,36 @@ class DailyInfoService:
         return result
 
     def get_us_macro_indicators(self) -> Dict[str, Any]:
-        """获取美国宏观数据"""
-        return {}
+        """获取美国宏观数据（FRED，24小时缓存）"""
+        cache_key = "daily_us_macro"
+        cached = get_cache(cache_key, TTL_WEEKLY)
+        if cached:
+            return cached
+        try:
+            from app.services.fred_service import fred_service
+            if not fred_service._is_available():
+                return {"indicators": {}, "source": "FRED", "available": False,
+                        "reason": "FRED_API_KEY未设置", "update_time": datetime.now().isoformat()}
+            keys = ["cpi", "unemployment", "fed_rate", "treasury_10y", "treasury_2y",
+                    "yield_spread_10y2y", "gdp_real", "nonfarm_payroll"]
+            result = fred_service.get_batch(keys)
+            indicators = {}
+            for key, data in result.items():
+                if data and data.get("latest"):
+                    indicators[key] = {
+                        "value": data["latest"]["value"],
+                        "date": data["latest"]["date"],
+                        "series": data.get("series", [])[:12],
+                        "series_id": data.get("series_id", ""),
+                    }
+            formatted = {"indicators": indicators, "source": "FRED", "available": True,
+                         "update_time": datetime.now().isoformat()}
+            set_cache(cache_key, formatted)
+            return formatted
+        except Exception as e:
+            logger.warning(f"FRED数据获取失败: {e}")
+            return {"indicators": {}, "source": "FRED", "available": False,
+                    "error": str(e), "update_time": datetime.now().isoformat()}
 
     def get_sector_performance(self) -> List[Dict[str, Any]]:
         """获取行业板块表现（板块数据，5分钟缓存）"""

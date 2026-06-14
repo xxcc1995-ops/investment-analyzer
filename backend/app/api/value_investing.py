@@ -4,7 +4,7 @@ from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 from typing import Optional
 from app.services.vi_service import screen_stocks
-from app.services.dcf import DCFService, calculate_graham_number, estimate_wacc
+from app.services.dcf import DCFService, calculate_graham_number, estimate_wacc, ddm_gordon, ddm_two_stage, ddm_sensitivity, monte_carlo_dcf
 from app.services.data_service import DataService
 
 router = APIRouter()
@@ -670,3 +670,110 @@ def _build_sensitivity_matrix(req) -> dict:
         'discount_rates': [f"{d*100:.0f}%" for d in discount_rates],
         'matrix': matrix,
     }
+
+
+# ============================================================
+# DDM 股息贴现模型
+# ============================================================
+
+class DDMRequest(BaseModel):
+    dps: float = Field(..., description="当前每股股息（元）")
+    dividend_growth_rate: float = Field(..., description="股息增长率（小数）")
+    discount_rate: float = Field(0.10, description="折现率（小数）")
+    current_price: float = Field(0, description="当前股价")
+
+
+class TwoStageDDMRequest(BaseModel):
+    dps: float = Field(..., description="当前每股股息（元）")
+    high_growth_rate: float = Field(..., description="高增长阶段增长率")
+    high_growth_years: int = Field(5, description="高增长年数")
+    stable_growth_rate: float = Field(0.03, description="永续增长率")
+    discount_rate: float = Field(0.10, description="折现率")
+    current_price: float = Field(0, description="当前股价")
+
+
+@router.post("/ddm")
+def ddm_calculator(req: DDMRequest):
+    """Gordon DDM 股息贴现模型"""
+    try:
+        result = ddm_gordon(
+            dps=req.dps,
+            dividend_growth_rate=req.dividend_growth_rate,
+            discount_rate=req.discount_rate,
+            current_price=req.current_price,
+        )
+        return result
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+@router.post("/ddm-two-stage")
+def ddm_two_stage_calculator(req: TwoStageDDMRequest):
+    """两阶段DDM股息贴现模型"""
+    try:
+        result = ddm_two_stage(
+            dps=req.dps,
+            high_growth_rate=req.high_growth_rate,
+            high_growth_years=req.high_growth_years,
+            stable_growth_rate=req.stable_growth_rate,
+            discount_rate=req.discount_rate,
+            current_price=req.current_price,
+        )
+        return result
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+@router.post("/ddm-sensitivity")
+def ddm_sensitivity_analysis(req: DDMRequest):
+    """DDM敏感性分析矩阵"""
+    try:
+        result = ddm_sensitivity(
+            dps=req.dps,
+            dividend_growth_rate=req.dividend_growth_rate,
+            discount_rate=req.discount_rate,
+            current_price=req.current_price,
+        )
+        return result
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+# ============================================================
+# 蒙特卡洛模拟 DCF
+# ============================================================
+
+class MonteCarloRequest(BaseModel):
+    current_fcf: float = Field(..., description="当前FCF（亿元）")
+    shares: float = Field(..., description="总股本（亿股）")
+    net_debt: float = Field(0, description="净负债（亿元）")
+    current_price: float = Field(0, description="当前股价")
+    growth_mean: float = Field(0.10, description="增长率均值")
+    growth_std: float = Field(0.05, description="增长率标准差")
+    discount_mean: float = Field(0.10, description="折现率均值")
+    discount_std: float = Field(0.02, description="折现率标准差")
+    terminal_mean: float = Field(0.03, description="永续增长率均值")
+    terminal_std: float = Field(0.01, description="永续增长率标准差")
+    n_simulations: int = Field(1000, description="模拟次数")
+
+
+@router.post("/monte-carlo")
+def monte_carlo_endpoint(req: MonteCarloRequest):
+    """蒙特卡洛模拟DCF估值"""
+    try:
+        result = monte_carlo_dcf(
+            current_fcf=req.current_fcf,
+            shares=req.shares,
+            net_debt=req.net_debt,
+            current_price=req.current_price,
+            growth_mean=req.growth_mean,
+            growth_std=req.growth_std,
+            discount_mean=req.discount_mean,
+            discount_std=req.discount_std,
+            terminal_mean=req.terminal_mean,
+            terminal_std=req.terminal_std,
+            n_simulations=req.n_simulations,
+        )
+        return result
+    except ValueError as e:
+        raise HTTPException(400, str(e))

@@ -268,8 +268,8 @@ export default function IndexValuation() {
                     <td style={{ color: idx.dividend_yield !== null && idx.dividend_yield > 3 ? '#3fb950' : 'var(--text-secondary)', fontWeight: idx.dividend_yield !== null && idx.dividend_yield > 3 ? 600 : 400 }}>
                       {idx.dividend_yield !== null ? `${idx.dividend_yield.toFixed(2)}%` : '--'}
                     </td>
-                    <td style={{ color: idx.risk_premium !== null && idx.risk_premium > 0 ? '#3fb950' : idx.risk_premium !== null && idx.risk_premium < -2 ? '#f85149' : 'var(--text-secondary)' }}>
-                      {idx.risk_premium !== null ? `${idx.risk_premium > 0 ? '+' : ''}${idx.risk_premium.toFixed(1)}%` : '--'}
+                    <td style={{ color: idx.risk_premium != null && idx.risk_premium > 0 ? '#3fb950' : idx.risk_premium != null && idx.risk_premium < -2 ? '#f85149' : 'var(--text-secondary)' }}>
+                      {idx.risk_premium != null ? `${idx.risk_premium > 0 ? '+' : ''}${idx.risk_premium.toFixed(1)}%` : '--'}
                     </td>
                     <td style={{ color: getReturnColor(idx.return_1y), fontWeight: 600 }}>{formatReturn(idx.return_1y)}</td>
                     <td style={{ color: getReturnColor(idx.return_3y), fontWeight: 600 }}>{formatReturn(idx.return_3y)}</td>

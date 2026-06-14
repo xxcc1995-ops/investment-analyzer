@@ -2,6 +2,8 @@ import { useState, useEffect, useCallback, Fragment } from 'react'
 import axios from 'axios'
 import { PageSection, TabBar, StatCard, StatCardGroup, LoadingSpinner, EmptyState, DataTable } from '../components/ui'
 import type { Column } from '../components/ui'
+import { useTradingInterceptor } from '../hooks/useTradingInterceptor'
+import RationalCheckpoint from '../components/RationalCheckpoint'
 
 const API_BASE = '/api/t-trading'
 
@@ -144,6 +146,9 @@ export default function TTrading() {
   // Philosophy state
   const [philosophy, setPhilosophy] = useState<any>(null)
 
+  // 交易拦截器
+  const { intercept, checkpointOpen, checkpointMeta, handlePass, handleCancel } = useTradingInterceptor()
+
   // Backtest state
   const [backtestData, setBacktestData] = useState<BacktestResult | null>(null)
   const [backtestLoading, setBacktestLoading] = useState(false)
@@ -233,7 +238,7 @@ export default function TTrading() {
   // Handlers
   // ============================================================
 
-  const handleInitPosition = async () => {
+  const doInitPosition = async () => {
     if (!initForm.code.trim() || !initForm.name.trim()) {
       alert('请填写股票代码和名称')
       return
@@ -262,7 +267,14 @@ export default function TTrading() {
     }
   }
 
-  const handleExecuteTrade = async (code: string, market: string) => {
+  const handleInitPosition = () => {
+    intercept(doInitPosition, {
+      actionType: 'buy',
+      target: initForm.name || initForm.code,
+    })
+  }
+
+  const doExecuteTrade = async (code: string, market: string) => {
     if (!tradeForm.shares || Number(tradeForm.shares) <= 0) {
       alert('请填写有效的股数')
       return
@@ -287,6 +299,14 @@ export default function TTrading() {
     } catch (e: any) {
       alert(e.response?.data?.error || '交易失败')
     }
+  }
+
+  const handleExecuteTrade = (code: string, market: string) => {
+    const posName = positions.find(p => p.code === code)?.name || code
+    intercept(() => doExecuteTrade(code, market), {
+      actionType: tradeForm.action === 'buy_t' ? 'buy' : 'sell',
+      target: posName,
+    })
   }
 
   const loadPyramid = async (code: string, market: string) => {
@@ -368,6 +388,7 @@ export default function TTrading() {
   // ============================================================
 
   return (
+    <>
     <div className="cb-page">
       <PageSection title="金渐成做T交易系统" compact>
         <div style={{ color: 'var(--text-secondary)', fontSize: 13 }}>三重确认 · ATR自适应 · 负成本持股</div>
@@ -1124,5 +1145,13 @@ export default function TTrading() {
         </div>
       )}
     </div>
+    <RationalCheckpoint
+      open={checkpointOpen}
+      actionType={checkpointMeta.actionType}
+      target={checkpointMeta.target}
+      onPass={handlePass}
+      onCancel={handleCancel}
+    />
+    </>
   )
 }
