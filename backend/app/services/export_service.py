@@ -1,8 +1,18 @@
-"""出口冠军筛选服务 - 筛选具备全球竞争力、分红稳健、且满足价值投资标准的企业"""
+"""出口冠军筛选服务 - 筛选具备全球竞争力、分红稳健、且满足价值投资标准的企业
+
+机构级优化:
+1. 汇率影响实时评估 (AKShare currency_boc_sina)
+2. 关税/贸易政策风险分行业量化评估
+3. 同行业公司对比分析 (行业均值/中位数/排名)
+4. 数据来源透明化
+5. 修复A股代码筛选逻辑
+"""
 
 import time
-from typing import Optional
-from datetime import datetime
+import math
+import logging
+from typing import Optional, List, Dict
+from datetime import datetime, timedelta
 from app.services.data_service import DataService, _safe_float, _get_annual_report
 from app.services.vi_service import (
     _get_hk_stock_data,
@@ -12,71 +22,82 @@ from app.services.vi_service import (
     _score_duan_yongping,
 )
 
+logger = logging.getLogger(__name__)
+
 # ============================================================
 # 出口冠军股票池 - 精选具备全球竞争力的A股和港股
 # ============================================================
 
 EXPORT_STOCKS = {
     # === 家电出口 ===
-    "000333": {"name": "美的集团", "industry": "家电出口", "export_intensity": "high", "est_overseas_pct": 40},
-    "000651": {"name": "格力电器", "industry": "家电出口", "export_intensity": "medium", "est_overseas_pct": 15},
-    "002032": {"name": "苏泊尔", "industry": "家电出口", "export_intensity": "high", "est_overseas_pct": 50},
-    "600690": {"name": "海尔智家", "industry": "家电出口", "export_intensity": "high", "est_overseas_pct": 50},
-    "600060": {"name": "海信视像", "industry": "家电出口", "export_intensity": "high", "est_overseas_pct": 40},
+    "000333": {"name": "美的集团", "industry": "家电出口", "sub_industry": "白色家电", "export_intensity": "high", "est_overseas_pct": 40, "tariff_sensitivity": "medium", "main_export_markets": ["东南亚", "欧洲", "北美"], "competitive_advantage": "全品类覆盖+全球供应链"},
+    "000651": {"name": "格力电器", "industry": "家电出口", "sub_industry": "白色家电", "export_intensity": "medium", "est_overseas_pct": 15, "tariff_sensitivity": "medium", "main_export_markets": ["东南亚", "中东"], "competitive_advantage": "空调技术领先"},
+    "002032": {"name": "苏泊尔", "industry": "家电出口", "sub_industry": "小家电", "export_intensity": "high", "est_overseas_pct": 50, "tariff_sensitivity": "low", "main_export_markets": ["欧洲", "东南亚"], "competitive_advantage": "SEB集团全球渠道"},
+    "600690": {"name": "海尔智家", "industry": "家电出口", "sub_industry": "白色家电", "export_intensity": "high", "est_overseas_pct": 50, "tariff_sensitivity": "medium", "main_export_markets": ["北美", "欧洲", "东南亚", "日本"], "competitive_advantage": "全球化品牌矩阵(海尔/卡萨帝/GE/Fisher&Paykel)"},
+    "600060": {"name": "海信视像", "industry": "家电出口", "sub_industry": "黑色家电", "export_intensity": "high", "est_overseas_pct": 40, "tariff_sensitivity": "medium", "main_export_markets": ["北美", "欧洲", "日本"], "competitive_advantage": "显示技术+体育营销全球化"},
 
     # === 动力电池 / 新能源车 ===
-    "300750": {"name": "宁德时代", "industry": "动力电池", "export_intensity": "high", "est_overseas_pct": 35},
-    "002594": {"name": "比亚迪", "industry": "新能源车", "export_intensity": "high", "est_overseas_pct": 25},
-    "002460": {"name": "赣锋锂业", "industry": "锂矿", "export_intensity": "high", "est_overseas_pct": 45},
-    "601633": {"name": "长城汽车", "industry": "汽车出口", "export_intensity": "high", "est_overseas_pct": 30},
+    "300750": {"name": "宁德时代", "industry": "动力电池", "sub_industry": "锂电池", "export_intensity": "high", "est_overseas_pct": 35, "tariff_sensitivity": "high", "main_export_markets": ["欧洲", "北美", "东南亚"], "competitive_advantage": "全球市占率37%+技术代差"},
+    "002594": {"name": "比亚迪", "industry": "新能源车", "sub_industry": "整车", "export_intensity": "high", "est_overseas_pct": 25, "tariff_sensitivity": "high", "main_export_markets": ["东南亚", "欧洲", "中东", "南美"], "competitive_advantage": "垂直一体化(电池+芯片+整车)"},
+    "002460": {"name": "赣锋锂业", "industry": "锂矿", "sub_industry": "锂资源", "export_intensity": "high", "est_overseas_pct": 45, "tariff_sensitivity": "low", "main_export_markets": ["全球"], "competitive_advantage": "全球锂资源布局+加工能力"},
+    "601633": {"name": "长城汽车", "industry": "汽车出口", "sub_industry": "整车", "export_intensity": "high", "est_overseas_pct": 30, "tariff_sensitivity": "high", "main_export_markets": ["俄罗斯", "东南亚", "中东", "澳洲"], "competitive_advantage": "SUV/皮卡差异化+本地化生产"},
 
     # === 光伏 / 太阳能 ===
-    "601012": {"name": "隆基绿能", "industry": "光伏", "export_intensity": "high", "est_overseas_pct": 35},
-    "600438": {"name": "通威股份", "industry": "光伏", "export_intensity": "high", "est_overseas_pct": 30},
-    "002459": {"name": "晶澳科技", "industry": "光伏", "export_intensity": "high", "est_overseas_pct": 60},
+    "601012": {"name": "隆基绿能", "industry": "光伏", "sub_industry": "硅片+组件", "export_intensity": "high", "est_overseas_pct": 35, "tariff_sensitivity": "high", "main_export_markets": ["欧洲", "北美", "东南亚"], "competitive_advantage": "单晶硅片技术龙头"},
+    "600438": {"name": "通威股份", "industry": "光伏", "sub_industry": "多晶硅+电池", "export_intensity": "high", "est_overseas_pct": 30, "tariff_sensitivity": "high", "main_export_markets": ["东南亚", "欧洲"], "competitive_advantage": "硅料成本最低+电池片龙头"},
+    "002459": {"name": "晶澳科技", "industry": "光伏", "sub_industry": "组件", "export_intensity": "high", "est_overseas_pct": 60, "tariff_sensitivity": "high", "main_export_markets": ["欧洲", "北美", "日本", "东南亚"], "competitive_advantage": "N型电池技术+全球渠道"},
 
     # === 船舶制造 / 重工 ===
-    "600150": {"name": "中国船舶", "industry": "船舶制造", "export_intensity": "high", "est_overseas_pct": 70},
-    "601989": {"name": "中国重工", "industry": "船舶制造", "export_intensity": "high", "est_overseas_pct": 50},
+    "600150": {"name": "中国船舶", "industry": "船舶制造", "sub_industry": "造船", "export_intensity": "high", "est_overseas_pct": 70, "tariff_sensitivity": "low", "main_export_markets": ["全球"], "competitive_advantage": "全球最大造船集团+LNG船突破"},
+    "601989": {"name": "中国重工", "industry": "船舶制造", "sub_industry": "造船+军工", "export_intensity": "high", "est_overseas_pct": 50, "tariff_sensitivity": "low", "main_export_markets": ["全球"], "competitive_advantage": "军民融合+大型船舶"},
 
     # === 工程机械 ===
-    "600031": {"name": "三一重工", "industry": "工程机械", "export_intensity": "high", "est_overseas_pct": 45},
-    "000157": {"name": "中联重科", "industry": "工程机械", "export_intensity": "high", "est_overseas_pct": 35},
+    "600031": {"name": "三一重工", "industry": "工程机械", "sub_industry": "工程机械", "export_intensity": "high", "est_overseas_pct": 45, "tariff_sensitivity": "medium", "main_export_markets": ["东南亚", "欧洲", "北美", "中东"], "competitive_advantage": "挖掘机全球前三+海外本地化"},
+    "000157": {"name": "中联重科", "industry": "工程机械", "sub_industry": "工程机械", "export_intensity": "high", "est_overseas_pct": 35, "tariff_sensitivity": "medium", "main_export_markets": ["东南亚", "中东", "非洲"], "competitive_advantage": "起重机全球龙头"},
 
     # === 电子 / 消费电子 ===
-    "002415": {"name": "海康威视", "industry": "安防设备", "export_intensity": "high", "est_overseas_pct": 35},
-    "000725": {"name": "京东方A", "industry": "面板", "export_intensity": "high", "est_overseas_pct": 50},
-    "002241": {"name": "歌尔股份", "industry": "消费电子", "export_intensity": "high", "est_overseas_pct": 75},
-    "002475": {"name": "立讯精密", "industry": "消费电子", "export_intensity": "high", "est_overseas_pct": 80},
-    "601138": {"name": "工业富联", "industry": "电子制造", "export_intensity": "high", "est_overseas_pct": 70},
+    "002415": {"name": "海康威视", "industry": "安防设备", "sub_industry": "安防", "export_intensity": "high", "est_overseas_pct": 35, "tariff_sensitivity": "high", "main_export_markets": ["欧洲", "东南亚", "中东"], "competitive_advantage": "AI视觉技术领先+全球服务网络"},
+    "000725": {"name": "京东方A", "industry": "面板", "sub_industry": "显示面板", "export_intensity": "high", "est_overseas_pct": 50, "tariff_sensitivity": "low", "main_export_markets": ["全球"], "competitive_advantage": "LCD全球第一+OLED追赶"},
+    "002241": {"name": "歌尔股份", "industry": "消费电子", "sub_industry": "精密制造", "export_intensity": "high", "est_overseas_pct": 75, "tariff_sensitivity": "medium", "main_export_markets": ["北美", "欧洲"], "competitive_advantage": "苹果/索尼核心供应商+XR布局"},
+    "002475": {"name": "立讯精密", "industry": "消费电子", "sub_industry": "精密制造", "export_intensity": "high", "est_overseas_pct": 80, "tariff_sensitivity": "medium", "main_export_markets": ["北美", "欧洲"], "competitive_advantage": "苹果第一大代工商+汽车电子转型"},
+    "601138": {"name": "工业富联", "industry": "电子制造", "sub_industry": "EMS代工", "export_intensity": "high", "est_overseas_pct": 70, "tariff_sensitivity": "medium", "main_export_markets": ["北美", "欧洲"], "competitive_advantage": "全球最大EMS+AI服务器"},
 
     # === 化工 / 材料 ===
-    "600309": {"name": "万华化学", "industry": "化工", "export_intensity": "high", "est_overseas_pct": 45},
-    "002353": {"name": "杰瑞股份", "industry": "油服设备", "export_intensity": "high", "est_overseas_pct": 50},
+    "600309": {"name": "万华化学", "industry": "化工", "sub_industry": "MDI", "export_intensity": "high", "est_overseas_pct": 45, "tariff_sensitivity": "low", "main_export_markets": ["全球"], "competitive_advantage": "全球MDI龙头(市占率25%)+技术壁垒"},
+    "002353": {"name": "杰瑞股份", "industry": "油服设备", "sub_industry": "油气装备", "export_intensity": "high", "est_overseas_pct": 50, "tariff_sensitivity": "low", "main_export_markets": ["中东", "北美", "中亚"], "competitive_advantage": "压裂设备全球竞争力"},
 
     # === 通信设备 ===
-    "000063": {"name": "中兴通讯", "industry": "通信设备", "export_intensity": "high", "est_overseas_pct": 30},
+    "000063": {"name": "中兴通讯", "industry": "通信设备", "sub_industry": "电信设备", "export_intensity": "high", "est_overseas_pct": 30, "tariff_sensitivity": "high", "main_export_markets": ["东南亚", "非洲", "中东"], "competitive_advantage": "5G技术第二梯队+性价比"},
 
     # === 半导体 ===
-    "603501": {"name": "韦尔股份", "industry": "半导体", "export_intensity": "high", "est_overseas_pct": 60},
+    "603501": {"name": "韦尔股份", "industry": "半导体", "sub_industry": "芯片设计", "export_intensity": "high", "est_overseas_pct": 60, "tariff_sensitivity": "high", "main_export_markets": ["全球"], "competitive_advantage": "CIS全球第三+汽车CIS增长"},
 
     # === 发动机 / 工业 ===
-    "000338": {"name": "潍柴动力", "industry": "发动机", "export_intensity": "high", "est_overseas_pct": 40},
+    "000338": {"name": "潍柴动力", "industry": "发动机", "sub_industry": "动力总成", "export_intensity": "high", "est_overseas_pct": 40, "tariff_sensitivity": "medium", "main_export_markets": ["东南亚", "中东", "非洲", "南美"], "competitive_advantage": "柴油发动机全球领先+液压龙头(林德)"},
 
     # === 港股 ===
-    "01810": {"name": "小米集团", "industry": "消费电子", "export_intensity": "high", "est_overseas_pct": 40},
-    "01211": {"name": "比亚迪股份", "industry": "新能源车", "export_intensity": "high", "est_overseas_pct": 25},
-    "02333": {"name": "长城汽车", "industry": "汽车出口", "export_intensity": "high", "est_overseas_pct": 30},
-    "00175": {"name": "吉利汽车", "industry": "汽车出口", "export_intensity": "high", "est_overseas_pct": 20},
-    "02269": {"name": "药明生物", "industry": "CXO", "export_intensity": "high", "est_overseas_pct": 70},
-    "06690": {"name": "海尔智家H", "industry": "家电出口", "export_intensity": "high", "est_overseas_pct": 50},
-    "09992": {"name": "泡泡玛特", "industry": "潮玩", "export_intensity": "high", "est_overseas_pct": 30},
-    "01929": {"name": "周大福", "industry": "珠宝", "export_intensity": "medium", "est_overseas_pct": 15},
+    "01810": {"name": "小米集团", "industry": "消费电子", "sub_industry": "智能硬件", "export_intensity": "high", "est_overseas_pct": 40, "tariff_sensitivity": "medium", "main_export_markets": ["印度", "东南亚", "欧洲"], "competitive_advantage": "性价比+IoT生态+造车"},
+    "01211": {"name": "比亚迪股份", "industry": "新能源车", "sub_industry": "整车", "export_intensity": "high", "est_overseas_pct": 25, "tariff_sensitivity": "high", "main_export_markets": ["东南亚", "欧洲", "中东"], "competitive_advantage": "垂直一体化+刀片电池"},
+    "02333": {"name": "长城汽车", "industry": "汽车出口", "sub_industry": "整车", "export_intensity": "high", "est_overseas_pct": 30, "tariff_sensitivity": "high", "main_export_markets": ["俄罗斯", "东南亚", "中东"], "competitive_advantage": "SUV/皮卡+海外工厂"},
+    "00175": {"name": "吉利汽车", "industry": "汽车出口", "sub_industry": "整车", "export_intensity": "high", "est_overseas_pct": 20, "tariff_sensitivity": "high", "main_export_markets": ["东南亚", "中东"], "competitive_advantage": "沃尔沃技术+极氪高端化"},
+    "02269": {"name": "药明生物", "industry": "CXO", "sub_industry": "生物制药CDMO", "export_intensity": "high", "est_overseas_pct": 70, "tariff_sensitivity": "low", "main_export_markets": ["北美", "欧洲"], "competitive_advantage": "全球CDMO第二+技术平台"},
+    "06690": {"name": "海尔智家H", "industry": "家电出口", "sub_industry": "白色家电", "export_intensity": "high", "est_overseas_pct": 50, "tariff_sensitivity": "medium", "main_export_markets": ["北美", "欧洲", "东南亚", "日本"], "competitive_advantage": "全球化品牌矩阵"},
+    "09992": {"name": "泡泡玛特", "industry": "潮玩", "sub_industry": "潮流玩具", "export_intensity": "high", "est_overseas_pct": 30, "tariff_sensitivity": "low", "main_export_markets": ["东南亚", "日韩", "欧美"], "competitive_advantage": "IP运营+盲盒模式全球化"},
+    "01929": {"name": "周大福", "industry": "珠宝", "sub_industry": "珠宝零售", "export_intensity": "medium", "est_overseas_pct": 15, "tariff_sensitivity": "low", "main_export_markets": ["港澳", "东南亚"], "competitive_advantage": "品牌+渠道+黄金工艺"},
 }
 
-# A股和港股代码列表
-A_EXPORT_STOCKS = [c for c in EXPORT_STOCKS if not c.startswith("0") or len(c) == 6 and c[0] in "603"]
+# A股代码: 6位数字, 以0/3/6开头
+# 港股代码: 5位数字
+A_EXPORT_STOCKS = [c for c in EXPORT_STOCKS if len(c) == 6]
 HK_EXPORT_STOCKS = [c for c in EXPORT_STOCKS if len(c) == 5]
+
+# 行业分组索引
+INDUSTRY_GROUPS: Dict[str, List[str]] = {}
+for _code, _info in EXPORT_STOCKS.items():
+    _ind = _info['industry']
+    if _ind not in INDUSTRY_GROUPS:
+        INDUSTRY_GROUPS[_ind] = []
+    INDUSTRY_GROUPS[_ind].append(_code)
 
 # ============================================================
 # Data Fetching
@@ -94,7 +115,10 @@ def _get_a_stock_data(code: str) -> Optional[dict]:
         reports = financials.get("reports", [])
         latest = _get_annual_report(reports) if reports else {}
 
-        div_per_share, consecutive_years, dividend_ratio = DataService._get_actual_dividend(code)
+        _div = DataService._get_actual_dividend(code)
+        div_per_share = _div["dividend_per_share"]
+        consecutive_years = _div["consecutive_years"]
+        dividend_ratio = _div["dividend_ratio"]
         dividend_yield = None
         if div_per_share > 0 and basic.get('price', 0) > 0:
             dividend_yield = round(div_per_share / basic['price'] * 100, 2)
@@ -150,6 +174,360 @@ def _get_hk_data(code: str) -> Optional[dict]:
 
 
 # ============================================================
+# 汇率数据服务
+# ============================================================
+
+def get_exchange_rate_data() -> Optional[Dict]:
+    """获取USD/CNY汇率数据及趋势分析 (数据源: AKShare -> 中国银行外汇牌价)"""
+    cache_key = "export_fx_usdcny"
+    cached = _get_cached(cache_key, cache_type='financial')
+    if cached:
+        return cached
+
+    try:
+        import akshare as ak
+        end_date = datetime.now().strftime('%Y%m%d')
+        start_date = (datetime.now() - timedelta(days=90)).strftime('%Y%m%d')
+        df = ak.currency_boc_sina(symbol='美元', start_date=start_date, end_date=end_date)
+        if df is None or df.empty:
+            return None
+
+        # 中间价在第5列 (index 4)
+        col_name = df.columns[4]
+        df = df.dropna(subset=[col_name])
+        df['rate'] = df[col_name].astype(float) / 100.0  # 转换为标准汇率
+
+        latest_rate = float(df['rate'].iloc[-1])
+        latest_date = str(df.iloc[-1, 0])
+
+        # 计算趋势
+        rates = df['rate'].tolist()
+        rate_7d = float(rates[-7]) if len(rates) >= 7 else float(rates[0])
+        rate_30d = float(rates[-22]) if len(rates) >= 22 else float(rates[0])
+        rate_90d = float(rates[0])
+
+        change_7d = round((latest_rate / rate_7d - 1) * 100, 3)
+        change_30d = round((latest_rate / rate_30d - 1) * 100, 3)
+        change_90d = round((latest_rate / rate_90d - 1) * 100, 3)
+
+        # 汇率趋势判断
+        if change_30d > 1.0:
+            trend = "人民币贬值"
+            trend_desc = "近30天人民币贬值超过1%，利好出口企业营收换算"
+            export_impact = "positive"
+        elif change_30d < -1.0:
+            trend = "人民币升值"
+            trend_desc = "近30天人民币升值超过1%，利空出口企业营收换算"
+            export_impact = "negative"
+        else:
+            trend = "汇率稳定"
+            trend_desc = "近30天人民币汇率波动在1%以内，对出口企业影响有限"
+            export_impact = "neutral"
+
+        # 高海外收入企业的汇率敏感度
+        high_fx_stocks = []
+        for code, info in EXPORT_STOCKS.items():
+            if info['est_overseas_pct'] >= 50:
+                # 粗略估计: 海外营收占比 * 汇率变动 = 营收影响
+                revenue_impact = round(info['est_overseas_pct'] / 100 * change_30d, 2)
+                high_fx_stocks.append({
+                    'code': code,
+                    'name': info['name'],
+                    'est_overseas_pct': info['est_overseas_pct'],
+                    'revenue_fx_impact_pct': revenue_impact,
+                })
+        high_fx_stocks.sort(key=lambda x: abs(x['revenue_fx_impact_pct']), reverse=True)
+
+        result = {
+            'latest_rate': round(latest_rate, 4),
+            'latest_date': latest_date,
+            'change_7d_pct': change_7d,
+            'change_30d_pct': change_30d,
+            'change_90d_pct': change_90d,
+            'trend': trend,
+            'trend_desc': trend_desc,
+            'export_impact': export_impact,
+            'high_fx_sensitivity_stocks': high_fx_stocks[:10],
+            'update_time': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+            'data_source': 'AKShare -> 中国银行外汇牌价',
+        }
+
+        _set_cached(cache_key, result)
+        return result
+    except Exception as e:
+        logger.warning(f"获取汇率数据失败: {e}")
+        return None
+
+
+# ============================================================
+# 关税/贸易政策风险量化评估
+# ============================================================
+
+# 行业关税风险矩阵 (2024-2025年最新政策)
+TARIFF_RISK_MATRIX = {
+    '光伏': {
+        'risk_level': 'critical',
+        'score': 95,
+        'detail': '美国对华光伏组件关税累计超100%(301条款+AD/CVD)，欧盟CBAM碳关税2026年实施',
+        'mitigation': '东南亚产能转移(隆基越南/晶澳马来)可部分规避',
+        'recent_policy': '2024年5月拜登将光伏关税从25%提升至50%(Section 301)',
+        'fx_hedge': '美元结算为主，汇率自然对冲',
+    },
+    '动力电池': {
+        'risk_level': 'high',
+        'score': 80,
+        'detail': '美国IRA法案限制中国电池享受补贴，欧盟反补贴调查',
+        'mitigation': '宁德时代与福特技术授权模式、欧洲建厂',
+        'recent_policy': '2024年欧盟对中国电动汽车加征17-36%反补贴关税',
+        'fx_hedge': '欧元/美元结算，汇率风险中等',
+    },
+    '新能源车': {
+        'risk_level': 'high',
+        'score': 85,
+        'detail': '美国100%关税(2024)、欧盟17-36%反补贴关税',
+        'mitigation': '东南亚/中东/南美市场分散化，海外建厂',
+        'recent_policy': '2024年美国对中国电动车关税从25%提升至100%',
+        'fx_hedge': '多币种结算，需关注各市场汇率',
+    },
+    '半导体': {
+        'risk_level': 'high',
+        'score': 80,
+        'detail': '美国出口管制+实体清单限制高端芯片和设备',
+        'mitigation': '韦尔为Fabless设计公司，代工在台积电/中芯，限制相对较小',
+        'recent_policy': '2024年美国进一步收紧对华半导体出口管制',
+        'fx_hedge': '美元结算为主',
+    },
+    '安防设备': {
+        'risk_level': 'high',
+        'score': 75,
+        'detail': '海康威视已被列入实体清单，美国市场受限',
+        'mitigation': '已退出美国市场，聚焦欧洲/东南亚/中东',
+        'recent_policy': 'NDAA禁令覆盖联邦采购，部分州扩展至商业',
+        'fx_hedge': '欧元/美元结算为主',
+    },
+    '通信设备': {
+        'risk_level': 'high',
+        'score': 75,
+        'detail': '中兴曾遭制裁(2018)，美国/澳洲/部分欧洲国家禁用5G设备',
+        'mitigation': '聚焦发展中国家市场(东南亚/非洲/中东)',
+        'recent_policy': '部分国家逐步排除中国5G设备',
+        'fx_hedge': '多币种结算，新兴市场汇率波动大',
+    },
+    'CXO': {
+        'risk_level': 'high',
+        'score': 70,
+        'detail': '美国《生物安全法案》(BIOSECURE Act)可能限制药明等中资CXO',
+        'mitigation': '法案尚未最终通过，药明持续建设海外产能',
+        'recent_policy': '2024年BIOSECURE Act在众议院通过，参议院待审',
+        'fx_hedge': '美元结算为主，汇率自然对冲',
+    },
+    '汽车出口': {
+        'risk_level': 'medium',
+        'score': 55,
+        'detail': '欧盟反补贴关税、部分国家本地化要求',
+        'mitigation': '长城/吉利在东南亚建厂，本地化生产规避',
+        'recent_policy': '2024年欧盟反补贴关税落地',
+        'fx_hedge': '多币种结算',
+    },
+    '消费电子': {
+        'risk_level': 'medium',
+        'score': 50,
+        'detail': '终端品牌(苹果)承担关税，供应链转移压力',
+        'mitigation': '越南/印度产能布局，苹果承担部分关税成本',
+        'recent_policy': '消费电子暂未被大幅加征关税',
+        'fx_hedge': '美元结算为主',
+    },
+    '家电出口': {
+        'risk_level': 'medium',
+        'score': 45,
+        'detail': '已有反倾销税但整体可控，海外建厂规避',
+        'mitigation': '海尔/美的全球工厂布局成熟',
+        'recent_policy': '关税稳定，无大幅升级风险',
+        'fx_hedge': '多币种+海外本地生产自然对冲',
+    },
+    '工程机械': {
+        'risk_level': 'medium',
+        'score': 40,
+        'detail': '非贸易制裁重点行业，部分市场有准入限制',
+        'mitigation': '三一海外工厂布局+代理商网络',
+        'recent_policy': '无重大政策变化',
+        'fx_hedge': '美元+当地货币结算',
+    },
+    '化工': {
+        'risk_level': 'low',
+        'score': 25,
+        'detail': 'MDI等化工品属全球化大宗商品，贸易壁垒较低',
+        'mitigation': '万华匈牙利工厂+全球化产能布局',
+        'recent_policy': '无重大贸易限制',
+        'fx_hedge': '美元定价为主，汇率自然对冲',
+    },
+    '面板': {
+        'risk_level': 'low',
+        'score': 20,
+        'detail': '面板属全球化供应链，贸易壁垒低',
+        'mitigation': '京东方全球产能布局',
+        'recent_policy': '无贸易限制',
+        'fx_hedge': '美元定价',
+    },
+    '船舶制造': {
+        'risk_level': 'low',
+        'score': 15,
+        'detail': '造船业全球招标，无明显贸易壁垒',
+        'mitigation': '全球第一造船大国，订单排期长',
+        'recent_policy': '无贸易限制',
+        'fx_hedge': '美元定价',
+    },
+    '发动机': {
+        'risk_level': 'medium',
+        'score': 40,
+        'detail': '非制裁重点，但需关注地缘政治风险',
+        'mitigation': '潍柴海外并购(林德液压)+本地化',
+        'recent_policy': '无重大政策变化',
+        'fx_hedge': '多币种结算',
+    },
+    '油服设备': {
+        'risk_level': 'low',
+        'score': 25,
+        'detail': '油服设备面向全球油气公司，贸易壁垒低',
+        'mitigation': '杰瑞中东/北美本地化服务',
+        'recent_policy': '无贸易限制',
+        'fx_hedge': '美元定价为主',
+    },
+    '锂矿': {
+        'risk_level': 'low',
+        'score': 20,
+        'detail': '锂资源属全球化大宗商品',
+        'mitigation': '赣锋全球锂资源布局(澳洲/南美/非洲)',
+        'recent_policy': '无贸易限制',
+        'fx_hedge': '美元定价',
+    },
+    '潮玩': {
+        'risk_level': 'low',
+        'score': 15,
+        'detail': '消费品类，贸易壁垒极低',
+        'mitigation': '泡泡玛特海外门店快速扩张',
+        'recent_policy': '无贸易限制',
+        'fx_hedge': '当地货币结算+少量汇率风险',
+    },
+    '珠宝': {
+        'risk_level': 'low',
+        'score': 10,
+        'detail': '零售消费品，贸易壁垒极低',
+        'mitigation': '周大福以港澳和东南亚为主',
+        'recent_policy': '无贸易限制',
+        'fx_hedge': '港币+当地货币',
+    },
+    '电子制造': {
+        'risk_level': 'medium',
+        'score': 45,
+        'detail': '代工模式受品牌方影响，产能转移压力',
+        'mitigation': '工业富联全球工厂布局(中国/越南/印度/墨西哥)',
+        'recent_policy': '消费电子暂未被大幅加征关税',
+        'fx_hedge': '美元结算为主',
+    },
+}
+
+
+def get_peer_comparison(stocks_data: List[dict]) -> Dict[str, dict]:
+    """
+    同行业公司对比分析
+
+    对每只股票，计算其所在行业的均值/中位数，并给出该股票在行业内的排名。
+    """
+    # 按行业分组
+    industry_stocks: Dict[str, List[dict]] = {}
+    for stock in stocks_data:
+        industry = stock.get('industry', '未分类')
+        if industry not in industry_stocks:
+            industry_stocks[industry] = []
+        industry_stocks[industry].append(stock)
+
+    result = {}
+    for industry, group in industry_stocks.items():
+        if len(group) < 2:
+            # 单一公司无对比意义
+            result[industry] = {
+                'count': len(group),
+                'companies': [s.get('name', '') for s in group],
+                'has_comparison': False,
+            }
+            continue
+
+        # 计算行业均值/中位数
+        metrics = ['roe', 'gross_margin', 'net_margin', 'debt_ratio', 'dividend_yield',
+                    'pe', 'pb', 'revenue_growth', 'profit_growth', 'est_overseas_pct']
+
+        industry_stats = {}
+        for metric in metrics:
+            values = [s.get(metric) for s in group if s.get(metric) is not None]
+            if values:
+                sorted_vals = sorted(values)
+                n = len(sorted_vals)
+                median = sorted_vals[n // 2] if n % 2 == 1 else (sorted_vals[n // 2 - 1] + sorted_vals[n // 2]) / 2
+                industry_stats[metric] = {
+                    'mean': round(sum(values) / len(values), 2),
+                    'median': round(median, 2),
+                    'min': round(min(values), 2),
+                    'max': round(max(values), 2),
+                    'count': len(values),
+                }
+
+        # 为每只股票计算行业排名
+        stock_rankings = {}
+        for stock in group:
+            code = stock.get('code', '')
+            name = stock.get('name', '')
+            rankings = {}
+
+            # ROE排名 (越高越好)
+            roe_vals = sorted([(s.get('roe', 0) or 0, s.get('code', '')) for s in group], reverse=True)
+            for rank, (val, c) in enumerate(roe_vals, 1):
+                if c == code:
+                    rankings['roe_rank'] = rank
+                    rankings['roe_total'] = len(group)
+                    break
+
+            # 股息率排名 (越高越好)
+            div_vals = sorted([(s.get('dividend_yield', 0) or 0, s.get('code', '')) for s in group], reverse=True)
+            for rank, (val, c) in enumerate(div_vals, 1):
+                if c == code:
+                    rankings['dividend_rank'] = rank
+                    rankings['dividend_total'] = len(group)
+                    break
+
+            # PE排名 (越低越好)
+            pe_vals = sorted([(s.get('pe', 999) or 999, s.get('code', '')) for s in group])
+            for rank, (val, c) in enumerate(pe_vals, 1):
+                if c == code:
+                    rankings['pe_rank'] = rank
+                    rankings['pe_total'] = len(group)
+                    break
+
+            # 海外营收排名 (越高越好)
+            overseas_vals = sorted([(s.get('est_overseas_pct', 0) or 0, s.get('code', '')) for s in group], reverse=True)
+            for rank, (val, c) in enumerate(overseas_vals, 1):
+                if c == code:
+                    rankings['overseas_rank'] = rank
+                    rankings['overseas_total'] = len(group)
+                    break
+
+            stock_rankings[code] = {
+                'name': name,
+                'rankings': rankings,
+            }
+
+        result[industry] = {
+            'count': len(group),
+            'companies': [s.get('name', '') for s in group],
+            'has_comparison': True,
+            'stats': industry_stats,
+            'stock_rankings': stock_rankings,
+        }
+
+    return result
+
+
+# ============================================================
 # 出口冠军评分体系 (满分100)
 # ============================================================
 
@@ -157,42 +535,119 @@ def _score_export_champion(stock: dict) -> tuple:
     """
     出口冠军评分体系 (满分100)
     核心框架: 出口竞争力 + 分红稳健 + 盈利能力 + 财务健康
+
+    改进点:
+    1. 数据缺失时大幅降权而非给默认分
+    2. 增加风险标签生成
+    3. 优化评分公式，更符合投资逻辑
+    4. 增加行业差异化权重
     """
     score = 0
     details = []
+    missing_data_penalty = 0  # 数据缺失扣分累计
     code = stock.get('code', '')
 
-    # 1. 出口强度 (25分)
+    # 1. 出口强度 (25分) - 优化公式，考虑行业差异
     export_info = EXPORT_STOCKS.get(code, {})
     intensity = export_info.get('export_intensity', 'low')
     est_pct = export_info.get('est_overseas_pct', 0)
+    industry = export_info.get('industry', '')
+
+    # 不同行业的出口强度标准不同
+    industry_thresholds = {
+        '家电出口': {'high': 35, 'medium': 20},
+        '动力电池': {'high': 30, 'medium': 15},
+        '光伏': {'high': 40, 'medium': 25},
+        '消费电子': {'high': 50, 'medium': 30},
+        '汽车出口': {'high': 25, 'medium': 15},
+        '船舶制造': {'high': 50, 'medium': 30},
+        '工程机械': {'high': 35, 'medium': 20},
+        '化工': {'high': 35, 'medium': 20},
+        '通信设备': {'high': 25, 'medium': 15},
+        '半导体': {'high': 40, 'medium': 25},
+        '发动机': {'high': 35, 'medium': 20},
+        'CXO': {'high': 50, 'medium': 30},
+        '潮玩': {'high': 25, 'medium': 15},
+        '珠宝': {'high': 20, 'medium': 10},
+    }
+
+    # 行业权重调整：不同行业对各维度的重视程度不同
+    industry_weights = {
+        '光伏': {'export': 1.2, 'growth': 1.1, 'valuation': 0.9},  # 光伏更看重出口和成长
+        '半导体': {'export': 1.1, 'growth': 1.2, 'valuation': 0.9},  # 半导体更看重成长
+        '动力电池': {'export': 1.1, 'growth': 1.1, 'valuation': 0.95},
+        '消费电子': {'export': 1.2, 'dividend': 0.9, 'valuation': 1.0},  # 消费电子更看出口
+        '家电出口': {'dividend': 1.1, 'valuation': 1.1, 'growth': 0.9},  # 家电更看分红和估值
+        '汽车出口': {'export': 1.1, 'growth': 1.1, 'dividend': 0.9},
+        '船舶制造': {'export': 1.2, 'valuation': 0.9, 'dividend': 0.9},  # 船舶更看出口
+        '工程机械': {'export': 1.1, 'valuation': 1.0, 'dividend': 0.9},
+        '化工': {'export': 1.0, 'valuation': 1.1, 'dividend': 1.0},
+        '通信设备': {'export': 1.1, 'growth': 1.1, 'valuation': 0.9},
+        '发动机': {'export': 1.0, 'valuation': 1.1, 'dividend': 1.0},
+        'CXO': {'export': 1.1, 'growth': 1.2, 'valuation': 0.9},
+        '潮玩': {'export': 1.1, 'growth': 1.2, 'valuation': 0.9},
+        '珠宝': {'dividend': 1.1, 'valuation': 1.1, 'growth': 0.9},
+    }
+
+    weights = industry_weights.get(industry, {'export': 1.0, 'dividend': 1.0, 'growth': 1.0, 'valuation': 1.0})
+    thresholds = industry_thresholds.get(industry, {'high': 30, 'medium': 15})
+
     if intensity == 'high':
-        pts = min(25, 15 + est_pct // 10)
+        # 使用更平滑的评分公式：基础分 + 超额部分的对数奖励
+        import math
+        base_pts = 15
+        excess_pct = max(0, est_pct - thresholds['high'])
+        bonus = min(10, int(math.log1p(excess_pct) * 3))  # 对数增长，避免极端值
+        pts = base_pts + bonus
+        # 应用行业权重
+        pts = int(pts * weights.get('export', 1.0))
+        pts = min(pts, 25)  # 确保不超过满分
         score += pts
         details.append(f"出口强度:高(海外~{est_pct}%) +{pts}")
     elif intensity == 'medium':
-        score += 10
-        details.append(f"出口强度:中(海外~{est_pct}%) +10")
+        pts = 10
+        pts = int(pts * weights.get('export', 1.0))
+        pts = min(pts, 25)
+        score += pts
+        details.append(f"出口强度:中(海外~{est_pct}%) +{pts}")
     else:
-        score += 5
-        details.append(f"出口强度:低 +5")
+        pts = 3  # 低出口强度给更低分
+        pts = int(pts * weights.get('export', 1.0))
+        pts = min(pts, 25)
+        score += pts
+        details.append(f"出口强度:低 +{pts}")
 
-    # 2. 股息率 (20分)
+    # 2. 股息率 (20分) - 保持原有逻辑，但增加分红可持续性检查
     div_yield = stock.get('dividend_yield') or 0
-    if div_yield >= 5:
-        score += 20
-        details.append(f"股息率{div_yield:.1f}% 高股息 +20")
-    elif div_yield >= 3:
-        score += 15
-        details.append(f"股息率{div_yield:.1f}% 中等 +15")
-    elif div_yield >= 2:
-        score += 10
-        details.append(f"股息率{div_yield:.1f}% +10")
-    elif div_yield >= 1.5:
-        score += 5
-        details.append(f"股息率{div_yield:.1f}% +5")
+    dividend_ratio = stock.get('dividend_ratio')  # 分红率（分红/利润）
 
-    # 3. 连续分红年数 (10分)
+    if div_yield >= 5:
+        # 高股息但分红率过高可能是不可持续的
+        if dividend_ratio and dividend_ratio > 80:
+            pts = 15  # 降权
+            details.append(f"股息率{div_yield:.1f}% 但分红率{dividend_ratio:.0f}%偏高 +{pts}")
+        else:
+            pts = 20
+            details.append(f"股息率{div_yield:.1f}% 高股息 +{pts}")
+    elif div_yield >= 3:
+        pts = 15
+        details.append(f"股息率{div_yield:.1f}% 中等 +{pts}")
+    elif div_yield >= 2:
+        pts = 10
+        details.append(f"股息率{div_yield:.1f}% +{pts}")
+    elif div_yield >= 1.5:
+        pts = 5
+        details.append(f"股息率{div_yield:.1f}% +{pts}")
+    else:
+        pts = 0
+    # 股息率<1.5%不得分，不扣分
+
+    # 应用行业权重
+    pts = int(pts * weights.get('dividend', 1.0))
+    pts = min(pts, 20)  # 确保不超过满分
+    score += pts
+
+    # 3. 连续分红年数 (10分) - 数据缺失时降权
     years = stock.get('consecutive_years')
     if years is not None:
         if years >= 10:
@@ -204,12 +659,14 @@ def _score_export_champion(stock: dict) -> tuple:
         elif years >= 3:
             score += 4
             details.append(f"连续分红{years}年 +4")
+        # <3年已被硬过滤
     else:
-        # 港股无此数据，给默认分
-        score += 5
-        details.append("连续分红:港股无数据 +5")
+        # 港股无此数据，给较低默认分
+        score += 2
+        missing_data_penalty += 3
+        details.append("连续分红:无数据 +2")
 
-    # 4. ROE (15分)
+    # 4. ROE (15分) - 数据缺失时大幅降权
     roe = stock.get('roe')
     if roe is not None:
         if roe >= 20:
@@ -224,11 +681,16 @@ def _score_export_champion(stock: dict) -> tuple:
         elif roe >= 5:
             score += 4
             details.append(f"ROE={roe:.1f}% +4")
+        else:
+            score += 1
+            details.append(f"ROE={roe:.1f}% 偏低 +1")
     else:
-        score += 5
-        details.append("ROE无数据 +5")
+        # ROE缺失是严重问题，大幅降权
+        score += 0
+        missing_data_penalty += 8
+        details.append("ROE无数据 +0 (严重缺失)")
 
-    # 5. 毛利率 - 护城河 (10分)
+    # 5. 毛利率 - 护城河 (10分) - 数据缺失时降权
     gm = stock.get('gross_margin')
     if gm is not None:
         if gm >= 40:
@@ -240,29 +702,54 @@ def _score_export_champion(stock: dict) -> tuple:
         elif gm >= 15:
             score += 4
             details.append(f"毛利率{gm:.1f}% +4")
+        else:
+            score += 1
+            details.append(f"毛利率{gm:.1f}% 偏低 +1")
     else:
-        score += 4
-        details.append("毛利率无数据 +4")
+        # 毛利率缺失，降权
+        score += 0
+        missing_data_penalty += 5
+        details.append("毛利率无数据 +0 (缺失)")
 
-    # 6. 估值合理性 (10分)
+    # 6. 估值合理性 (10分) - 增加PEG检查
     pe = stock.get('pe') or 999
     pb = stock.get('pb') or 999
+    profit_growth = stock.get('profit_growth')
+
     val_pts = 0
     if pe > 0 and pe < 15:
         val_pts += 5
     elif pe < 25:
         val_pts += 3
+    elif pe < 35:
+        val_pts += 1
+
     if pb > 0 and pb < 2:
         val_pts += 3
     elif pb < 4:
         val_pts += 2
+
     if div_yield and div_yield > 2:
         val_pts += 2
-    score += min(val_pts, 10)
-    if val_pts > 0:
-        details.append(f"估值 PE={pe:.1f} PB={pb:.1f} +{min(val_pts, 10)}")
 
-    # 7. 财务健康 - 负债率 (10分)
+    # PEG检查：PE/增长率，PEG<1可能是低估
+    if pe > 0 and pe < 999 and profit_growth and profit_growth > 0:
+        peg = pe / profit_growth
+        if peg < 0.5:
+            val_pts += 2  # PEG极低，可能严重低估
+            details.append(f"PEG={peg:.1f} 可能低估 +2")
+        elif peg > 2:
+            val_pts -= 1  # PEG过高，估值偏贵
+            details.append(f"PEG={peg:.1f} 估值偏贵 -1")
+
+    # 应用行业权重
+    val_pts = int(val_pts * weights.get('valuation', 1.0))
+    val_pts = min(val_pts, 10)  # 确保不超过满分
+    score += val_pts
+    if val_pts > 0:
+        details.append(f"估值 PE={pe:.1f} PB={pb:.1f} +{val_pts}")
+
+    # 7. 财务健康 - 负债率 (10分) - 数据缺失时降权
     debt = stock.get('debt_ratio')
     if debt is not None:
         if debt < 40:
@@ -274,22 +761,166 @@ def _score_export_champion(stock: dict) -> tuple:
         elif debt < 70:
             score += 4
             details.append(f"负债率{debt:.1f}% 偏高 +4")
+        else:
+            score += 1
+            details.append(f"负债率{debt:.1f}% 高风险 +1")
     else:
-        score += 4
-        details.append("负债率无数据 +4")
+        # 负债率缺失，降权
+        score += 0
+        missing_data_penalty += 5
+        details.append("负债率无数据 +0 (缺失)")
+
+    # 应用数据缺失惩罚
+    if missing_data_penalty > 0:
+        score = max(0, score - missing_data_penalty)
+        details.append(f"数据缺失扣分 -{missing_data_penalty}")
 
     return min(score, 100), " | ".join(details)
 
 
+def generate_risk_tags(stock: dict, fx_data: Optional[dict] = None) -> list:
+    """
+    为股票生成风险标签 (机构级增强版)
+
+    Args:
+        stock: 股票数据
+        fx_data: 汇率数据 (可选, 用于汇率风险动态评估)
+
+    Returns:
+        list: 风险标签列表，每个标签格式为 {'tag': '标签名', 'level': 'high/medium/low', 'desc': '描述'}
+    """
+    tags = []
+    code = stock.get('code', '')
+    export_info = EXPORT_STOCKS.get(code, {})
+    industry = export_info.get('industry', '')
+    tariff_info = TARIFF_RISK_MATRIX.get(industry, {})
+    est_overseas_pct = export_info.get('est_overseas_pct', 0)
+
+    # 1. 关税/贸易政策风险 (使用量化矩阵)
+    if tariff_info:
+        risk_level_raw = tariff_info.get('risk_level', '')
+        tag_level = 'high' if risk_level_raw in ('critical', 'high') else ('medium' if risk_level_raw == 'medium' else 'low')
+        recent = tariff_info.get('recent_policy', '')
+        detail = tariff_info.get('detail', '')
+        mitigation = tariff_info.get('mitigation', '')
+        tags.append({
+            'tag': '关税/贸易政策风险' if risk_level_raw == 'critical' else '贸易政策风险',
+            'level': tag_level,
+            'desc': detail,
+            'mitigation': mitigation,
+            'recent_policy': recent,
+            'risk_score': tariff_info.get('score', 0),
+        })
+
+    # 2. 估值泡沫风险
+    pe = stock.get('pe')
+    if pe and pe > 50:
+        tags.append({
+            'tag': '估值偏高',
+            'level': 'high',
+            'desc': f'PE={pe:.1f}，估值可能存在泡沫'
+        })
+    elif pe and pe > 35:
+        tags.append({
+            'tag': '估值较高',
+            'level': 'medium',
+            'desc': f'PE={pe:.1f}，估值偏贵'
+        })
+
+    # 3. 高负债风险
+    debt = stock.get('debt_ratio')
+    if debt and debt > 70:
+        tags.append({
+            'tag': '高负债风险',
+            'level': 'high',
+            'desc': f'资产负债率{debt:.1f}%，财务风险较高'
+        })
+    elif debt and debt > 60:
+        tags.append({
+            'tag': '负债偏高',
+            'level': 'medium',
+            'desc': f'资产负债率{debt:.1f}%，需关注'
+        })
+
+    # 4. 分红不可持续风险
+    div_yield = stock.get('dividend_yield', 0)
+    dividend_ratio = stock.get('dividend_ratio')
+    if div_yield > 4 and dividend_ratio and dividend_ratio > 80:
+        tags.append({
+            'tag': '分红不可持续',
+            'level': 'high',
+            'desc': f'股息率{div_yield:.1f}%但分红率{dividend_ratio:.0f}%过高，可能不可持续'
+        })
+
+    # 5. 汇率风险 (动态评估)
+    if est_overseas_pct >= 60:
+        # 高海外营收: 动态汇率影响
+        fx_desc = f'海外营收占比~{est_overseas_pct}%，受汇率波动影响较大'
+        if fx_data:
+            change_30d = fx_data.get('change_30d_pct', 0)
+            trend = fx_data.get('trend', '')
+            if abs(change_30d) > 1:
+                impact = '利好' if change_30d > 0 else '利空'
+                fx_desc += f'。当前人民币{trend}({change_30d:+.2f}%)，{impact}出口营收换算'
+        tags.append({
+            'tag': '汇率风险',
+            'level': 'high' if est_overseas_pct >= 75 else 'medium',
+            'desc': fx_desc,
+        })
+    elif est_overseas_pct >= 40:
+        tags.append({
+            'tag': '汇率敏感',
+            'level': 'medium',
+            'desc': f'海外营收占比~{est_overseas_pct}%，有一定汇率敞口',
+        })
+
+    # 6. 数据缺失风险
+    roe = stock.get('roe')
+    gross_margin = stock.get('gross_margin')
+    if roe is None or gross_margin is None:
+        tags.append({
+            'tag': '数据不完整',
+            'level': 'medium',
+            'desc': '关键财务数据缺失，影响评分准确性'
+        })
+
+    # 7. 地缘政治风险（特定行业）
+    geopolitical_risk_industries = {
+        '安防设备': '海康威视已被列入美国实体清单，北美市场受限',
+        '通信设备': '5G设备在部分西方国家被禁用，面临技术封锁',
+        '半导体': '美国对华半导体出口管制持续收紧',
+        'CXO': '美国《生物安全法案》可能限制中资CXO企业',
+        '动力电池': 'IRA法案限制中国电池享受美国补贴',
+        '新能源车': '美国/欧盟对中国电动车加征高额关税',
+    }
+    if industry in geopolitical_risk_industries:
+        tags.append({
+            'tag': '地缘政治风险',
+            'level': 'high',
+            'desc': geopolitical_risk_industries[industry]
+        })
+
+    return tags
+
+
 # ============================================================
-# 缓存
+# 缓存 - 分层缓存策略
 # ============================================================
 
 from app.core.cache import get_cache as _base_get_cache, set_cache as _set_cached
-_CACHE_TTL = 600
 
-def _get_cached(key: str):
-    return _base_get_cache(key, ttl_seconds=_CACHE_TTL)
+# 分层缓存时间
+CACHE_TTL = {
+    'realtime': 60,        # 实时数据1分钟
+    'financial': 1800,     # 财务数据30分钟
+    'philosophy': 3600,    # 理念数据1小时
+    'screener': 300,       # 筛选结果5分钟
+}
+
+def _get_cached(key: str, cache_type: str = 'screener'):
+    """获取缓存，根据数据类型使用不同的TTL"""
+    ttl = CACHE_TTL.get(cache_type, 300)
+    return _base_get_cache(key, ttl_seconds=ttl)
 
 
 # ============================================================
@@ -300,7 +931,7 @@ def screen_export_champions(market: str = 'all', min_score: int = 0,
                             min_dividend_yield: float = 1.5,
                             top_n: int = 50) -> dict:
     """
-    出口冠军筛选
+    出口冠军筛选 (机构级增强版)
 
     Args:
         market: 'A', 'HK', 'all'
@@ -309,9 +940,12 @@ def screen_export_champions(market: str = 'all', min_score: int = 0,
         top_n: 返回前N只
     """
     cache_key = f"export_{market}_{min_score}_{min_dividend_yield}_{top_n}"
-    cached = _get_cached(cache_key)
+    cached = _get_cached(cache_key, cache_type='screener')
     if cached:
         return cached
+
+    # 获取汇率数据 (全局复用)
+    fx_data = get_exchange_rate_data()
 
     stocks = []
 
@@ -332,7 +966,7 @@ def screen_export_champions(market: str = 'all', min_score: int = 0,
                 stocks.append(stock)
 
     # Score and filter
-    results = []
+    filtered_stocks = []
     for stock in stocks:
         # Hard filter: dividend yield
         dy = stock.get('dividend_yield') or 0
@@ -376,8 +1010,17 @@ def screen_export_champions(market: str = 'all', min_score: int = 0,
         # Combined score: export 40% + value investing avg 60%
         combined_score = round(export_score * 0.4 + vi_avg * 0.6)
 
+        # Generate risk tags (with exchange rate data)
+        risk_tags = generate_risk_tags(stock, fx_data=fx_data)
+
+        # Calculate risk-adjusted score
+        high_risk_count = sum(1 for tag in risk_tags if tag['level'] == 'high')
+        medium_risk_count = sum(1 for tag in risk_tags if tag['level'] == 'medium')
+        risk_penalty = high_risk_count * 5 + medium_risk_count * 2
+        risk_adjusted_score = max(0, combined_score - risk_penalty)
+
         if combined_score >= min_score:
-            results.append({
+            filtered_stocks.append({
                 **stock,
                 'export_score': export_score,
                 'export_detail': export_detail,
@@ -391,16 +1034,37 @@ def screen_export_champions(market: str = 'all', min_score: int = 0,
                 'duan_detail': duan_detail,
                 'vi_avg_score': vi_avg,
                 'combined_score': combined_score,
+                'risk_adjusted_score': risk_adjusted_score,
+                'risk_tags': risk_tags,
+                'risk_penalty': risk_penalty,
+                'tariff_risk': TARIFF_RISK_MATRIX.get(stock.get('industry', ''), {}),
+                'main_export_markets': EXPORT_STOCKS.get(stock.get('code', ''), {}).get('main_export_markets', []),
+                'competitive_advantage': EXPORT_STOCKS.get(stock.get('code', ''), {}).get('competitive_advantage', ''),
                 'match_level': (
-                    'excellent' if combined_score >= 80 else
-                    'good' if combined_score >= 65 else
-                    'fair' if combined_score >= 50 else
+                    'excellent' if risk_adjusted_score >= 80 else
+                    'good' if risk_adjusted_score >= 65 else
+                    'fair' if risk_adjusted_score >= 50 else
                     'poor'
                 ),
             })
 
-    # Sort by combined score descending
-    results.sort(key=lambda x: x['combined_score'], reverse=True)
+    # Peer comparison (industry analysis)
+    peer_comparison = get_peer_comparison(filtered_stocks)
+
+    # Enrich stocks with peer ranking data
+    results = []
+    for stock in filtered_stocks:
+        industry = stock.get('industry', '')
+        code = stock.get('code', '')
+        peer = peer_comparison.get(industry, {})
+        stock_rankings = peer.get('stock_rankings', {}).get(code, {})
+        stock['peer_rankings'] = stock_rankings.get('rankings', {})
+        stock['peer_stats'] = peer.get('stats', {}) if peer.get('has_comparison') else None
+        stock['peer_count'] = peer.get('count', 1)
+        results.append(stock)
+
+    # Sort by risk-adjusted score descending
+    results.sort(key=lambda x: x['risk_adjusted_score'], reverse=True)
     results = results[:top_n]
 
     result = {
@@ -412,6 +1076,15 @@ def screen_export_champions(market: str = 'all', min_score: int = 0,
             'min_score': min_score,
             'min_dividend_yield': min_dividend_yield,
             'top_n': top_n,
+        },
+        'exchange_rate': fx_data,
+        'peer_comparison': {k: v for k, v in peer_comparison.items() if v.get('has_comparison')},
+        'data_sources': {
+            'realtime': '通达信/新浪财经/腾讯财经/东方财富 (多源容错)',
+            'financials': '东方财富API',
+            'exchange_rate': 'AKShare -> 中国银行外汇牌价',
+            'export_pct': '公司年报/公告 (静态数据, 定期更新)',
+            'tariff_risk': '基于2024-2025年公开贸易政策整理',
         },
     }
 
@@ -425,7 +1098,12 @@ def screen_export_champions(market: str = 'all', min_score: int = 0,
 
 def get_philosophy() -> dict:
     """返回出口冠军筛选理念 — 出口竞争力 + 价值投资双轮驱动"""
-    return {
+    cache_key = "export_philosophy"
+    cached = _get_cached(cache_key, cache_type='philosophy')
+    if cached:
+        return cached
+
+    philosophy = {
         'name': '出口冠军筛选',
         'title': '出口竞争力 × 价值投资：在日本化时代寻找全球化赢家',
         'core_thesis': '中国正在经历类似日本1990年后的估值中枢下移。日本30年的教训只有一个结论：全球化是估值修复的唯一确定性路径。纯内需消费股的PE从60-70倍永久性下移到12-15倍，而成功全球化的公司（尤妮佳海外营收从20%到60%、资生堂靠中国市场修复估值、优衣库PE长期维持30-40倍）成为唯一的例外者。',
@@ -584,5 +1262,76 @@ def get_philosophy() -> dict:
                 '估值锚定：过度依赖历史估值可能错过结构性变化',
                 '中国市场特殊性：政策风险、公司治理、信息不对称',
             ],
+            'risk_tags_system': {
+                'title': '风险标签系统 (机构级增强)',
+                'description': '每只股票会根据其行业、财务、估值、汇率、关税政策等多维度特征自动生成风险标签。关税风险使用量化矩阵评估(0-100分)，汇率风险接入实时USD/CNY牌价动态评估。',
+                'tags': [
+                    {'tag': '关税/贸易政策风险', 'level': 'critical', 'desc': '光伏(关税>100%)、新能源车(美国100%关税)面临极高贸易壁垒'},
+                    {'tag': '贸易政策风险', 'level': 'high', 'desc': '动力电池、半导体、安防、通信面临出口管制/实体清单'},
+                    {'tag': '地缘政治风险', 'level': 'high', 'desc': '安防、通信、半导体、CXO等行业可能面临制裁或技术封锁'},
+                    {'tag': '估值偏高', 'level': 'high', 'desc': 'PE>50，估值可能存在泡沫'},
+                    {'tag': '高负债风险', 'level': 'high', 'desc': '资产负债率>70%，财务风险较高'},
+                    {'tag': '分红不可持续', 'level': 'high', 'desc': '股息率高但分红率>80%，可能不可持续'},
+                    {'tag': '汇率风险', 'level': 'high', 'desc': '海外营收占比>=60%，受汇率波动影响大(实时USD/CNY评估)'},
+                    {'tag': '汇率敏感', 'level': 'medium', 'desc': '海外营收占比40-60%，有一定汇率敞口'},
+                    {'tag': '数据不完整', 'level': 'medium', 'desc': '关键财务数据缺失，影响评分准确性'},
+                ],
+                'scoring_impact': '高风险标签每个扣5分，中风险标签每个扣2分，从综合得分中扣除得到风险调整后得分。',
+                'new_features': [
+                    '关税风险量化矩阵: 基于2024-2025年公开贸易政策，为每个行业打分(0-100)并提供最新政策动态和企业应对措施',
+                    '汇率风险实时评估: 接入AKShare中国银行外汇牌价，计算7/30/90天汇率变动对高海外营收企业的影响',
+                    '同行业对比排名: 每只股票在其所在行业内进行ROE/股息率/估值/海外占比多维度排名',
+                ],
+            },
+            'tariff_risk_matrix': {
+                'title': '关税/贸易政策风险矩阵',
+                'description': '基于2024-2025年最新贸易政策，对每个行业进行量化风险评估(0-100分)。分值越高风险越大。',
+                'disclaimer': '关税政策变化频繁，本矩阵仅供参考，需定期更新。不构成投资建议。',
+                'critical_risks': [
+                    {'industry': '光伏', 'score': 95, 'detail': '美国对华光伏关税累计超100%(301+AD/CVD)'},
+                    {'industry': '新能源车', 'score': 85, 'detail': '美国100%关税(2024)、欧盟17-36%反补贴关税'},
+                ],
+                'high_risks': [
+                    {'industry': '动力电池', 'score': 80, 'detail': 'IRA法案限制+欧盟反补贴调查'},
+                    {'industry': '半导体', 'score': 80, 'detail': '美国出口管制+实体清单'},
+                    {'industry': '安防设备', 'score': 75, 'detail': '海康威视已列入实体清单'},
+                    {'industry': '通信设备', 'score': 75, 'detail': '5G设备在部分西方国家被禁'},
+                    {'industry': 'CXO', 'score': 70, 'detail': 'BIOSECURE Act可能限制中资CXO'},
+                ],
+                'low_risks': [
+                    {'industry': '船舶制造', 'score': 15, 'detail': '全球招标，无明显贸易壁垒'},
+                    {'industry': '潮玩', 'score': 15, 'detail': '消费品类，贸易壁垒极低'},
+                    {'industry': '面板', 'score': 20, 'detail': '全球化供应链，贸易壁垒低'},
+                    {'industry': '化工', 'score': 25, 'detail': 'MDI等化工品属全球化大宗商品'},
+                ],
+            },
+            'exchange_rate_monitoring': {
+                'title': '汇率影响实时监控',
+                'description': '接入AKShare中国银行外汇牌价数据，实时评估USD/CNY汇率变动对出口冠军企业的影响。',
+                'data_source': 'AKShare -> 中国银行外汇牌价 (BOC)',
+                'update_frequency': '每日',
+                'metrics': [
+                    'USD/CNY最新中间价',
+                    '7天/30天/90天汇率变动百分比',
+                    '汇率趋势判断(人民币升值/贬值/稳定)',
+                    '高海外营收企业(>=50%)的营收汇率影响估算',
+                ],
+                'impact_logic': '人民币贬值(USD/CNY上升) -> 利好出口企业(海外营收换算为更多人民币)。反之亦然。海外营收占比越高，汇率敏感度越大。',
+            },
+            'peer_comparison': {
+                'title': '同行业公司对比分析',
+                'description': '对筛选池中同行业的公司进行多维度对比排名，帮助投资者在行业内选出最优标的。',
+                'dimensions': [
+                    'ROE排名: 行业内资本回报效率对比',
+                    '股息率排名: 行业内分红回报对比',
+                    'PE排名: 行业内估值水平对比(越低越好)',
+                    '海外营收占比排名: 行业内全球化程度对比',
+                ],
+                'additional_info': '同行业均值/中位数/最高/最低值供参考',
+            },
         },
     }
+
+    # Cache the philosophy
+    _set_cached(cache_key, philosophy)
+    return philosophy

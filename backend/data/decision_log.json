@@ -1,0 +1,61 @@
+[
+  {
+    "id": "d_1781275124593",
+    "timestamp": "2026-06-12T22:38:44.593374",
+    "decision_type": "sell",
+    "target": "海外科技LOF",
+    "reason": "没有遵守套利纪录，没有第一时间卖出，继续持有了很多天",
+    "trigger": "我卖出海外科技LOF是因为金渐成说最近科技股波动会很大",
+    "position_pct": "all",
+    "time_horizon": "long",
+    "biases": [],
+    "questions": [
+      {
+        "id": 1,
+        "question": "如果一年后回看这个决定，你觉得那时候的你会怎么评价现在的你？",
+        "bias_type": "general",
+        "bias_name": "通用反思",
+        "answer": "套利得遵守纪录，到账就卖，不论盈亏"
+      },
+      {
+        "id": 2,
+        "question": "你有没有认真考虑过完全相反的操作？比如持有而不是卖出？",
+        "bias_type": "general",
+        "bias_name": "反向思考",
+        "answer": "没有认真思考"
+      },
+      {
+        "id": 3,
+        "question": "如果你把这笔钱投到了别的地方（比如指数基金），一年后你会更安心吗？",
+        "bias_type": "general",
+        "bias_name": "机会成本",
+        "answer": "是的"
+      },
+      {
+        "id": 4,
+        "question": "你上一次做类似决策的结果如何？你从中学到了什么？",
+        "bias_type": "general",
+        "bias_name": "历史复盘",
+        "answer": "对于LOF我没有做过类似的操作"
+      },
+      {
+        "id": 5,
+        "question": "如果让你最信任的人（而不是你自己）来做这个决策，你会给他什么建议？",
+        "bias_type": "general",
+        "bias_name": "旁观者视角",
+        "answer": "套利仓位到账后第一时间卖出"
+      }
+    ],
+    "diagnosis": {
+      "score": 100,
+      "level": "low",
+      "level_text": "🟢 低风险",
+      "summary": "你的决策过程较为理性，偏误风险较低。但仍建议回顾下面的建议。",
+      "warnings": [],
+      "suggestions": [
+        "✅ 继续保持理性的决策习惯，定期回顾决策日志"
+      ]
+    },
+    "outcome": null
+  }
+]

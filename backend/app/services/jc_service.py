@@ -1,11 +1,25 @@
-"""金渐成（机哥）投资体系筛选服务 - 第一兼唯一选股法"""
+"""金渐成（机哥）投资体系筛选服务 - 第一兼唯一选股法
 
-import requests
-import time
-from typing import Optional
+优化要点:
+- 并发获取股票数据（ThreadPoolExecutor）
+- 分层缓存TTL（交易时间感知）
+- 输入参数校验
+- 缺失数据惩罚（不再给中间分）
+- get_buy_signals复用screen_stocks
+- 结构化日志
+"""
+
+import logging
+import time as _time
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from typing import Optional, List, Literal
 from datetime import datetime
+
 from app.services.data_service import DataService, _safe_float, _get_annual_report
 from app.services.vi_service import _get_hk_stock_data, _get_us_stock_data
+from app.core.cache import get_cache, set_cache, get_realtime_ttl, TTL_DAILY
+
+logger = logging.getLogger(__name__)
 
 # ============================================================
 # 金渐成核心投资理念
@@ -62,7 +76,7 @@ US_STOCKS_LIST = [
 ]
 
 # ============================================================
-# Data Fetching (reuse existing functions)
+# Data Fetching (with concurrency)
 # ============================================================
 
 def _get_a_stock_data(code: str) -> Optional[dict]:
@@ -70,13 +84,15 @@ def _get_a_stock_data(code: str) -> Optional[dict]:
     try:
         basic = DataService.get_stock_basic(code)
         if "error" in basic:
+            logger.warning(f"A股数据获取失败: {code} - {basic.get('error')}")
             return None
 
         financials = DataService.get_financial_indicators(code)
         reports = financials.get("reports", [])
         latest = _get_annual_report(reports) if reports else {}
 
-        div_per_share, _, _ = DataService._get_actual_dividend(code)
+        _div = DataService._get_actual_dividend(code)
+        div_per_share = _div["dividend_per_share"]
         dividend_yield = None
         if div_per_share > 0 and basic.get('price', 0) > 0:
             dividend_yield = round(div_per_share / basic['price'] * 100, 2)
@@ -97,8 +113,51 @@ def _get_a_stock_data(code: str) -> Optional[dict]:
             'profit_growth': latest.get('profit_growth'),
             'report_period': latest.get('report_period', ''),
         }
-    except Exception:
+    except Exception as e:
+        logger.error(f"A股数据异常 {code}: {e}")
         return None
+
+
+def _fetch_stocks_concurrent(market: str = 'all', max_workers: int = 6) -> List[dict]:
+    """并发获取多市场股票数据。"""
+    stocks = []
+    tasks = []
+
+    if market in ('A', 'all'):
+        for code in A_STOCKS_LIST:
+            tasks.append(('A', code))
+    if market in ('HK', 'all'):
+        for code in HK_STOCKS_LIST:
+            tasks.append(('HK', code))
+    if market in ('US', 'all'):
+        for symbol in US_STOCKS_LIST:
+            tasks.append(('US', symbol))
+
+    if not tasks:
+        return stocks
+
+    def _fetch_one(task):
+        mkt, code = task
+        try:
+            if mkt == 'A':
+                return _get_a_stock_data(code)
+            elif mkt == 'HK':
+                return _get_hk_stock_data(code)
+            else:
+                return _get_us_stock_data(code)
+        except Exception as e:
+            logger.error(f"获取{mkt}股票{code}失败: {e}")
+            return None
+
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        futures = {executor.submit(_fetch_one, t): t for t in tasks}
+        for future in as_completed(futures):
+            result = future.result()
+            if result:
+                stocks.append(result)
+
+    logger.info(f"并发获取完成: {len(stocks)}/{len(tasks)}只成功 (market={market})")
+    return stocks
 
 
 # ============================================================
@@ -110,13 +169,10 @@ def _score_jc(stock: dict) -> tuple:
     金渐成评分体系 (满分100)
     核心框架: "第一兼唯一" + 管理层 + 安全边际
 
-    金渐成的投资逻辑:
-    1. "第一兼唯一" - 只投行业第一且具有垄断/唯一地位的公司
-    2. 科技、消费、医疗三大赛道
-    3. 管理层品质：诚实可靠、踏实进取、眼光长远
-    4. 下跌20%开始试探，金字塔加仓
-    5. 永不满仓，控制安全边际
-    6. "止赚比止损重要，活着比暴利重要"
+    评分规则:
+    - 有数据: 按区间给分
+    - 无数据: 给0分（惩罚缺失，不给中间分）
+    - 行业地位: 有标注按标注给分，无标注给基础分
     """
     score = 0
     details = []
@@ -133,7 +189,6 @@ def _score_jc(stock: dict) -> tuple:
     code = stock.get('code', '')
 
     # 1. 行业地位 - "第一兼唯一" (20分)
-    # 金渐成最看重的维度：必须是行业第一且有垄断地位
     pos_info = INDUSTRY_POSITION.get(code)
     if pos_info:
         pos_score = pos_info[1]
@@ -144,7 +199,6 @@ def _score_jc(stock: dict) -> tuple:
         details.append("行业地位:未标注 +8")
 
     # 2. ROE - 衡量股东回报效率 (20分)
-    # 金渐成: 高ROE说明公司赚钱能力强，资本运用效率高
     if roe is not None:
         if roe >= 25:
             score += 20
@@ -162,11 +216,10 @@ def _score_jc(stock: dict) -> tuple:
             score += 4
             details.append(f"ROE={roe:.1f}% 偏低 +4")
     else:
-        score += 8
-        details.append("ROE无数据 +8")
+        score += 0
+        details.append("ROE无数据 +0")
 
     # 3. 毛利率 - 护城河体现 (15分)
-    # 金渐成: 高毛利率=定价权=护城河（茅台90%+, Costco低毛利但模式独特）
     if gross_margin is not None:
         if gross_margin >= 60:
             score += 15
@@ -181,11 +234,10 @@ def _score_jc(stock: dict) -> tuple:
             score += 5
             details.append(f"毛利率{gross_margin:.1f}% 低护城河 +5")
     else:
-        score += 7
-        details.append("毛利率无数据 +7")
+        score += 0
+        details.append("毛利率无数据 +0")
 
     # 4. 估值合理性 (15分)
-    # 金渐成: 不追高，逢低买入；PE太高要警惕，但科技股可以容忍较高PE
     val_score = 0
     if pe is not None and pe > 0:
         if pe < 15:
@@ -215,7 +267,6 @@ def _score_jc(stock: dict) -> tuple:
     score += min(val_score, 15)
 
     # 5. 成长性 (10分)
-    # 金渐成: 看重"改变未来的科技龙头"，但也看重稳定增长
     if rev_growth is not None and profit_growth is not None:
         if profit_growth > 15 and rev_growth > 10:
             score += 10
@@ -230,11 +281,10 @@ def _score_jc(stock: dict) -> tuple:
             score += 2
             details.append(f"利润{profit_growth:+.1f}% 承压 +2")
     else:
-        score += 5
-        details.append("成长数据无 +5")
+        score += 0
+        details.append("成长数据无 +0")
 
     # 6. 负债率 - 财务健康 (10分)
-    # 金渐成: "控制好安全边际"，低负债是安全的基础
     if debt is not None:
         if debt < 30:
             score += 10
@@ -249,11 +299,10 @@ def _score_jc(stock: dict) -> tuple:
             score += 1
             details.append(f"负债率{debt:.1f}% 高风险 +1")
     else:
-        score += 5
-        details.append("负债率无数据 +5")
+        score += 0
+        details.append("负债率无数据 +0")
 
     # 7. 股息率 - 现金流回报 (10分)
-    # 金渐成: 防守型资产看重股息，进取型可容忍低股息
     if div_yield is not None:
         if div_yield >= 4:
             score += 10
@@ -268,77 +317,82 @@ def _score_jc(stock: dict) -> tuple:
             score += 2
             details.append(f"股息率{div_yield:.1f}% 低 +2")
     else:
-        score += 3
-        details.append("股息率无数据 +3")
+        score += 0
+        details.append("股息率无数据 +0")
 
     return min(score, 100), " | ".join(details)
-
-
-# ============================================================
-# 缓存
-# ============================================================
-
-from app.core.cache import get_cache as _base_get_cache, set_cache as _set_cached
-_CACHE_TTL = 600
-
-def _get_cached(key: str):
-    return _base_get_cache(key, ttl_seconds=_CACHE_TTL)
 
 
 # ============================================================
 # 主筛选函数
 # ============================================================
 
-def screen_stocks(market: str = 'all', min_score: int = 0,
-                  max_pe: float = None, top_n: int = 50) -> dict:
+# 允许的排序字段
+_SORT_FIELDS = {
+    'jc_score', 'pe', 'pb', 'roe', 'dividend_yield',
+    'price', 'market_cap', 'gross_margin', 'profit_growth',
+}
+_MARKET_VALUES = {'A', 'HK', 'US', 'all'}
+
+
+def screen_stocks(
+    market: str = 'all',
+    min_score: int = 0,
+    max_pe: float = None,
+    max_pb: float = None,
+    min_roe: float = None,
+    min_dividend: float = None,
+    top_n: int = 50,
+    sort_by: str = 'jc_score',
+    sort_order: str = 'desc',
+) -> dict:
     """
     金渐成体系筛选股票
 
     Args:
         market: 'A', 'HK', 'US', 'all'
-        min_score: 最低分数
+        min_score: 最低分数 (0-100)
         max_pe: 最大PE
-        top_n: 返回前N只
+        max_pb: 最大PB
+        min_roe: 最低ROE
+        min_dividend: 最低股息率
+        top_n: 返回前N只 (1-200)
+        sort_by: 排序字段
+        sort_order: 'asc' 或 'desc'
     """
-    cache_key = f"jc_{market}_{min_score}_{max_pe}_{top_n}"
-    cached = _get_cached(cache_key)
+    # 参数校验
+    if market not in _MARKET_VALUES:
+        market = 'all'
+    min_score = max(0, min(100, min_score))
+    top_n = max(1, min(200, top_n))
+    if sort_by not in _SORT_FIELDS:
+        sort_by = 'jc_score'
+    reverse = sort_order != 'asc'
+
+    cache_key = f"jc_screen_{market}_{min_score}_{max_pe}_{max_pb}_{min_roe}_{min_dividend}_{top_n}_{sort_by}_{sort_order}"
+    ttl = get_realtime_ttl()
+    cached = get_cache(cache_key, ttl_seconds=ttl)
     if cached:
         return cached
 
-    stocks = []
+    start = _time.time()
+    stocks = _fetch_stocks_concurrent(market)
 
-    # Fetch A-share stocks
-    if market in ('A', 'all'):
-        for code in A_STOCKS_LIST:
-            stock = _get_a_stock_data(code)
-            if stock:
-                stocks.append(stock)
-
-    # Fetch HK stocks
-    if market in ('HK', 'all'):
-        for code in HK_STOCKS_LIST:
-            stock = _get_hk_stock_data(code)
-            if stock:
-                stocks.append(stock)
-
-    # Fetch US stocks
-    if market in ('US', 'all'):
-        for symbol in US_STOCKS_LIST:
-            stock = _get_us_stock_data(symbol)
-            if stock:
-                stocks.append(stock)
-
-    # Score each stock
+    # Score and filter
     results = []
     for stock in stocks:
-        # Apply PE filter
         if max_pe and stock.get('pe') and stock['pe'] > max_pe:
+            continue
+        if max_pb and stock.get('pb') and stock['pb'] > max_pb:
+            continue
+        if min_roe and stock.get('roe') is not None and stock['roe'] < min_roe:
+            continue
+        if min_dividend and stock.get('dividend_yield') is not None and stock['dividend_yield'] < min_dividend:
             continue
 
         score, detail = _score_jc(stock)
 
         if score >= min_score:
-            # Get industry position label
             pos_info = INDUSTRY_POSITION.get(stock.get('code', ''))
             industry_label = pos_info[0] if pos_info else ""
 
@@ -355,9 +409,11 @@ def screen_stocks(market: str = 'all', min_score: int = 0,
                 ),
             })
 
-    # Sort by score descending
-    results.sort(key=lambda x: x['jc_score'], reverse=True)
+    # Sort
+    results.sort(key=lambda x: x.get(sort_by) or 0, reverse=reverse)
     results = results[:top_n]
+
+    elapsed = round(_time.time() - start, 2)
 
     result = {
         'stocks': results,
@@ -365,14 +421,21 @@ def screen_stocks(market: str = 'all', min_score: int = 0,
         'master': '金渐成',
         'market': market,
         'update_time': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+        'elapsed': elapsed,
         'criteria': {
             'min_score': min_score,
             'max_pe': max_pe,
+            'max_pb': max_pb,
+            'min_roe': min_roe,
+            'min_dividend': min_dividend,
             'top_n': top_n,
+            'sort_by': sort_by,
+            'sort_order': sort_order,
         },
     }
 
-    _set_cached(cache_key, result)
+    set_cache(cache_key, result)
+    logger.info(f"筛选完成: {len(results)}只, {elapsed}s, market={market}")
     return result
 
 
@@ -380,53 +443,17 @@ def get_buy_signals(market: str = 'all') -> dict:
     """
     基于金渐成"下跌20%开始捞"逻辑，返回当前接近买入区间的标的
 
-    金渐成买入规则:
-    - 下跌20%左右开始小仓试探
-    - 下跌25%后开始逐步加仓
-    - 金字塔加仓法：越跌买越多
+    复用screen_stocks逻辑，不做重复数据获取。
     """
     cache_key = f"jc_signals_{market}"
-    cached = _get_cached(cache_key)
+    ttl = get_realtime_ttl()
+    cached = get_cache(cache_key, ttl_seconds=ttl)
     if cached:
         return cached
 
-    stocks = []
-    if market in ('A', 'all'):
-        for code in A_STOCKS_LIST:
-            stock = _get_a_stock_data(code)
-            if stock:
-                stocks.append(stock)
-    if market in ('HK', 'all'):
-        for code in HK_STOCKS_LIST:
-            stock = _get_hk_stock_data(code)
-            if stock:
-                stocks.append(stock)
-    if market in ('US', 'all'):
-        for symbol in US_STOCKS_LIST:
-            stock = _get_us_stock_data(symbol)
-            if stock:
-                stocks.append(stock)
-
-    # Score and filter for buy signals
-    signals = []
-    for stock in stocks:
-        score, detail = _score_jc(stock)
-        pos_info = INDUSTRY_POSITION.get(stock.get('code', ''))
-
-        signals.append({
-            **stock,
-            'jc_score': score,
-            'industry_position': pos_info[0] if pos_info else "",
-            'match_level': (
-                'excellent' if score >= 80 else
-                'good' if score >= 65 else
-                'fair' if score >= 50 else
-                'poor'
-            ),
-        })
-
-    # Sort by score
-    signals.sort(key=lambda x: x['jc_score'], reverse=True)
+    # 复用screen_stocks获取全部已评分股票
+    screened = screen_stocks(market=market, min_score=0, top_n=200)
+    signals = screened.get('stocks', [])
 
     result = {
         'stocks': signals,
@@ -441,13 +468,18 @@ def get_buy_signals(market: str = 'all') -> dict:
         },
     }
 
-    _set_cached(cache_key, result)
+    set_cache(cache_key, result)
     return result
 
 
 def get_philosophy() -> dict:
-    """返回金渐成完整投资哲学体系"""
-    return {
+    """返回金渐成完整投资哲学体系（静态数据，长缓存）"""
+    cache_key = "jc_philosophy"
+    cached = get_cache(cache_key, ttl_seconds=TTL_DAILY)
+    if cached:
+        return cached
+
+    data = {
         'name': '金渐成（机哥/天玑）',
         'title': '投资人 | 公众号:天机奇谈/金渐成/生玑伯伯',
         'era': '2016年至今 | 美股为主 | 年化收益优异',
@@ -548,3 +580,6 @@ def get_philosophy() -> dict:
             'note': '高收益得益于：现金储备多 + 遇上下跌行情 + 高位减仓增配防守型安全垫',
         },
     }
+
+    set_cache(cache_key, data)
+    return data

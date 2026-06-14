@@ -1,0 +1,274 @@
+/* ============================================================
+   Layout — Sidebar, TopBar, Search, Content Area
+   ============================================================ */
+
+/* antd 暗色主题覆盖 — 最小化，主要靠 ConfigProvider theme token */
+.ant-layout-content {
+  background: var(--bg-primary) !important;
+}
+
+/* Tooltip提示触发器 */
+.tip-trigger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 15px;
+  height: 15px;
+  border-radius: 50%;
+  background: #374151;
+  color: #9ca3af;
+  font-size: 10px;
+  cursor: help;
+  line-height: 1;
+  margin-left: 4px;
+  vertical-align: middle;
+}
+.tip-trigger:hover {
+  background: #4b5563;
+  color: #d1d5db;
+}
+
+/* 左侧面板 */
+.sidebar {
+  width: 340px;
+  background: var(--bg-secondary);
+  border-right: 1px solid var(--border-primary);
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+}
+
+.sidebar-header {
+  padding: 16px 18px;
+  background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+  color: #fff;
+}
+
+.sidebar-header h1 {
+  font-size: 18px;
+  margin-bottom: 8px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+}
+
+.invest-credo {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 10px;
+  background: rgba(255, 255, 255, 0.06);
+  border-radius: 6px;
+  margin-bottom: 12px;
+  border-left: 3px solid var(--accent-orange);
+}
+
+.invest-credo span:first-child {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--accent-orange);
+}
+
+.invest-credo span:last-child {
+  font-size: 11px;
+  color: var(--text-secondary);
+  font-weight: 500;
+}
+
+.search-box {
+  position: relative;
+}
+
+.search-box input {
+  width: 100%;
+  padding: 10px 12px;
+  border: none !important;
+  border-radius: 6px !important;
+  font-size: 14px;
+  background: rgba(255,255,255,0.1) !important;
+  color: #fff !important;
+  font-weight: 500;
+}
+
+.search-box input::placeholder {
+  color: rgba(255,255,255,0.5);
+}
+
+.search-box input:focus {
+  outline: none;
+  background: rgba(255,255,255,0.15);
+}
+
+.search-results {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-primary);
+  border-radius: 0 0 6px 6px;
+  max-height: 300px;
+  overflow-y: auto;
+  z-index: 100;
+  box-shadow: var(--shadow-dropdown);
+}
+
+.search-item {
+  padding: 10px 12px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-primary);
+  transition: background 0.2s;
+  font-weight: 500;
+}
+
+.search-item:hover {
+  background: var(--bg-hover);
+}
+
+.search-code {
+  min-width: 60px;
+  color: var(--text-muted);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.search-market-tag {
+  font-size: 11px;
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-weight: 500;
+}
+
+.search-market-tag.hk {
+  background: rgba(255, 152, 0, 0.15);
+  color: #ff9800;
+}
+
+.search-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 500;
+}
+
+.search-hint {
+  padding: 12px;
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 13px;
+  font-weight: 500;
+}
+
+/* 列表Tab — 2列网格布局 */
+.list-tabs {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 1px;
+  background: var(--border-subtle);
+  border-bottom: 1px solid var(--border-primary);
+}
+
+.list-tab {
+  padding: 10px 12px;
+  text-align: center;
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--text-secondary);
+  background: var(--bg-secondary);
+  transition: all 0.2s;
+  white-space: nowrap;
+  font-weight: 500;
+}
+
+.list-tab:hover {
+  color: var(--text-primary);
+  background: var(--bg-hover);
+}
+
+.list-tab.active {
+  color: var(--accent-blue);
+  background: rgba(88,166,255,0.08);
+  font-weight: 700;
+  box-shadow: inset 3px 0 0 var(--accent-blue);
+}
+
+.stock-list {
+  flex: 1;
+  overflow-y: auto;
+}
+
+.stock-item {
+  padding: 12px 18px;
+  border-bottom: 1px solid var(--border-subtle);
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.stock-item:hover {
+  background: var(--bg-hover);
+}
+
+.stock-item.active {
+  background: rgba(88,166,255,0.1);
+  border-left: 3px solid var(--accent-blue);
+}
+
+.stock-item-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 500;
+}
+
+.stock-item .code {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--accent-blue);
+}
+
+.stock-item .name {
+  font-size: 13px;
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+.stock-item-price {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.stock-item .price {
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: -0.2px;
+}
+
+.stock-item .change {
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.up { color: var(--accent-red) !important; }
+.down { color: var(--accent-green) !important; }
+
+/* 右侧内容 */
+.main-content {
+  flex: 1;
+  overflow-y: auto;
+  padding: 20px;
+  background: var(--bg-primary);
+}
+
+.sidebar-info {
+  padding: 20px 18px;
+  color: var(--text-muted);
+  font-size: 13px;
+  text-align: center;
+  font-weight: 500;
+}
+.sidebar-info p + p { margin-top: 8px; font-size: 12px; }

@@ -1,8 +1,43 @@
 import { useState, useCallback, useRef, useEffect, useMemo } from 'react'
 import axios from 'axios'
 import ReactECharts from 'echarts-for-react'
+import { Tooltip } from 'antd'
+import { PageSection, TabBar, StatCard, StatCardGroup, LoadingSpinner, EmptyState, ProgressBar } from '../components/ui'
 
 const API_BASE = '/api'
+
+/** 悬停提示组件 */
+const Tip = ({ text }: { text: string }) => (
+  <Tooltip title={text} overlayStyle={{ maxWidth: 300 }}>
+    <span className="tip-trigger">?</span>
+  </Tooltip>
+)
+
+/** 指标说明数据 */
+const DIMENSION_DESC: Record<string, string> = {
+  ma: '看价格是否在各均线上方、均线是否多头排列（短期>中期>长期）。均线就像"趋势轨道"，价格稳稳站在上方=趋势向上，跌破=趋势转弱。多头排列越多，趋势越强。',
+  macd: 'MACD由快线(DIF)和慢线(DEA)组成。金叉=快线上穿慢线=看涨；死叉=看跌。柱状图由负转正=动量转强。在零轴上方金叉比下方更可靠。',
+  volume: '成交量是价格的"燃料"。放量上涨=真突破（大家都在买）；缩量上涨=动力不足要小心。上涨时量大、下跌时量小=健康的量价配合。',
+  pattern: '寻找经典的底部突破图形：W底（两次探底后突破颈线）、杯柄形态（U型底+小回调）、旗形突破（快速拉升后整理再突破）。这些是大师们验证过的高胜率形态。',
+  rsi_kdj: '衡量短期涨跌力度的"温度计"。RSI<30=超卖区（跌过头了，可能反弹）；RSI>70=超买区（涨过头了，可能回调）。KDJ金叉=短期看涨信号。',
+  new_indicators: '多指标综合验证：布林带（价格通道）突破上轨=强势；OBV能量潮确认资金流入；CCI突破+100=动量强；抛物线SAR在价格下方=趋势向上。',
+  momentum: '判断上涨"力气"够不够大。KST是多周期动量的加权综合，上穿信号线=动量转强。Williams %R衡量超买超卖。多周期变动率(ROC)全部为正=动量共振，趋势更可靠。',
+  adaptive_trend: 'KAMA是"聪明的均线"——趋势市时紧跟价格（反应快），震荡市时自动远离价格（减少假信号）。Elder三重滤网要求周线→日线→入场方向一致才给高分。',
+  td_sequential: 'DeMark发明的"数K线"系统。连续9根K线收盘高于4天前=趋势可能"累了"要休息（卖出Setup）。连续13根确认=更强的衰竭信号。用作风险提示，防止追在顶部。',
+}
+
+const REGIME_DESC: Record<string, string> = {
+  trending: 'ADX≥25，市场有明确趋势方向。此时均线/MACD等趋势指标更可靠，适合趋势跟随策略。',
+  developing: 'ADX在20-25之间，趋势初步形成但尚未确立。可以关注但需谨慎，等ADX突破25再加仓。',
+  ranging: 'ADX<20，市场无明确方向，在区间内来回震荡。此时右侧信号假突破多，可靠性较低，建议观望。',
+}
+
+const STAGE_DESC: Record<string, string> = {
+  '1': '底部蓄势期：价格横盘整理，成交量低迷，30周均线走平。耐心等待突破，不要提前入场。',
+  '2': '★ 上升趋势（买入区间）：价格突破盘整区+站上30周均线+均线向上+成交量放大。这是大师们公认的"安全入场区"。',
+  '3': '顶部派发期：价格高位横盘，成交量异常放大但涨不动。聪明钱在出货，考虑减仓或卖出。',
+  '4': '下降趋势：价格跌破30周均线，均线向下。远离，不要抄底，"接飞刀"很危险。',
+}
 
 interface DimensionResult {
   score: number
@@ -70,8 +105,51 @@ interface BacktestResult {
     max_return_20d: number
     min_return_20d: number
     sharpe_like: number
+    profit_loss_ratio?: number
+    avg_trailing_return?: number
+    win_rate_trailing?: number
   }
   code: string
+}
+
+interface MarketTiming {
+  status: string
+  signal: string
+  reason: string
+  index_close: number
+  index_ma60: number
+  index_ma60_slope: number
+}
+
+interface SectorStrength {
+  sector_name: string
+  sector_signal: string
+  reason: string
+  sector_change_pct: number
+  top_sector: string
+  top_sector_change: number
+}
+
+interface FundamentalHealth {
+  eps_growth: number | null
+  roe: number | null
+  revenue_growth: number | null
+  signal: string
+  reason: string
+  report_date: string
+}
+
+interface EntryPlan {
+  entry_type: string
+  entry_price: number
+  stop_loss_price: number
+  risk_per_share: number
+  position_size_pct: number
+  position_shares?: number
+  position_value?: number
+  target_2r: number
+  target_3r: number
+  reason: string
 }
 
 interface RightSideResult {
@@ -85,6 +163,9 @@ interface RightSideResult {
     pattern: DimensionResult
     rsi_kdj: DimensionResult
     new_indicators: DimensionResult
+    momentum: DimensionResult
+    adaptive_trend: DimensionResult
+    td_sequential: DimensionResult
   }
   anti_fake_checks: AntiFakeCheck[]
   market_regime: MarketRegime
@@ -95,6 +176,10 @@ interface RightSideResult {
   weekly_score: number
   weekly_verdict: string
   dynamic_weights: Record<string, number>
+  market_timing: MarketTiming
+  sector_strength: SectorStrength
+  fundamental_health: FundamentalHealth
+  entry_plan: EntryPlan
   chart_data: {
     dates: string[]
     kline: [string, number, number, number, number][]
@@ -106,6 +191,10 @@ interface RightSideResult {
     cci: (number|null)[]
     obv: { obv: number[]; obv_ma20: (number|null)[] }
     sar: { sar: (number|null)[]; is_long: boolean[] }
+    kama: (number|null)[]
+    kst: { kst: (number|null)[]; signal: (number|null)[] }
+    williams_r: (number|null)[]
+    rsi: (number|null)[]
   }
   update_time: string
   error?: string
@@ -192,7 +281,7 @@ export default function RightSideTrading() {
   const getVerdictStyle = (verdict: string) => {
     switch (verdict) {
       case '右侧确认': return { bg: '#16a34a', icon: '✓', text: '#fff' }
-      case '疑似右侧': return { bg: '#ca8a04', icon: '⚠', text: '#fff' }
+      case '观望等待': return { bg: '#ca8a04', icon: '⏳', text: '#fff' }
       case '非右侧': return { bg: '#6b7280', icon: '—', text: '#fff' }
       case '左侧下跌': return { bg: '#dc2626', icon: '↓', text: '#fff' }
       default: return { bg: '#374151', icon: '?', text: '#fff' }
@@ -228,7 +317,7 @@ export default function RightSideTrading() {
   // K-line + MA chart (with optional Bollinger)
   const klineOption = useMemo(() => {
     if (!result?.chart_data) return {}
-    const { dates, kline, ma, bollinger } = result.chart_data
+    const { dates, kline, ma, bollinger, kama } = result.chart_data
     const series: any[] = [
       {
         type: 'candlestick',
@@ -259,7 +348,11 @@ export default function RightSideTrading() {
       series.push({ type: 'line', name: 'BOLL中轨', data: bollinger.middle, lineStyle: { color: '#9333ea', width: 1 }, symbol: 'none' })
       series.push({ type: 'line', name: 'BOLL下轨', data: bollinger.lower, lineStyle: { color: '#9333ea', width: 1, type: 'dashed' }, symbol: 'none' })
     }
-    const legendData = ['MA5', 'MA10', 'MA20', 'MA60', 'MA120']
+    // KAMA自适应均线
+    if (kama) {
+      series.push({ type: 'line', name: 'KAMA', data: kama, lineStyle: { color: '#f97316', width: 2 }, symbol: 'none', smooth: true })
+    }
+    const legendData = ['MA5', 'MA10', 'MA20', 'MA60', 'MA120', 'KAMA']
     if (showBollinger) legendData.push('BOLL上轨', 'BOLL中轨', 'BOLL下轨')
     return {
       tooltip: {
@@ -270,13 +363,14 @@ export default function RightSideTrading() {
           const k = params.find((p: any) => p.seriesType === 'candlestick')
           if (!k) return ''
           const d = k.data
-          return `${k.axisValue}<br/>开: ${d[1]}<br/>收: ${d[2]}<br/>低: ${d[3]}<br/>高: ${d[4]}`
+          return `${k.axisValue}<br/>开: ${d[0]}<br/>收: ${d[1]}<br/>低: ${d[2]}<br/>高: ${d[3]}`
         },
       },
       legend: { data: legendData, top: 0, textStyle: { color: '#9ca3af', fontSize: 11 } },
       grid: { left: 60, right: 30, top: 30, bottom: 60 },
       xAxis: { type: 'category', data: dates, axisLabel: { color: '#9ca3af', fontSize: 10 }, axisLine: { lineStyle: { color: '#374151' } } },
       yAxis: { type: 'value', scale: true, axisLabel: { color: '#9ca3af' }, splitLine: { lineStyle: { color: '#374151' } }, axisLine: { lineStyle: { color: '#374151' } } },
+      series,
       dataZoom: [{ type: 'inside', start: 60, end: 100 }, { type: 'slider', start: 60, end: 100, height: 20, bottom: 5 }],
       backgroundColor: 'transparent',
     }
@@ -326,19 +420,20 @@ export default function RightSideTrading() {
       legend: { data: ['ADX', '+DI', '-DI'], top: 0, textStyle: { color: '#9ca3af', fontSize: 11 } },
       grid: { left: 60, right: 30, top: 25, bottom: 30 },
       xAxis: { type: 'category', data: dates, axisLabel: { show: false } },
-      yAxis: { type: 'value', min: 0, max: 80, axisLabel: { color: '#9ca3af', fontSize: 10 }, splitLine: { lineStyle: { color: '#374151' } } },
+      yAxis: { type: 'value', min: 0, axisLabel: { color: '#9ca3af', fontSize: 10 }, splitLine: { lineStyle: { color: '#374151' } } },
       series: [
-        { type: 'line', name: 'ADX', data: adx.adx, lineStyle: { color: '#ef5350', width: 2 }, symbol: 'none' },
+        { type: 'line', name: 'ADX', data: adx.adx, lineStyle: { color: '#ef5350', width: 2 }, symbol: 'none',
+          markLine: {
+            silent: true,
+            data: [
+              { yAxis: 25, lineStyle: { color: '#f59e0b', type: 'dashed' }, label: { formatter: '趋势线(25)', color: '#f59e0b', position: 'end' } },
+              { yAxis: 20, lineStyle: { color: '#6b7280', type: 'dashed' }, label: { formatter: '震荡线(20)', color: '#6b7280', position: 'end' } },
+            ],
+          },
+        },
         { type: 'line', name: '+DI', data: adx.plus_di, lineStyle: { color: '#16a34a', width: 1 }, symbol: 'none' },
         { type: 'line', name: '-DI', data: adx.minus_di, lineStyle: { color: '#dc2626', width: 1 }, symbol: 'none' },
       ],
-      markLine: {
-        silent: true,
-        data: [
-          { yAxis: 25, lineStyle: { color: '#f59e0b', type: 'dashed' }, label: { formatter: '趋势线(25)', color: '#f59e0b' } },
-          { yAxis: 20, lineStyle: { color: '#6b7280', type: 'dashed' }, label: { formatter: '震荡线(20)', color: '#6b7280' } },
-        ],
-      },
       dataZoom: [{ type: 'inside', start: 60, end: 100 }],
       backgroundColor: 'transparent',
     }
@@ -354,16 +449,17 @@ export default function RightSideTrading() {
       xAxis: { type: 'category', data: dates, axisLabel: { show: false } },
       yAxis: { type: 'value', axisLabel: { color: '#9ca3af', fontSize: 10 }, splitLine: { lineStyle: { color: '#374151' } } },
       series: [
-        { type: 'line', name: 'CCI', data: cci, lineStyle: { color: '#8b5cf6', width: 1.5 }, symbol: 'none' },
+        { type: 'line', name: 'CCI', data: cci, lineStyle: { color: '#8b5cf6', width: 1.5 }, symbol: 'none',
+          markLine: {
+            silent: true,
+            data: [
+              { yAxis: 100, lineStyle: { color: '#16a34a', type: 'dashed' }, label: { formatter: '+100', color: '#16a34a', position: 'end' } },
+              { yAxis: -100, lineStyle: { color: '#dc2626', type: 'dashed' }, label: { formatter: '-100', color: '#dc2626', position: 'end' } },
+              { yAxis: 0, lineStyle: { color: '#6b7280', type: 'dotted' }, label: { show: false } },
+            ],
+          },
+        },
       ],
-      markLine: {
-        silent: true,
-        data: [
-          { yAxis: 100, lineStyle: { color: '#16a34a', type: 'dashed' }, label: { formatter: '+100', color: '#16a34a' } },
-          { yAxis: -100, lineStyle: { color: '#dc2626', type: 'dashed' }, label: { formatter: '-100', color: '#dc2626' } },
-          { yAxis: 0, lineStyle: { color: '#6b7280', type: 'dotted' }, label: { show: false } },
-        ],
-      },
       dataZoom: [{ type: 'inside', start: 60, end: 100 }],
       backgroundColor: 'transparent',
     }
@@ -388,13 +484,89 @@ export default function RightSideTrading() {
     }
   }, [result?.chart_data])
 
+  // KST chart
+  const kstOption = useMemo(() => {
+    if (!result?.chart_data?.kst) return {}
+    const { dates, kst } = result.chart_data
+    return {
+      tooltip: { trigger: 'axis' },
+      legend: { data: ['KST', '信号线'], top: 0, textStyle: { color: '#9ca3af', fontSize: 11 } },
+      grid: { left: 60, right: 30, top: 25, bottom: 30 },
+      xAxis: { type: 'category', data: dates, axisLabel: { show: false } },
+      yAxis: { type: 'value', axisLabel: { color: '#9ca3af', fontSize: 10 }, splitLine: { lineStyle: { color: '#374151' } } },
+      series: [
+        { type: 'line', name: 'KST', data: kst.kst, lineStyle: { color: '#8b5cf6', width: 1.5 }, symbol: 'none' },
+        { type: 'line', name: '信号线', data: kst.signal, lineStyle: { color: '#f59e0b', width: 1 }, symbol: 'none' },
+      ],
+      dataZoom: [{ type: 'inside', start: 60, end: 100 }],
+      backgroundColor: 'transparent',
+    }
+  }, [result?.chart_data])
+
+  // Williams %R chart
+  const wrOption = useMemo(() => {
+    if (!result?.chart_data?.williams_r) return {}
+    const { dates, williams_r } = result.chart_data
+    return {
+      tooltip: { trigger: 'axis' },
+      legend: { data: ['Williams %R'], top: 0, textStyle: { color: '#9ca3af', fontSize: 11 } },
+      grid: { left: 60, right: 30, top: 25, bottom: 30 },
+      xAxis: { type: 'category', data: dates, axisLabel: { show: false } },
+      yAxis: { type: 'value', min: -100, max: 0, axisLabel: { color: '#9ca3af', fontSize: 10 }, splitLine: { lineStyle: { color: '#374151' } } },
+      series: [
+        { type: 'line', name: '%R', data: williams_r, lineStyle: { color: '#14b8a6', width: 1.5 }, symbol: 'none',
+          markLine: {
+            silent: true,
+            data: [
+              { yAxis: -20, lineStyle: { color: '#dc2626', type: 'dashed' }, label: { formatter: '超买', color: '#dc2626', fontSize: 10 } },
+              { yAxis: -80, lineStyle: { color: '#16a34a', type: 'dashed' }, label: { formatter: '超卖', color: '#16a34a', fontSize: 10 } },
+            ],
+          },
+        },
+      ],
+      dataZoom: [{ type: 'inside', start: 60, end: 100 }],
+      backgroundColor: 'transparent',
+    }
+  }, [result?.chart_data])
+
+  // RSI chart
+  const rsiOption = useMemo(() => {
+    if (!result?.chart_data?.rsi) return {}
+    const { dates, rsi } = result.chart_data
+    return {
+      tooltip: { trigger: 'axis' },
+      legend: { data: ['RSI(14)'], top: 0, textStyle: { color: '#9ca3af', fontSize: 11 } },
+      grid: { left: 60, right: 30, top: 25, bottom: 30 },
+      xAxis: { type: 'category', data: dates, axisLabel: { show: false } },
+      yAxis: { type: 'value', min: 0, max: 100, axisLabel: { color: '#9ca3af', fontSize: 10 }, splitLine: { lineStyle: { color: '#374151' } } },
+      series: [
+        { type: 'line', name: 'RSI(14)', data: rsi, lineStyle: { color: '#f59e0b', width: 1.5 }, symbol: 'none',
+          markLine: {
+            silent: true,
+            data: [
+              { yAxis: 70, lineStyle: { color: '#ca8a04', type: 'dashed' }, label: { formatter: '超买(70)', color: '#ca8a04', position: 'end' } },
+              { yAxis: 80, lineStyle: { color: '#dc2626', type: 'dashed' }, label: { formatter: '深度超买(80)', color: '#dc2626', position: 'end' } },
+              { yAxis: 30, lineStyle: { color: '#16a34a', type: 'dashed' }, label: { formatter: '超卖(30)', color: '#16a34a', position: 'end' } },
+              { yAxis: 50, lineStyle: { color: '#374151', type: 'dotted' }, label: { show: false } },
+            ],
+          },
+        },
+      ],
+      dataZoom: [{ type: 'inside', start: 60, end: 100 }],
+      backgroundColor: 'transparent',
+    }
+  }, [result?.chart_data])
+
   const dimensions = result ? [
-    { key: 'ma', label: '均线系统', icon: '📊' },
-    { key: 'macd', label: 'MACD确认', icon: '📈' },
-    { key: 'volume', label: '成交量', icon: '📦' },
-    { key: 'pattern', label: '价格形态', icon: '🔍' },
-    { key: 'rsi_kdj', label: 'RSI/KDJ', icon: '⚡' },
-    { key: 'new_indicators', label: '综合指标', icon: '🎯' },
+    { key: 'ma', label: '均线系统', icon: '📊', desc: DIMENSION_DESC.ma },
+    { key: 'macd', label: 'MACD确认', icon: '📈', desc: DIMENSION_DESC.macd },
+    { key: 'volume', label: '成交量', icon: '📦', desc: DIMENSION_DESC.volume },
+    { key: 'pattern', label: '价格形态', icon: '🔍', desc: DIMENSION_DESC.pattern },
+    { key: 'rsi_kdj', label: 'RSI/KDJ', icon: '⚡', desc: DIMENSION_DESC.rsi_kdj },
+    { key: 'new_indicators', label: '综合指标', icon: '🎯', desc: DIMENSION_DESC.new_indicators },
+    { key: 'momentum', label: '动量综合', icon: '🚀', desc: DIMENSION_DESC.momentum },
+    { key: 'adaptive_trend', label: '自适应趋势', icon: '🧭', desc: DIMENSION_DESC.adaptive_trend },
+    { key: 'td_sequential', label: 'TD序列', icon: '🔢', desc: DIMENSION_DESC.td_sequential },
   ] : []
 
   return (
@@ -403,7 +575,8 @@ export default function RightSideTrading() {
       <div style={{ marginBottom: 24 }}>
         <h2 style={{ color: '#f3f4f6', margin: 0, fontSize: 20, fontWeight: 600 }}>右侧交易判断</h2>
         <p style={{ color: '#9ca3af', margin: '4px 0 0', fontSize: 13 }}>
-          六维度评分 · 多时间框架 · ADX环境判断 · Weinstein阶段 · 假右侧排除
+          九维度评分 · 多时间框架 · ADX环境判断 · Weinstein阶段 · 假右侧排除
+          <Tip text="右侧交易=在趋势确认后才入场（追涨不追高）。通过9个维度的技术指标综合打分（满分100），判断股票是否处于上升趋势中。分数越高，右侧信号越强。" />
         </p>
       </div>
 
@@ -464,7 +637,7 @@ export default function RightSideTrading() {
       {loading && (
         <div style={{ textAlign: 'center', padding: 60, color: '#9ca3af' }}>
           <div style={{ fontSize: 18, marginBottom: 8 }}>正在分析...</div>
-          <div style={{ fontSize: 13 }}>获取日线+周线数据 → ADX环境判断 → 六维度评分 → 多时间框架确认</div>
+          <div style={{ fontSize: 13 }}>获取日线+周线数据 → ADX环境判断 → 九维度评分 → 多时间框架确认</div>
         </div>
       )}
 
@@ -504,23 +677,126 @@ export default function RightSideTrading() {
                     </div>
                     <div style={{ textAlign: 'right' }}>
                       <div style={{ fontSize: 42, fontWeight: 800, color: vs.text }}>{result.score}</div>
-                      <div style={{ fontSize: 12, color: vs.text, opacity: 0.8 }}>/ 100分</div>
+                      <div style={{ fontSize: 12, color: vs.text, opacity: 0.8 }}>/ 100分
+                        <Tip text="大师级判定：大盘牛市+无高危警告+≥65分=右侧确认（可入场）；其他情况=观望等待（不做）；<32分=左侧下跌（远离）。大盘熊市时一票否决。" />
+                      </div>
                     </div>
                   </div>
                 )
               })()}
 
+              {/* 大师决策面板 */}
+              {result.market_timing && (
+                <div style={{
+                  background: '#1f2937', borderRadius: 12, padding: 16, marginBottom: 16,
+                  border: result.market_timing.signal === 'no_trade' ? '2px solid #dc2626' : '1px solid #374151',
+                }}>
+                  <div style={{ fontSize: 14, fontWeight: 600, color: '#f3f4f6', marginBottom: 12 }}>
+                    大师决策面板
+                    <Tip text="大师们的决策流程：①先看大盘（M=Market）②再看行业③再看基本面④最后看技术面。任何一层不通过，都不入场。" />
+                  </div>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 12 }}>
+                    {/* 大盘择时 */}
+                    <div style={{
+                      background: '#111827', borderRadius: 8, padding: 12,
+                      border: result.market_timing.signal === 'no_trade' ? '1px solid #dc2626' : result.market_timing.signal === 'go' ? '1px solid #16a34a' : '1px solid #ca8a04',
+                    }}>
+                      <div style={{ fontSize: 11, color: '#9ca3af', marginBottom: 4 }}>① 大盘择时</div>
+                      <div style={{
+                        fontSize: 14, fontWeight: 700, marginBottom: 4,
+                        color: result.market_timing.signal === 'go' ? '#16a34a' : result.market_timing.signal === 'no_trade' ? '#dc2626' : '#ca8a04',
+                      }}>
+                        {result.market_timing.signal === 'go' ? '✓ 牛市' : result.market_timing.signal === 'no_trade' ? '✗ 熊市' : '— 中性'}
+                      </div>
+                      <div style={{ fontSize: 10, color: '#6b7280' }}>
+                        上证{result.market_timing.index_close} / MA60{result.market_timing.index_ma60}
+                      </div>
+                    </div>
+
+                    {/* 行业强度 */}
+                    <div style={{
+                      background: '#111827', borderRadius: 8, padding: 12,
+                      border: result.sector_strength.sector_signal === 'strong' ? '1px solid #16a34a' : result.sector_strength.sector_signal === 'weak' ? '1px solid #dc2626' : '1px solid #374151',
+                    }}>
+                      <div style={{ fontSize: 11, color: '#9ca3af', marginBottom: 4 }}>② 行业强度</div>
+                      <div style={{
+                        fontSize: 14, fontWeight: 700, marginBottom: 4,
+                        color: result.sector_strength.sector_signal === 'strong' ? '#16a34a' : result.sector_strength.sector_signal === 'weak' ? '#dc2626' : '#f3f4f6',
+                      }}>
+                        {result.sector_strength.sector_signal === 'strong' ? '✓ 活跃' : result.sector_strength.sector_signal === 'weak' ? '✗ 偏冷' : '— 温和'}
+                      </div>
+                      <div style={{ fontSize: 10, color: '#6b7280' }}>
+                        {result.sector_strength.top_sector ? `领涨: ${result.sector_strength.top_sector}` : result.sector_strength.reason?.slice(0, 15)}
+                      </div>
+                    </div>
+
+                    {/* 基本面 */}
+                    <div style={{
+                      background: '#111827', borderRadius: 8, padding: 12,
+                      border: result.fundamental_health.signal === 'pass' ? '1px solid #16a34a' : result.fundamental_health.signal === 'fail' ? '1px solid #dc2626' : '1px solid #374151',
+                    }}>
+                      <div style={{ fontSize: 11, color: '#9ca3af', marginBottom: 4 }}>③ 基本面</div>
+                      <div style={{
+                        fontSize: 14, fontWeight: 700, marginBottom: 4,
+                        color: result.fundamental_health.signal === 'pass' ? '#16a34a' : result.fundamental_health.signal === 'fail' ? '#dc2626' : '#f3f4f6',
+                      }}>
+                        {result.fundamental_health.signal === 'pass' ? '✓ 健康' : result.fundamental_health.signal === 'fail' ? '✗ 承压' : '— 待查'}
+                      </div>
+                      <div style={{ fontSize: 10, color: '#6b7280' }}>
+                        {result.fundamental_health.eps_growth != null ? `EPS+${result.fundamental_health.eps_growth}%` : '数据不足'}
+                        {result.fundamental_health.roe != null ? ` ROE${result.fundamental_health.roe}%` : ''}
+                      </div>
+                    </div>
+
+                    {/* 入场建议 */}
+                    <div style={{
+                      background: result.entry_plan.entry_type !== 'none' ? '#111827' : '#1f2937',
+                      borderRadius: 8, padding: 12,
+                      border: result.entry_plan.entry_type !== 'none' ? '1px solid #3b82f6' : '1px solid #374151',
+                    }}>
+                      <div style={{ fontSize: 11, color: '#9ca3af', marginBottom: 4 }}>④ 入场建议</div>
+                      {result.entry_plan.entry_type !== 'none' ? (
+                        <>
+                          <div style={{ fontSize: 14, fontWeight: 700, color: '#3b82f6', marginBottom: 4 }}>
+                            ¥{result.entry_plan.entry_price ?? '--'}
+                          </div>
+                          <div style={{ fontSize: 10, color: '#6b7280' }}>
+                            止损¥{result.entry_plan.stop_loss_price ?? '--'} · {result.entry_plan.position_shares ? `${result.entry_plan.position_shares}股 · ` : ''}仓位{result.entry_plan.position_size_pct}%
+                          </div>
+                        </>
+                      ) : (
+                        <div style={{ fontSize: 14, fontWeight: 700, color: '#6b7280', marginBottom: 4 }}>暂无</div>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* 入场详情 */}
+                  {result.entry_plan.entry_type !== 'none' && (
+                    <div style={{ marginTop: 12, padding: '10px 12px', background: 'rgba(59,130,246,0.08)', borderRadius: 8, fontSize: 12, color: '#93c5fd', lineHeight: 1.8 }}>
+                      💡 {result.entry_plan.reason}
+                      &nbsp;|&nbsp; 2R目标: ¥{result.entry_plan.target_2r}
+                      &nbsp;|&nbsp; 3R目标: ¥{result.entry_plan.target_3r}
+                      &nbsp;|&nbsp; 每股风险: ¥{result.entry_plan.risk_per_share}
+                      {result.entry_plan.position_shares != null && result.entry_plan.position_shares > 0 && (
+                        <> &nbsp;|&nbsp; 建议{result.entry_plan.position_shares}股(约¥{result.entry_plan.position_value?.toLocaleString()})</>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
+
               {/* Market Regime + Weinstein */}
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 16 }}>
                 {/* ADX Regime */}
                 <div style={{ background: '#1f2937', borderRadius: 10, padding: 14, border: '1px solid #374151' }}>
-                  <div style={{ fontSize: 12, color: '#9ca3af', marginBottom: 8 }}>ADX市场环境</div>
+                  <div style={{ fontSize: 12, color: '#9ca3af', marginBottom: 8 }}>ADX市场环境<Tip text={'ADX衡量趋势的“强度”（不分方向）。ADX≥25=有明确趋势，适合趋势跟随；ADX<20=震荡市，假突破多，右侧信号不可靠。'} /></div>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
                     <div style={{
                       padding: '4px 12px', borderRadius: 6, fontSize: 13, fontWeight: 600,
                       background: getRegimeColor(result.market_regime.regime), color: '#fff',
                     }}>
                       {result.market_regime.regime === 'trending' ? '趋势市' : result.market_regime.regime === 'developing' ? '趋势形成中' : '震荡市'}
+                      <Tip text={REGIME_DESC[result.market_regime.regime] || ''} />
                     </div>
                     <div style={{ fontSize: 14, color: '#f3f4f6' }}>
                       ADX=<span style={{ fontWeight: 700 }}>{result.market_regime.adx_value}</span>
@@ -533,7 +809,7 @@ export default function RightSideTrading() {
 
                 {/* Weinstein Stage */}
                 <div style={{ background: '#1f2937', borderRadius: 10, padding: 14, border: '1px solid #374151' }}>
-                  <div style={{ fontSize: 12, color: '#9ca3af', marginBottom: 8 }}>Weinstein阶段分析</div>
+                  <div style={{ fontSize: 12, color: '#9ca3af', marginBottom: 8 }}>Weinstein阶段分析<Tip text="Stan Weinstein的四阶段模型：①底部蓄势（观望）②上升趋势（买入！）③顶部派发（卖出）④下降趋势（远离）。只在Stage 2买入，是最安全的右侧策略。" /></div>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
                     <div style={{
                       width: 36, height: 36, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center',
@@ -542,7 +818,7 @@ export default function RightSideTrading() {
                       {result.weinstein_stage.stage}
                     </div>
                     <div>
-                      <div style={{ fontSize: 14, fontWeight: 600, color: '#f3f4f6' }}>{result.weinstein_stage.stage_name}</div>
+                      <div style={{ fontSize: 14, fontWeight: 600, color: '#f3f4f6' }}>{result.weinstein_stage.stage_name}<Tip text={STAGE_DESC[String(result.weinstein_stage.stage)] || ''} /></div>
                       <div style={{ fontSize: 11, color: '#9ca3af' }}>
                         MA30斜率: {result.weinstein_stage.ma30_slope}% · 价格偏离: {result.weinstein_stage.price_vs_ma30}%
                       </div>
@@ -555,7 +831,7 @@ export default function RightSideTrading() {
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 16 }}>
                 {/* Multi-Timeframe */}
                 <div style={{ background: '#1f2937', borderRadius: 10, padding: 14, border: '1px solid #374151' }}>
-                  <div style={{ fontSize: 12, color: '#9ca3af', marginBottom: 8 }}>多时间框架对齐</div>
+                  <div style={{ fontSize: 12, color: '#9ca3af', marginBottom: 8 }}>多时间框架对齐<Tip text="日线看短期趋势，周线看中期趋势。两者方向一致（✓）=信号强，加分；方向冲突（✗）=信号矛盾，减分。好比开车要看远近两个方向。" /></div>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginBottom: 8 }}>
                     <div>
                       <div style={{ fontSize: 11, color: '#9ca3af' }}>日线</div>
@@ -584,6 +860,7 @@ export default function RightSideTrading() {
                 <div style={{ background: '#1f2937', borderRadius: 10, padding: 14, border: '1px solid #374151' }}>
                   <div style={{ fontSize: 12, color: '#9ca3af', marginBottom: 8 }}>
                     风险管理 · ATR({result.risk_management.atr_pct}%)
+                    <Tip text="ATR止损=基于波动率自动计算止损位。波动大时止损放宽松（避免被震出），波动小时止损收紧。2R目标=涨2倍ATR的距离，是合理的止盈参考。" />
                     <span style={{
                       marginLeft: 8, padding: '1px 6px', borderRadius: 3, fontSize: 10,
                       background: result.risk_management.volatility_level === 'low' ? '#16a34a' :
@@ -611,7 +888,7 @@ export default function RightSideTrading() {
                 </div>
               </div>
 
-              {/* 6-Dimension Cards */}
+              {/* 9-Dimension Cards */}
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12, marginBottom: 16 }}>
                 {dimensions.map(d => {
                   const dim = result.dimensions[d.key as keyof typeof result.dimensions]
@@ -632,8 +909,13 @@ export default function RightSideTrading() {
                       <div style={{ marginTop: 8, height: 4, background: '#374151', borderRadius: 2 }}>
                         <div style={{ height: '100%', width: `${pct}%`, background: pct >= 60 ? '#16a34a' : pct >= 30 ? '#ca8a04' : '#dc2626', borderRadius: 2, transition: 'width 0.5s' }} />
                       </div>
-                      {isExpanded && dim.signals.length > 0 && (
+                      {isExpanded && (
                         <div style={{ marginTop: 10, borderTop: '1px solid #374151', paddingTop: 8 }}>
+                          {/* 小白说明 */}
+                          <div style={{ fontSize: 11, color: '#60a5fa', lineHeight: 1.6, marginBottom: 8, padding: '6px 8px', background: 'rgba(59,130,246,0.08)', borderRadius: 6 }}>
+                            💡 {d.desc}
+                          </div>
+                          {/* 具体信号 */}
                           {dim.signals.map((s, i) => (
                             <div key={i} style={{ fontSize: 11, color: '#d1d5db', padding: '2px 0', lineHeight: 1.4 }}>· {s}</div>
                           ))}
@@ -647,7 +929,7 @@ export default function RightSideTrading() {
               {/* Anti-fake Warnings */}
               {result.anti_fake_checks.length > 0 && (
                 <div style={{ background: '#1f2937', borderRadius: 10, padding: 16, marginBottom: 16, border: '1px solid #374151' }}>
-                  <div style={{ fontSize: 14, fontWeight: 600, color: '#f3f4f6', marginBottom: 10 }}>假右侧风险提示</div>
+                  <div style={{ fontSize: 14, fontWeight: 600, color: '#f3f4f6', marginBottom: 10 }}>假右侧风险提示<Tip text="即使分数看起来不错，也可能存在假信号。这些警告帮你识别：下跌中的反弹（死猫跳）、缩量突破（假突破）、顶部背离（涨不动了）等危险信号。有高危警告时要特别谨慎。" /></div>
                   {result.anti_fake_checks.map((w, i) => (
                     <div key={i} style={{
                       display: 'flex', alignItems: 'flex-start', gap: 10, padding: '8px 0',
@@ -668,7 +950,7 @@ export default function RightSideTrading() {
               {/* Charts */}
               <div style={{ background: '#1f2937', borderRadius: 10, padding: 16, border: '1px solid #374151' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-                  <div style={{ fontSize: 14, fontWeight: 600, color: '#f3f4f6' }}>K线图 · 成交量 · MACD</div>
+                  <div style={{ fontSize: 14, fontWeight: 600, color: '#f3f4f6' }}>K线图 · 成交量 · MACD<Tip text="K线=每日价格走势（红涨绿跌）。均线=趋势轨道。KAMA（橙线）=智能均线，震荡市自动远离减少假信号。成交量=交易活跃度。MACD=趋势方向和动量。" /></div>
                   <button onClick={() => setShowBollinger(!showBollinger)} style={{
                     padding: '4px 12px', background: showBollinger ? '#8b5cf6' : '#374151', border: 'none',
                     borderRadius: 6, color: '#fff', fontSize: 11, cursor: 'pointer',
@@ -689,12 +971,18 @@ export default function RightSideTrading() {
                     <ReactECharts key={`vol-${result?.code}`} option={volumeOption} style={{ height: 120, width: '100%' }} notMerge={true} onChartReady={(chart) => { setTimeout(() => chart.resize(), 100) }} />
                     <div style={{ fontSize: 12, color: '#6b7280', margin: '8px 0 4px' }}>MACD</div>
                     <ReactECharts key={`macd-${result?.code}`} option={macdOption} style={{ height: 140, width: '100%' }} notMerge={true} onChartReady={(chart) => { setTimeout(() => chart.resize(), 100) }} />
-                    <div style={{ fontSize: 12, color: '#6b7280', margin: '8px 0 4px' }}>ADX趋势强度</div>
+                    <div style={{ fontSize: 12, color: '#6b7280', margin: '8px 0 4px' }}>ADX趋势强度<Tip text="ADX（黄线）衡量趋势强弱：>25=有趋势，<20=震荡。+DI（绿）vs -DI（红）：+DI在上方=多头占优。" /></div>
                     <ReactECharts key={`adx-${result?.code}`} option={adxOption} style={{ height: 140, width: '100%' }} notMerge={true} onChartReady={(chart) => { setTimeout(() => chart.resize(), 100) }} />
-                    <div style={{ fontSize: 12, color: '#6b7280', margin: '8px 0 4px' }}>CCI动量</div>
+                    <div style={{ fontSize: 12, color: '#6b7280', margin: '8px 0 4px' }}>CCI动量<Tip text={'CCI（商品通道指数）：>100=动量强势，>200=超买注意风险；<-100=动量弱势。突破+100是右侧入场的辅助确认信号。'} /></div>
                     <ReactECharts key={`cci-${result?.code}`} option={cciOption} style={{ height: 120, width: '100%' }} notMerge={true} onChartReady={(chart) => { setTimeout(() => chart.resize(), 100) }} />
-                    <div style={{ fontSize: 12, color: '#6b7280', margin: '8px 0 4px' }}>OBV能量潮</div>
+                    <div style={{ fontSize: 12, color: '#6b7280', margin: '8px 0 4px' }}>OBV能量潮<Tip text={'OBV把成交量和价格方向结合：价涨则加成交量，价跌则减。OBV上升=资金持续流入（有人在买）。如果价格涨但OBV跌，说明"虚涨"要小心。'} /></div>
                     <ReactECharts key={`obv-${result?.code}`} option={obvOption} style={{ height: 120, width: '100%' }} notMerge={true} onChartReady={(chart) => { setTimeout(() => chart.resize(), 100) }} />
+                    <div style={{ fontSize: 12, color: '#6b7280', margin: '8px 0 4px' }}>KST动量指标 (Pring)<Tip text="KST把4个不同周期的动量加权合并。紫色KST线上穿黄色信号线=动量转强（看涨）；下穿=动量转弱（看跌）。比单一指标更全面。" /></div>
+                    <ReactECharts key={`kst-${result?.code}`} option={kstOption} style={{ height: 120, width: '100%' }} notMerge={true} onChartReady={(chart) => { setTimeout(() => chart.resize(), 100) }} />
+                    <div style={{ fontSize: 12, color: '#6b7280', margin: '8px 0 4px' }}>Williams %R (Larry Williams)<Tip text={'Williams %R衡量短期超买超卖。>-20=超买区（涨过头了可能回调）；<-80=超卖区（跌过头了可能反弹）。从超卖区回升是右侧入场的好时机。'} /></div>
+                    <ReactECharts key={`wr-${result?.code}`} option={wrOption} style={{ height: 120, width: '100%' }} notMerge={true} onChartReady={(chart) => { setTimeout(() => chart.resize(), 100) }} />
+                    <div style={{ fontSize: 12, color: '#6b7280', margin: '8px 0 4px' }}>RSI相对强弱<Tip text={'RSI衡量涨跌力度。>70=超买（可能回调），>80=深度超买（高风险）；<30=超卖（可能反弹）。强趋势中RSI可持续在50-80区间运行。'} /></div>
+                    <ReactECharts key={`rsi-${result?.code}`} option={rsiOption} style={{ height: 120, width: '100%' }} notMerge={true} onChartReady={(chart) => { setTimeout(() => chart.resize(), 100) }} />
                   </>
                 )}
               </div>
@@ -709,16 +997,17 @@ export default function RightSideTrading() {
               {backtest && !backtestLoading && (
                 <>
                   {/* Stats */}
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 12, marginBottom: 20 }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12, marginBottom: 20 }}>
                     {[
-                      { label: '信号总数', value: backtest.stats.total_signals, color: '#f3f4f6' },
-                      { label: '20日胜率', value: `${backtest.stats.win_rate_20d}%`, color: backtest.stats.win_rate_20d > 50 ? '#16a34a' : '#dc2626' },
-                      { label: '20日均收益', value: `${backtest.stats.avg_return_20d}%`, color: backtest.stats.avg_return_20d > 0 ? '#16a34a' : '#dc2626' },
-                      { label: '最大收益', value: `${backtest.stats.max_return_20d}%`, color: '#16a34a' },
-                      { label: '夏普比率', value: backtest.stats.sharpe_like, color: backtest.stats.sharpe_like > 0 ? '#16a34a' : '#dc2626' },
+                      { label: '信号总数', value: backtest.stats.total_signals, color: '#f3f4f6', tip: '历史上出现"右侧确认"或"疑似右侧"信号的总次数。信号越多，统计越可靠。' },
+                      { label: '20日胜率', value: `${backtest.stats.win_rate_20d}%`, color: backtest.stats.win_rate_20d > 50 ? '#16a34a' : '#dc2626', tip: '出现信号后，持有20天盈利的比例。>50%=策略有效，越高越好。这是最核心的指标。' },
+                      { label: '20日均收益', value: `${backtest.stats.avg_return_20d}%`, color: backtest.stats.avg_return_20d > 0 ? '#16a34a' : '#dc2626', tip: '所有信号持有20天的平均收益率。正数=平均赚钱，负数=平均亏钱。' },
+                      { label: '盈亏比', value: backtest.stats.profit_loss_ratio ?? '-', color: (backtest.stats.profit_loss_ratio ?? 0) > 1.5 ? '#16a34a' : '#dc2626', tip: '平均盈利 ÷ 平均亏损。>1.5=赚的比亏的多，策略可持续。越高越好。' },
+                      { label: 'Trailing收益', value: backtest.stats.avg_trailing_return != null ? `${backtest.stats.avg_trailing_return}%` : '-', color: (backtest.stats.avg_trailing_return ?? 0) > 0 ? '#16a34a' : '#dc2626', tip: '模拟阶梯止损（盈利5%保本、10%锁5%、20%锁10%）后的实际收益，比固定持有更贴近实战。' },
+                      { label: '夏普比率', value: backtest.stats.sharpe_like, color: backtest.stats.sharpe_like > 0 ? '#16a34a' : '#dc2626', tip: '收益÷波动率，衡量"性价比"。>0.5=不错，>1=很好。同样的收益，波动越小夏普越高。' },
                     ].map((s, i) => (
                       <div key={i} style={{ background: '#111827', borderRadius: 8, padding: 12, textAlign: 'center' }}>
-                        <div style={{ fontSize: 11, color: '#9ca3af', marginBottom: 4 }}>{s.label}</div>
+                        <div style={{ fontSize: 11, color: '#9ca3af', marginBottom: 4 }}>{s.label}<Tip text={s.tip} /></div>
                         <div style={{ fontSize: 18, fontWeight: 700, color: s.color }}>{s.value}</div>
                       </div>
                     ))}
@@ -752,10 +1041,10 @@ export default function RightSideTrading() {
                                 return (
                                   <td key={period} style={{
                                     padding: '8px 12px',
-                                    color: val === null ? '#6b7280' : val > 0 ? '#16a34a' : '#dc2626',
-                                    fontWeight: val !== null ? 600 : 400,
+                                    color: val == null ? '#6b7280' : val > 0 ? '#16a34a' : '#dc2626',
+                                    fontWeight: val != null ? 600 : 400,
                                   }}>
-                                    {val !== null ? `${val > 0 ? '+' : ''}${val}%` : '—'}
+                                    {val != null ? `${val > 0 ? '+' : ''}${val}%` : '—'}
                                   </td>
                                 )
                               })}

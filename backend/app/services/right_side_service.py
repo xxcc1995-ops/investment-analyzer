@@ -147,7 +147,7 @@ def compute_timeframe_alignment(daily_verdict: str, daily_score: int,
     alignment_score = 0
     signals = []
 
-    verdict_rank = {'右侧确认': 3, '疑似右侧': 2, '非右侧': 1, '左侧下跌': 0}
+    verdict_rank = {'右侧确认': 3, '疑似右侧': 2, '观望等待': 2, '非右侧': 1, '左侧下跌': 0}
     d_rank = verdict_rank.get(daily_verdict, 0)
     w_rank = verdict_rank.get(weekly_verdict, 0)
 
@@ -200,23 +200,35 @@ def compute_ma(closes: list, period: int) -> list:
 
 def compute_ema(values: list, period: int) -> list:
     """指数移动平均"""
-    if len(values) < period:
-        return values[:]
+    n = len(values)
+    if n < period:
+        return [None] * n
     k = 2.0 / (period + 1)
-    ema = [0.0] * len(values)
+    ema = [None] * n
     ema[period - 1] = sum(values[:period]) / period
-    for i in range(period, len(values)):
+    for i in range(period, n):
         ema[i] = values[i] * k + ema[i - 1] * (1 - k)
     return ema
 
 
 def compute_macd(closes: list, fast: int = 12, slow: int = 26, signal: int = 9) -> dict:
     """MACD: DIF/DEA/柱状图"""
+    n = len(closes)
     ema_fast = compute_ema(closes, fast)
     ema_slow = compute_ema(closes, slow)
-    dif = [ema_fast[i] - ema_slow[i] for i in range(len(closes))]
-    dea = compute_ema(dif, signal)
-    histogram = [(dif[i] - dea[i]) * 2 for i in range(len(closes))]
+    # DIF: only valid from index slow-1 (where both EMAs exist)
+    dif = [None] * n
+    for i in range(slow - 1, n):
+        dif[i] = ema_fast[i] - ema_slow[i]
+    # DEA = EMA of DIF; feed 0.0 for None slots so EMA can compute, then mask invalids
+    dif_for_ema = [v if v is not None else 0.0 for v in dif]
+    dea_raw = compute_ema(dif_for_ema, signal)
+    dea_start = slow + signal - 2  # first index where DEA is truly valid
+    dea = [None if i < dea_start else dea_raw[i] for i in range(n)]
+    histogram = [None] * n
+    for i in range(n):
+        if dif[i] is not None and dea[i] is not None:
+            histogram[i] = round((dif[i] - dea[i]) * 2, 4)
     return {'dif': dif, 'dea': dea, 'histogram': histogram}
 
 
@@ -236,7 +248,7 @@ def compute_rsi(closes: list, period: int = 14) -> list:
     if avg_loss == 0:
         result.append(100.0)
     else:
-        result.append(100.0 - 100.0 / (1 + avg_gain / avg_loss))
+        result.append(round(100.0 - 100.0 / (1 + avg_gain / avg_loss), 2))
     for i in range(period, len(gains)):
         avg_gain = (avg_gain * (period - 1) + gains[i]) / period
         avg_loss = (avg_loss * (period - 1) + losses[i]) / period
@@ -490,6 +502,170 @@ def compute_parabolic_sar(highs: list, lows: list, af_start: float = 0.02,
     return {'sar': sar, 'is_long': is_long}
 
 
+def compute_kama(closes: list, period: int = 10, fast_period: int = 2, slow_period: int = 30) -> list:
+    """Kaufman自适应均线 (Perry Kaufman)
+    效率比率(ER)自动适应市场噪声：趋势市快速响应，震荡市减少假信号
+    """
+    n = len(closes)
+    if n < period + 1:
+        return [None] * n
+    fast_sc = 2.0 / (fast_period + 1)
+    slow_sc = 2.0 / (slow_period + 1)
+    kama = [None] * n
+    kama[period] = closes[period]  # 初始化为第一个可用值
+    for i in range(period + 1, n):
+        direction = abs(closes[i] - closes[i - period])
+        volatility = sum(abs(closes[j] - closes[j - 1]) for j in range(i - period + 1, i + 1))
+        er = direction / volatility if volatility > 0 else 0
+        sc = (er * (fast_sc - slow_sc) + slow_sc) ** 2
+        kama[i] = kama[i - 1] + sc * (closes[i] - kama[i - 1])
+    return kama
+
+
+def compute_kst(closes: list) -> dict:
+    """KST指标 (Martin Pring) — 多周期动量综合
+    KST = RCMA1×1 + RCMA2×2 + RCMA3×3 + RCMA4×4
+    RCMA1 = ROC(10)的10日SMA, RCMA2 = ROC(15)的10日SMA,
+    RCMA3 = ROC(20)的10日SMA, RCMA4 = ROC(30)的15日SMA
+    """
+    n = len(closes)
+    if n < 45:
+        return {'kst': [None] * n, 'signal': [None] * n}
+
+    def roc(values, period):
+        result = [None] * len(values)
+        for i in range(period, len(values)):
+            if values[i - period] != 0:
+                result[i] = (values[i] - values[i - period]) / values[i - period] * 100
+            else:
+                result[i] = 0
+        return result
+
+    def sma(values, period):
+        result = [None] * len(values)
+        for i in range(period - 1, len(values)):
+            window = [v for v in values[i - period + 1:i + 1] if v is not None]
+            if len(window) == period:
+                result[i] = sum(window) / period
+        return result
+
+    roc10 = roc(closes, 10)
+    roc15 = roc(closes, 15)
+    roc20 = roc(closes, 20)
+    roc30 = roc(closes, 30)
+    rcma1 = sma(roc10, 10)
+    rcma2 = sma(roc15, 10)
+    rcma3 = sma(roc20, 10)
+    rcma4 = sma(roc30, 15)
+
+    kst = [None] * n
+    for i in range(n):
+        vals = [rcma1[i], rcma2[i], rcma3[i], rcma4[i]]
+        if all(v is not None for v in vals):
+            kst[i] = vals[0] * 1 + vals[1] * 2 + vals[2] * 3 + vals[3] * 4
+
+    # KST信号线 = 9日SMA
+    signal = sma(kst, 9)
+    return {'kst': kst, 'signal': signal}
+
+
+def compute_williams_r(highs: list, lows: list, closes: list, period: int = 14) -> list:
+    """Williams %R指标 (Larry Williams)
+    %R = (最高价 - 收盘价) / (最高价 - 最低价) × (-100)
+    范围：-100 到 0，<-80超买，>-20超卖
+    """
+    n = len(closes)
+    result = [None] * n
+    for i in range(period - 1, n):
+        hh = max(highs[i - period + 1:i + 1])
+        ll = min(lows[i - period + 1:i + 1])
+        if hh != ll:
+            result[i] = round((hh - closes[i]) / (hh - ll) * (-100), 2)
+        else:
+            result[i] = -50.0
+    return result
+
+
+def compute_td_sequential(closes: list, highs: list, lows: list) -> dict:
+    """DeMark TD序列 (Tom DeMark) — 趋势衰竭计数系统
+    TD Setup: 连续9根K线收盘价高于/低于4根前的收盘价
+    TD Countdown: 13根K线计数确认
+    """
+    n = len(closes)
+    setup = [0] * n      # 正数=卖出setup计数, 负数=买入setup计数
+    countdown = [0] * n  # 正数=卖出countdown, 负数=买入countdown
+    tdst_support = [None] * n
+    tdst_resistance = [None] * n
+
+    # TD Setup
+    sell_count = 0
+    buy_count = 0
+    for i in range(4, n):
+        if closes[i] > closes[i - 4]:
+            sell_count += 1
+            buy_count = 0
+        elif closes[i] < closes[i - 4]:
+            buy_count += 1
+            sell_count = 0
+        else:
+            sell_count = 0
+            buy_count = 0
+        setup[i] = sell_count if sell_count > 0 else -buy_count
+
+    # TDST (Setup的极值)
+    for i in range(4, n):
+        if setup[i] >= 9:
+            # 卖出Setup完成，记录最高价为阻力
+            tdst_resistance[i] = max(highs[max(0, i - 8):i + 1])
+        elif setup[i] <= -9:
+            # 买入Setup完成，记录最低价为支撑
+            tdst_support[i] = min(lows[max(0, i - 8):i + 1])
+
+    # TD Countdown (简化版：在Setup完成后开始13根计数)
+    sell_cd_count = 0
+    buy_cd_count = 0
+    sell_cd_active = False
+    buy_cd_active = False
+    for i in range(4, n):
+        if setup[i] >= 9:
+            sell_cd_active = True
+            sell_cd_count = 0
+        elif setup[i] <= -9:
+            buy_cd_active = True
+            buy_cd_count = 0
+
+        if sell_cd_active and i >= 2:
+            if closes[i] >= highs[max(0, i - 2)]:
+                sell_cd_count += 1
+            if sell_cd_count >= 13:
+                countdown[i] = 13
+                sell_cd_active = False
+                sell_cd_count = 0
+
+        if buy_cd_active and i >= 2:
+            if closes[i] <= lows[max(0, i - 2)]:
+                buy_cd_count += 1
+            if buy_cd_count >= 13:
+                countdown[i] = -13
+                buy_cd_active = False
+                buy_cd_count = 0
+
+    return {'setup': setup, 'countdown': countdown,
+            'tdst_support': tdst_support, 'tdst_resistance': tdst_resistance}
+
+
+def compute_roc(closes: list, period: int) -> list:
+    """ROC: Rate of Change 变动率"""
+    n = len(closes)
+    result = [None] * n
+    for i in range(period, n):
+        if closes[i - period] != 0:
+            result[i] = round((closes[i] - closes[i - period]) / closes[i - period] * 100, 2)
+        else:
+            result[i] = 0
+    return result
+
+
 # ============================================================
 # 2b. 市场环境判断 & Weinstein阶段分析
 # ============================================================
@@ -539,13 +715,19 @@ def detect_market_regime(adx_values: list, plus_di: list, minus_di: list) -> dic
 
 
 def get_dynamic_weights(regime: str) -> dict:
-    """根据市场环境返回动态权重（总和100）"""
+    """根据市场环境返回动态权重（九维度，总和100）"""
     if regime == 'trending':
-        return {'ma': 28, 'macd': 22, 'volume': 18, 'pattern': 15, 'rsi_kdj': 7, 'new_ind': 10}
+        # 趋势市：均线/MACD/自适应趋势权重高
+        return {'ma': 20, 'macd': 15, 'volume': 14, 'pattern': 12,
+                'rsi_kdj': 5, 'new_ind': 8, 'momentum': 10, 'adaptive_trend': 10, 'td': 6}
     elif regime == 'developing':
-        return {'ma': 25, 'macd': 20, 'volume': 20, 'pattern': 18, 'rsi_kdj': 7, 'new_ind': 10}
+        # 发展中：均衡分配
+        return {'ma': 18, 'macd': 14, 'volume': 14, 'pattern': 14,
+                'rsi_kdj': 7, 'new_ind': 8, 'momentum': 10, 'adaptive_trend': 8, 'td': 7}
     else:  # ranging
-        return {'ma': 15, 'macd': 12, 'volume': 15, 'pattern': 20, 'rsi_kdj': 18, 'new_ind': 20}
+        # 震荡市：形态/RSI/动量权重高，均线/自适应趋势权重低
+        return {'ma': 10, 'macd': 10, 'volume': 12, 'pattern': 18,
+                'rsi_kdj': 14, 'new_ind': 14, 'momentum': 10, 'adaptive_trend': 4, 'td': 8}
 
 
 def detect_weinstein_stage(highs: list, lows: list, closes: list, volumes: list, ma_period: int = 30) -> dict:
@@ -833,6 +1015,164 @@ def detect_cup_and_handle(highs: list, lows: list, closes: list) -> dict:
     }
 
 
+def detect_flag_pattern(highs: list, lows: list, closes: list, volumes: list) -> dict:
+    """旗形/三角旗形形态检测 (Dan Zanger)
+    旗杆：快速上涨25%+，旗面：小幅回调10-40%，突破：放量突破旗面上轨
+    """
+    n = len(closes)
+    cur = n - 1
+    score = 0
+    signals = []
+
+    if cur < 60:
+        return {'score': 0, 'signals': [], 'found': False, 'flag_type': 'none'}
+
+    # 找旗杆：过去60日内连续10天以上涨幅超30%
+    best_flagpole = 0
+    flagpole_start = -1
+    flagpole_end = -1
+    for start in range(max(0, cur - 50), cur - 10):
+        for end in range(start + 10, min(start + 30, cur)):
+            gain = (closes[end] - closes[start]) / closes[start] * 100
+            if gain > best_flagpole and gain >= 25:
+                best_flagpole = gain
+                flagpole_start = start
+                flagpole_end = end
+
+    if flagpole_start < 0:
+        return {'score': 0, 'signals': [], 'found': False, 'flag_type': 'none'}
+
+    # 找旗面：旗杆后的回调
+    flag_high = max(highs[flagpole_end:min(flagpole_end + 20, cur + 1)])
+    flag_low = min(lows[flagpole_end:min(flagpole_end + 20, cur + 1)])
+    flag_range = (flag_high - flag_low) / flag_high * 100 if flag_high > 0 else 0
+    flagpole_height = closes[flagpole_end] - closes[flagpole_start]
+    flag_depth = (closes[flagpole_end] - flag_low) / flagpole_height * 100 if flagpole_height > 0 else 0
+
+    # 旗形条件：回调幅度15-35%，旗面振幅合理
+    if 10 < flag_depth < 40 and flag_range < 15:
+        # 检查是否突破旗面上轨
+        neckline = flag_high
+        if closes[cur] > neckline:
+            # 检查突破日成交量
+            vol_ma = sum(volumes[max(0, cur - 19):cur + 1]) / min(20, cur + 1)
+            vol_ratio = volumes[cur] / vol_ma if vol_ma > 0 else 1
+            if vol_ratio > 1.5:
+                score = 7
+                signals.append(f"旗形突破确认：旗杆涨幅{best_flagpole:.0f}%，旗面回调{flag_depth:.0f}%，放量突破")
+            else:
+                score = 4
+                signals.append(f"旗形突破但量能不足：旗杆{best_flagpole:.0f}%，旗面{flag_depth:.0f}%")
+        else:
+            score = 2
+            signals.append(f"旗形形成中：旗杆涨幅{best_flagpole:.0f}%，待突破{neckline:.2f}")
+
+    # 三角旗形：旗面呈收敛状
+    if flagpole_end >= 0 and cur - flagpole_end >= 5:
+        recent_highs = highs[flagpole_end:min(flagpole_end + 15, cur + 1)]
+        recent_lows = lows[flagpole_end:min(flagpole_end + 15, cur + 1)]
+        if len(recent_highs) >= 3:
+            highs_decreasing = all(recent_highs[i] <= recent_highs[i - 1] * 1.01 for i in range(1, len(recent_highs)))
+            lows_increasing = all(recent_lows[i] >= recent_lows[i - 1] * 0.99 for i in range(1, len(recent_lows)))
+            if highs_decreasing and lows_increasing and closes[cur] > recent_highs[-1]:
+                score = max(score, 6)
+                signals.append("三角旗形收敛突破")
+
+    return {
+        'score': score,
+        'signals': signals,
+        'found': score > 0,
+        'flag_type': 'triangle_flag' if '三角旗形' in ' '.join(signals) else ('flag' if score > 0 else 'none'),
+    }
+
+
+def detect_sepa_template(closes: list, highs: list, lows: list) -> dict:
+    """Minervini SEPA趋势模板 — 8个条件全部满足才得分
+    用于筛选处于Stage 2上升趋势的强势股
+    """
+    n = len(closes)
+    cur = n - 1
+    signals = []
+    details = []
+
+    if cur < 200:
+        return {'score': 0, 'conditions_met': 0, 'signals': ['数据不足(需200+交易日)'], 'details': []}
+
+    ma50 = compute_ma(closes, 50)
+    ma150 = compute_ma(closes, 150)
+    ma200 = compute_ma(closes, 200)
+
+    if not all([ma50[cur], ma150[cur], ma200[cur]]):
+        return {'score': 0, 'conditions_met': 0, 'signals': ['均线数据不足'], 'details': []}
+
+    price = closes[cur]
+    conditions = []
+
+    # 1. 股价 > 150日均线 > 200日均线
+    c1 = price > ma150[cur] > ma200[cur]
+    conditions.append(('股价>MA150>MA200', c1))
+
+    # 2. 150日均线 > 200日均线
+    c2 = ma150[cur] > ma200[cur]
+    conditions.append(('MA150>MA200', c2))
+
+    # 3. 200日均线至少上升1个月(20个交易日)
+    c3 = ma200[cur] > ma200[max(0, cur - 20)] if ma200[max(0, cur - 20)] else False
+    conditions.append(('MA200上升趋势', c3))
+
+    # 4. 50日均线 > 150日均线 > 200日均线
+    c4 = ma50[cur] > ma150[cur] > ma200[cur]
+    conditions.append(('MA50>MA150>MA200', c4))
+
+    # 5. 股价 > 50日均线
+    c5 = price > ma50[cur]
+    conditions.append(('股价>MA50', c5))
+
+    # 6. 股价比52周低点至少高25%
+    low_52w = min(lows[max(0, cur - 250):cur + 1])
+    c6 = (price - low_52w) / low_52w * 100 >= 25 if low_52w > 0 else False
+    conditions.append((f'距52周低点+{(price - low_52w) / low_52w * 100:.0f}%', c6))
+
+    # 7. 股价距离52周高点不超过25%
+    high_52w = max(highs[max(0, cur - 250):cur + 1])
+    dist_from_high = (high_52w - price) / high_52w * 100
+    c7 = dist_from_high <= 25
+    conditions.append((f'距52周高点-{dist_from_high:.0f}%', c7))
+
+    # 8. 相对强度(简化：使用近50日涨幅 vs 近200日涨幅的加权)
+    if cur >= 200:
+        ret_50 = (price - closes[cur - 50]) / closes[cur - 50] * 100
+        ret_200 = (price - closes[cur - 200]) / closes[cur - 200] * 100
+        rs_score = ret_50 * 0.4 + ret_200 * 0.6
+        c8 = rs_score >= 0  # 简化：正收益即达标
+        conditions.append((f'相对强度={rs_score:.1f}', c8))
+    else:
+        c8 = False
+        conditions.append(('相对强度:数据不足', False))
+
+    met = sum(1 for _, ok in conditions if ok)
+    for name, ok in conditions:
+        details.append({'condition': name, 'met': ok})
+
+    # 评分：满足条件越多得分越高
+    score_map = {8: 10, 7: 8, 6: 6, 5: 4, 4: 2}
+    score = score_map.get(met, max(0, met - 3))
+
+    if met >= 7:
+        signals.append(f"SEPA模板高度满足({met}/8)，强势趋势确认")
+    elif met >= 5:
+        signals.append(f"SEPA模板部分满足({met}/8)，趋势发展中")
+    else:
+        signals.append(f"SEPA模板仅满足{met}/8，趋势尚未形成")
+
+    return {
+        'score': score,
+        'conditions_met': met,
+        'signals': signals,
+        'details': details,
+    }
+
+
 # ============================================================
 # 2d. 新指标评分维度
 # ============================================================
@@ -966,6 +1306,29 @@ def compute_risk_management(closes: list, highs: list, lows: list, atr_value: fl
     elif vol_level == 'high':
         signals.append(f"波动率偏高(ATR={atr_pct:.1f}%)，注意控制仓位")
 
+    # R-multiple目标位（让利润奔跑）
+    r_targets = {
+        '1R': round(price + 1.0 * atr_value, 2),
+        '2R': round(price + 2.0 * atr_value, 2),
+        '3R': round(price + 3.0 * atr_value, 2),
+        '5R': round(price + 5.0 * atr_value, 2),
+    }
+
+    # 自适应移动止损 (Trailing Stop)
+    trailing_stop = {
+        'tight': round(price - 1.5 * atr_value, 2),
+        'normal': round(price - 2.5 * atr_value, 2),
+        'breakeven_trigger': round(price + 1.0 * atr_value, 2),
+    }
+
+    # 移动止损阶梯 (基于盈利百分比)
+    trailing_ladder = {
+        'profit_5pct': {'action': 'move_stop_to_breakeven', 'stop': round(price, 2)},
+        'profit_10pct': {'action': 'lock_5pct_profit', 'stop': round(price * 1.05, 2)},
+        'profit_20pct': {'action': 'lock_10pct_profit', 'stop': round(price * 1.10, 2)},
+        'profit_30pct': {'action': 'lock_15pct + tighten_1.5ATR', 'stop': round(price * 1.15, 2)},
+    }
+
     return {
         'atr': round(atr_value, 4),
         'atr_pct': round(atr_pct, 2),
@@ -973,6 +1336,9 @@ def compute_risk_management(closes: list, highs: list, lows: list, atr_value: fl
         'stop_loss': stop_loss,
         'position_sizing': position_sizing,
         'risk_reward': risk_reward,
+        'r_targets': r_targets,
+        'trailing_stop': trailing_stop,
+        'trailing_ladder': trailing_ladder,
         'signals': signals,
     }
 
@@ -1071,7 +1437,8 @@ def detect_macd_signals(closes: list, dates: list) -> dict:
     # 1. 近期MACD金叉（0-6分）
     golden_cross_at = None
     for i in range(max(1, cur - 9), cur + 1):
-        if dif[i - 1] <= dea[i - 1] and dif[i] > dea[i]:
+        if (dif[i - 1] is not None and dea[i - 1] is not None and dif[i] is not None and dea[i] is not None and
+                dif[i - 1] <= dea[i - 1] and dif[i] > dea[i]):
             golden_cross_at = i
             break
     if golden_cross_at is not None:
@@ -1080,18 +1447,20 @@ def detect_macd_signals(closes: list, dates: list) -> dict:
         if dif[golden_cross_at] >= 0:
             cross_score += 2
             signals.append("MACD零轴上方金叉（强信号）")
-        elif abs(dif[golden_cross_at]) < abs(max(dif[-60:]) - min(dif[-60:])) * 0.1:
-            cross_score += 1
-            signals.append("MACD零轴附近金叉")
         else:
-            signals.append("MACD零轴下方金叉")
+            dif_60 = [v for v in dif[max(0, cur - 59):cur + 1] if v is not None]
+            if dif_60 and abs(dif[golden_cross_at]) < abs(max(dif_60) - min(dif_60)) * 0.1:
+                cross_score += 1
+                signals.append("MACD零轴附近金叉")
+            else:
+                signals.append("MACD零轴下方金叉")
         score += cross_score
 
     # 2. 柱状图由负转正（0-4分）
-    if cur >= 1 and hist[cur] > 0 and hist[cur - 1] <= 0:
+    if cur >= 1 and hist[cur] is not None and hist[cur] > 0 and hist[cur - 1] is not None and hist[cur - 1] <= 0:
         score += 4
         signals.append("MACD柱状图由负转正")
-    elif cur >= 2 and hist[cur] > 0 and hist[cur - 1] > 0 and hist[cur - 2] <= 0:
+    elif cur >= 2 and hist[cur] is not None and hist[cur] > 0 and hist[cur - 1] is not None and hist[cur - 1] > 0 and hist[cur - 2] is not None and hist[cur - 2] <= 0:
         score += 2
         signals.append("MACD柱状图连续为正")
 
@@ -1102,7 +1471,7 @@ def detect_macd_signals(closes: list, dates: list) -> dict:
         signals.append("MACD底背离确认（强信号）")
 
     # 4. DIF趋势向上（0-4分）
-    if cur >= 5:
+    if cur >= 5 and dif[cur] is not None and dif[cur - 5] is not None:
         dif_slope = dif[cur] - dif[cur - 5]
         if dif_slope > 0:
             if dif[cur] >= 0:
@@ -1132,7 +1501,7 @@ def _detect_bottom_divergence(closes: list, dif: list, lookback: int = 120) -> d
     price_mins = []
     for i in range(10, len(recent_closes) - 10):
         window = recent_closes[i - 10:i + 11]
-        if recent_closes[i] == min(window):
+        if recent_closes[i] == min(window) and recent_dif[i] is not None:
             price_mins.append((i, recent_closes[i], recent_dif[i]))
     if len(price_mins) < 2:
         return {'confirmed': False}
@@ -1339,16 +1708,267 @@ def detect_rsi_kdj_signals(closes: list, highs: list, lows: list) -> dict:
                 signals.append(f"KDJ金叉(K={k_vals[i]:.0f},D={d_vals[i]:.0f})")
                 break
 
-    # 3. RSI超买惩罚（-4分）
-    if cur_rsi is not None and cur_rsi > 70:
+    # 3. RSI超买惩罚（-4分，>80深度超买额外-2分）
+    if cur_rsi is not None and cur_rsi > 80:
+        score -= 6
+        signals.append(f"RSI深度超买({cur_rsi:.0f}>)，追高风险极大")
+    elif cur_rsi is not None and cur_rsi > 70:
         score -= 4
-        signals.append(f"RSI超买({cur_rsi:.0f})，注意追高风险")
+        signals.append(f"RSI超买({cur_rsi:.0f})，注意短期回调风险")
 
     score = max(0, min(15, score))
     return {
         'score': score,
         'signals': signals,
         'detail': f"RSI/KDJ得分 {score}/15",
+    }
+
+
+def detect_momentum_signals(closes: list, highs: list, lows: list, volumes: list) -> dict:
+    """动量综合评分（满分20）— 融合Pring KST + Williams %R + ROC多周期
+    来源：Martin Pring (KST), Larry Williams (%R), 多周期动量确认
+    """
+    score = 0
+    signals = []
+    cur = len(closes) - 1
+
+    if cur < 45:
+        return {'score': 0, 'signals': ['数据不足'], 'detail': '动量数据不足', 'max': 20}
+
+    # 1. KST上穿信号线 (0-6分)
+    kst_data = compute_kst(closes)
+    kst_val = kst_data['kst'][cur]
+    sig_val = kst_data['signal'][cur]
+    if kst_val is not None and sig_val is not None:
+        if kst_val > sig_val:
+            # KST在信号线上方
+            if cur >= 2 and kst_data['kst'][cur - 1] is not None and kst_data['signal'][cur - 1] is not None:
+                if kst_data['kst'][cur - 1] <= kst_data['signal'][cur - 1]:
+                    score += 6
+                    signals.append(f"KST上穿信号线（金叉），动量转强")
+                else:
+                    score += 4
+                    signals.append(f"KST在信号线上方，动量持续")
+            else:
+                score += 3
+        elif kst_val < sig_val * 0.8:
+            signals.append("KST在信号线下方，动量偏弱")
+
+    # 2. Williams %R从超卖回升 (0-4分)
+    wr = compute_williams_r(highs, lows, closes)
+    wr_val = wr[cur] if cur < len(wr) else None
+    if wr_val is not None:
+        min_wr_20 = min((v for v in wr[max(0, cur - 19):cur + 1] if v is not None), default=-50)
+        if min_wr_20 < -80 and wr_val > -50:
+            score += 4
+            signals.append(f"Williams %R从超卖区({min_wr_20:.0f})回升至{wr_val:.0f}")
+        elif min_wr_20 < -70 and wr_val > -40:
+            score += 2
+            signals.append(f"Williams %R从低位({min_wr_20:.0f})回升")
+        elif wr_val > -20:
+            signals.append(f"Williams %R={wr_val:.0f}进入超买区，注意回调风险")
+
+    # 3. 多周期ROC方向一致 (0-6分)
+    roc10 = compute_roc(closes, 10)
+    roc20 = compute_roc(closes, 20)
+    roc40 = compute_roc(closes, 40)
+    r10 = roc10[cur] if cur < len(roc10) and roc10[cur] is not None else None
+    r20 = roc20[cur] if cur < len(roc20) and roc20[cur] is not None else None
+    r40 = roc40[cur] if cur < len(roc40) and roc40[cur] is not None else None
+    if r10 is not None and r20 is not None and r40 is not None:
+        if r10 > 0 and r20 > 0 and r40 > 0:
+            score += 6
+            signals.append(f"三周期ROC全部为正(10d:{r10:.1f}%,20d:{r20:.1f}%,40d:{r40:.1f}%)，动量共振")
+        elif r10 > 0 and r20 > 0:
+            score += 3
+            signals.append(f"短期+中期ROC为正，动量偏多")
+        elif r10 < 0 and r20 < 0 and r40 < 0:
+            signals.append("三周期ROC全部为负，动量偏空")
+
+    # 4. 动量背离检测 (0-4分)
+    if cur >= 60 and kst_val is not None:
+        # 价格创新高但KST未创新高 → 顶背离警告
+        price_high_30 = max(closes[cur - 30:cur + 1])
+        kst_30 = [kst_data['kst'][i] for i in range(max(0, cur - 30), cur + 1) if kst_data['kst'][i] is not None]
+        if kst_30 and closes[cur] >= price_high_30 * 0.99:
+            max_kst_30 = max(kst_30)
+            if kst_val < max_kst_30 * 0.8:
+                score -= 2
+                signals.append("KST顶背离：价格接近高位但动量减弱")
+        # 价格创新低但KST未创新低 → 底背离
+        price_low_30 = min(closes[cur - 30:cur + 1])
+        min_kst_30 = min(kst_30) if kst_30 else 0
+        if closes[cur] <= price_low_30 * 1.01 and kst_val > min_kst_30 * 1.2:
+            score += 4
+            signals.append("KST底背离：价格低位但动量回升")
+
+    score = max(0, min(20, score))
+    return {
+        'score': score,
+        'signals': signals,
+        'detail': f"动量综合得分 {score}/20",
+        'max': 20,
+        'kst_data': kst_data,
+        'williams_r': wr,
+    }
+
+
+def detect_adaptive_trend_signals(closes: list, highs: list, lows: list,
+                                   weekly_closes: list = None) -> dict:
+    """自适应趋势评分（满分15）— 融合KAMA + Elder三重滤网
+    来源：Perry Kaufman (KAMA), Alexander Elder (Triple Screen)
+    """
+    score = 0
+    signals = []
+    cur = len(closes) - 1
+
+    if cur < 30:
+        return {'score': 0, 'signals': ['数据不足'], 'detail': '自适应趋势数据不足', 'max': 15}
+
+    # 1. KAMA趋势方向 (0-5分)
+    kama = compute_kama(closes, period=10)
+    kama_val = kama[cur]
+    if kama_val is not None:
+        price = closes[cur]
+        kama_pct = (price - kama_val) / kama_val * 100
+        if price > kama_val:
+            # KAMA斜率
+            if cur >= 5 and kama[cur - 5] is not None:
+                kama_slope = (kama_val - kama[cur - 5]) / kama[cur - 5] * 100
+                if kama_slope > 1:
+                    score += 5
+                    signals.append(f"KAMA上升趋势({kama_slope:.1f}%)，自适应均线确认")
+                elif kama_slope > 0:
+                    score += 3
+                    signals.append(f"KAMA温和上升，价格在KAMA上方{kama_pct:.1f}%")
+                else:
+                    score += 1
+                    signals.append("KAMA走平，价格勉强在上方")
+            else:
+                score += 2
+        else:
+            signals.append(f"价格在KAMA下方{kama_pct:.1f}%，自适应趋势偏空")
+
+    # 2. KAMA自适应效率 (0-3分)
+    if cur >= 20 and kama_val is not None:
+        # 计算效率比率
+        direction = abs(closes[cur] - closes[cur - 10])
+        volatility = sum(abs(closes[j] - closes[j - 1]) for j in range(cur - 9, cur + 1))
+        er = direction / volatility if volatility > 0 else 0
+        if er > 0.5:
+            score += 3
+            signals.append(f"效率比率={er:.2f}，市场趋势清晰")
+        elif er > 0.3:
+            score += 1
+            signals.append(f"效率比率={er:.2f}，趋势中等")
+
+    # 3. 三重滤网确认 (0-7分) — Elder Triple Screen
+    # 第一重：周线MACD方向（使用周线数据或近5日模拟）
+    weekly_macd_ok = False
+    if weekly_closes and len(weekly_closes) >= 30:
+        w_macd = compute_macd(weekly_closes)
+        w_cur = len(weekly_closes) - 1
+        if w_macd['histogram'][w_cur] is not None:
+            if w_macd['histogram'][w_cur] > 0:
+                weekly_macd_ok = True
+                score += 3
+                signals.append("三重滤网①：周线MACD柱状图为正")
+            else:
+                signals.append("三重滤网①：周线MACD柱状图为负（周线趋势偏空）")
+    else:
+        # 使用日线MACD模拟
+        macd = compute_macd(closes)
+        if macd['histogram'][cur] is not None and macd['histogram'][cur] > 0:
+            weekly_macd_ok = True
+            score += 2
+            signals.append("三重滤网①：日线MACD柱状图为正（周线数据不足）")
+
+    # 第二重：日线振荡指标超卖回升
+    rsi = compute_rsi(closes)
+    rsi_val = rsi[cur] if cur < len(rsi) and rsi[cur] is not None else None
+    if rsi_val is not None and weekly_macd_ok:
+        min_rsi_10 = min((v for v in rsi[max(0, cur - 9):cur + 1] if v is not None), default=50)
+        if min_rsi_10 < 40 and rsi_val > 45:
+            score += 2
+            signals.append(f"三重滤网②：RSI从{min_rsi_10:.0f}回升至{rsi_val:.0f}")
+        elif 40 < rsi_val < 65:
+            score += 1
+            signals.append(f"三重滤网②：RSI={rsi_val:.0f}处于中性偏多")
+
+    # 第三重：入场突破信号
+    if cur >= 5:
+        recent_high = max(highs[cur - 5:cur])
+        if closes[cur] > recent_high:
+            score += 2
+            signals.append(f"三重滤网③：突破近5日高点({recent_high:.2f})")
+
+    score = max(0, min(15, score))
+    return {
+        'score': score,
+        'signals': signals,
+        'detail': f"自适应趋势得分 {score}/15",
+        'max': 15,
+        'kama_data': kama,
+    }
+
+
+def detect_td_signals(closes: list, highs: list, lows: list) -> dict:
+    """DeMark TD序列评分（满分10）
+    来源：Tom DeMark — 趋势衰竭计数系统
+    注意：在右侧交易中，TD卖出信号作为风险警告，TD买入信号作为趋势确认
+    """
+    score = 0
+    signals = []
+    cur = len(closes) - 1
+
+    if cur < 20:
+        return {'score': 0, 'signals': ['数据不足'], 'detail': 'TD序列数据不足', 'max': 10}
+
+    td = compute_td_sequential(closes, highs, lows)
+
+    setup_val = td['setup'][cur]
+    countdown_val = td['countdown'][cur]
+
+    # 买入Setup完成（连续9根收盘低于4根前）→ 底部信号
+    if setup_val <= -9:
+        score += 4
+        signals.append(f"TD买入Setup完成({abs(setup_val)}根)，底部衰竭信号")
+
+    # 卖出Setup完成（连续9根收盘高于4根前）→ 顶部警告
+    if setup_val >= 9:
+        score -= 3
+        signals.append(f"TD卖出Setup完成({setup_val}根)，顶部衰竭警告")
+
+    # 买入Countdown完成（13根计数）→ 强底部信号
+    if countdown_val <= -13:
+        score += 6
+        signals.append("TD买入Countdown完成(13根)，强底部反转信号")
+
+    # 卖出Countdown完成 → 强顶部警告
+    if countdown_val >= 13:
+        score -= 4
+        signals.append("TD卖出Countdown完成(13根)，强顶部反转警告")
+
+    # TDST支撑/阻力
+    if td['tdst_support'][cur] is not None:
+        dist = (closes[cur] - td['tdst_support'][cur]) / closes[cur] * 100
+        if 0 < dist < 5:
+            score += 2
+            signals.append(f"价格接近TDST支撑位({td['tdst_support'][cur]:.2f})")
+
+    if td['tdst_resistance'][cur] is not None:
+        dist = (td['tdst_resistance'][cur] - closes[cur]) / closes[cur] * 100
+        if 0 < dist < 3:
+            score -= 2
+            signals.append(f"价格接近TDST阻力位({td['tdst_resistance'][cur]:.2f})")
+
+    score = max(0, min(10, score))
+    return {
+        'score': score,
+        'signals': signals,
+        'detail': f"TD序列得分 {score}/10",
+        'max': 10,
+        'td_data': td,
     }
 
 
@@ -1477,8 +2097,10 @@ def anti_fake_checks(ma_result: dict, macd_result: dict, vol_result: dict,
             # 找近60日价格高点和DIF高点
             price_high_60 = max(closes[cur - 60:cur + 1])
             price_high_30 = max(closes[cur - 30:cur + 1])
-            dif_at_60_high = max(dif_list[max(0, cur - 60):cur + 1]) if any(d is not None for d in dif_list[max(0, cur - 60):cur + 1]) else None
-            dif_at_30_high = max(dif_list[max(0, cur - 30):cur + 1]) if any(d is not None for d in dif_list[max(0, cur - 30):cur + 1]) else None
+            dif_60_valid = [d for d in dif_list[max(0, cur - 60):cur + 1] if d is not None]
+            dif_30_valid = [d for d in dif_list[max(0, cur - 30):cur + 1] if d is not None]
+            dif_at_60_high = max(dif_60_valid) if dif_60_valid else None
+            dif_at_30_high = max(dif_30_valid) if dif_30_valid else None
             if (dif_at_60_high is not None and dif_at_30_high is not None and
                     price_high_30 >= price_high_60 * 0.99 and dif_at_30_high < dif_at_60_high * 0.8):
                 warnings.append({
@@ -1538,15 +2160,281 @@ def anti_fake_checks(ma_result: dict, macd_result: dict, vol_result: dict,
 
     # === 第五类：动量指标类 ===
 
-    # 12. RSI超买
-    if rsi_val is not None and rsi_val > 70:
+    # 12. RSI超买（强趋势中RSI可持续60-80，>80才触发警告）
+    if rsi_val is not None and rsi_val > 80:
+        warnings.append({
+            'type': 'rsi_overbought',
+            'severity': 'high',
+            'message': f'RSI={rsi_val:.0f}已深度超买(>80)，追高风险极大',
+        })
+    elif rsi_val is not None and rsi_val > 70:
         warnings.append({
             'type': 'rsi_overbought',
             'severity': 'medium',
-            'message': f'RSI={rsi_val:.0f}已进入超买区，追高风险较大',
+            'message': f'RSI={rsi_val:.0f}进入超买区(>70)，注意短期回调风险',
         })
 
     return warnings
+
+
+# ============================================================
+# 4b. 大师级三层过滤器 + 精确入场
+# ============================================================
+
+def fetch_index_klines(index_code: str = '000001', days: int = 120) -> list[dict]:
+    """获取大盘指数K线（上证指数默认）"""
+    cache_key = f"index_klines_{index_code}_{days}"
+    cached_data = get_cache(cache_key, 600)
+    if cached_data:
+        return cached_data
+    try:
+        url = 'https://web.ifzq.gtimg.cn/appstock/app/fqkline/get'
+        end_date = datetime.now().strftime('%Y-%m-%d')
+        start_date = (datetime.now() - timedelta(days=int(days * 1.6))).strftime('%Y-%m-%d')
+        params = {'param': f'sh{index_code},day,{start_date},{end_date},{days + 10},qfq'}
+        r = requests.get(url, params=params, timeout=15)
+        data = r.json()
+        if 'data' in data and f'sh{index_code}' in data['data']:
+            klines = data['data'][f'sh{index_code}']
+            rows = klines.get('qfqday') or klines.get('day') or []
+            records = []
+            for row in rows:
+                if len(row) >= 6:
+                    records.append({
+                        'date': str(row[0]),
+                        'open': float(row[1]),
+                        'high': float(row[3]),
+                        'low': float(row[4]),
+                        'close': float(row[2]),
+                        'volume': float(row[5]),
+                    })
+            result = records[-days:]
+            set_cache(cache_key, result)
+            return result
+    except Exception as e:
+        logger.error(f"fetch_index_klines failed for {index_code}: {e}")
+    return []
+
+
+def detect_market_timing() -> dict:
+    """大盘择时判断（O'Neil M=Market + Weinstein Stage）
+    大盘下跌时一票否决，不做多。
+    """
+    idx_data = fetch_index_klines('000001', 120)
+    if not idx_data or len(idx_data) < 60:
+        return {'status': 'unknown', 'signal': 'caution', 'reason': '大盘数据不足',
+                'index_close': 0, 'index_ma60': 0, 'index_ma60_slope': 0}
+
+    closes = [d['close'] for d in idx_data]
+    cur = len(closes) - 1
+    ma60 = compute_ma(closes, 60)
+    ma20 = compute_ma(closes, 20)
+
+    idx_close = closes[cur]
+    idx_ma60 = ma60[cur] if ma60[cur] else idx_close
+    idx_ma20 = ma20[cur] if ma20[cur] else idx_close
+
+    # MA60斜率（过去20日）
+    slope = 0
+    if cur >= 20 and ma60[cur - 20] and ma60[cur - 20] > 0:
+        slope = (idx_ma60 - ma60[cur - 20]) / ma60[cur - 20] * 100
+
+    price_vs_ma60 = (idx_close - idx_ma60) / idx_ma60 * 100 if idx_ma60 > 0 else 0
+
+    if idx_close > idx_ma60 and slope > 0:
+        status = 'bull'
+        signal = 'go'
+        reason = f'上证指数({idx_close:.0f})站上MA60({idx_ma60:.0f})且均线向上({slope:+.1f}%)，牛市环境'
+    elif idx_close > idx_ma60 and slope >= -0.5:
+        status = 'neutral'
+        signal = 'caution'
+        reason = f'上证指数在MA60上方但均线走平({slope:+.1f}%)，趋势不明'
+    elif idx_close > idx_ma20 and idx_close <= idx_ma60:
+        status = 'neutral'
+        signal = 'caution'
+        reason = f'上证指数在MA20上方但MA60下方，反弹中需确认'
+    else:
+        status = 'bear'
+        signal = 'no_trade'
+        reason = f'上证指数({idx_close:.0f})低于MA60({idx_ma60:.0f})，熊市环境，不宜做多'
+
+    return {
+        'status': status,
+        'signal': signal,
+        'reason': reason,
+        'index_close': round(idx_close, 2),
+        'index_ma60': round(idx_ma60, 2),
+        'index_ma20': round(idx_ma20, 2),
+        'index_ma60_slope': round(slope, 2),
+        'price_vs_ma60': round(price_vs_ma60, 2),
+    }
+
+
+def detect_sector_strength(stock_code: str) -> dict:
+    """行业相对强度判断（Livermore: 只买领涨行业的领涨股）
+    复用 akshare_service 获取行业排名
+    """
+    try:
+        from app.services.akshare_service import AKShareService
+        svc = AKShareService()
+        sectors = svc.get_industry_rank()
+        if not sectors:
+            return {'sector_name': '未知', 'sector_rank': 99, 'sector_signal': 'neutral',
+                    'reason': '行业数据获取失败', 'sector_change_pct': 0}
+
+        # 尝试匹配股票所属行业（简化：通过股票代码推断市场，取行业前20）
+        # 实际上这里返回的是行业排名列表，不是个股所属行业
+        # 我们用行业整体表现来判断市场热度
+        top_sectors = sectors[:5]
+        bottom_sectors = sectors[-5:] if len(sectors) > 5 else []
+
+        avg_top_change = sum(s.get('change_pct', 0) for s in top_sectors) / len(top_sectors) if top_sectors else 0
+        avg_all_change = sum(s.get('change_pct', 0) for s in sectors) / len(sectors) if sectors else 0
+
+        if avg_top_change > 1:
+            signal = 'strong'
+            reason = f'领涨行业平均涨幅{avg_top_change:.1f}%，市场热点活跃'
+        elif avg_all_change > 0:
+            signal = 'neutral'
+            reason = f'行业平均涨幅{avg_all_change:.1f}%，市场温和'
+        else:
+            signal = 'weak'
+            reason = f'行业平均涨幅{avg_all_change:.1f}%，市场偏冷'
+
+        return {
+            'sector_name': '全市场行业',
+            'sector_rank': 0,
+            'sector_signal': signal,
+            'reason': reason,
+            'sector_change_pct': round(avg_all_change, 2),
+            'top_sector': top_sectors[0].get('name', '') if top_sectors else '',
+            'top_sector_change': round(top_sectors[0].get('change_pct', 0), 2) if top_sectors else 0,
+        }
+    except Exception as e:
+        logger.error(f"detect_sector_strength failed: {e}")
+        return {'sector_name': '未知', 'sector_rank': 99, 'sector_signal': 'neutral',
+                'reason': f'行业数据异常: {str(e)}', 'sector_change_pct': 0}
+
+
+def detect_fundamental_health(stock_code: str) -> dict:
+    """基本面健康度检查（O'Neil CAN SLIM: C=Current Earnings）
+    复用 data_service 获取 EPS/ROE
+    """
+    try:
+        from app.services.data_service import DataService
+        svc = DataService()
+        fin = svc.get_financial_indicators(stock_code)
+        if not fin or not fin.get('indicators'):
+            return {'eps_growth': None, 'roe': None, 'revenue_growth': None,
+                    'signal': 'warning', 'reason': '财务数据不足，无法验证基本面'}
+
+        # 取最新一期数据
+        latest = fin['indicators'][0] if fin['indicators'] else {}
+        eps_growth = latest.get('profit_growth')
+        revenue_growth = latest.get('revenue_growth')
+        roe = latest.get('roe')
+
+        # 判断
+        if eps_growth is not None and eps_growth >= 20 and roe is not None and roe >= 12:
+            signal = 'pass'
+            reason = f'EPS增长{eps_growth:.0f}%、ROE={roe:.0f}%，基本面健康'
+        elif eps_growth is not None and eps_growth >= 10:
+            signal = 'warning'
+            reason = f'EPS增长{eps_growth:.0f}%，增长尚可但不够强劲'
+        elif eps_growth is not None and eps_growth < 0:
+            signal = 'fail'
+            reason = f'EPS增长{eps_growth:.0f}%，利润下滑，基本面承压'
+        elif eps_growth is None:
+            signal = 'warning'
+            reason = 'EPS增长数据缺失，无法判断'
+        else:
+            signal = 'warning'
+            reason = f'EPS增长{eps_growth:.0f}%，增长偏弱'
+
+        return {
+            'eps_growth': round(eps_growth, 2) if eps_growth is not None else None,
+            'roe': round(roe, 2) if roe is not None else None,
+            'revenue_growth': round(revenue_growth, 2) if revenue_growth is not None else None,
+            'signal': signal,
+            'reason': reason,
+            'report_date': latest.get('report_date', ''),
+        }
+    except Exception as e:
+        logger.error(f"detect_fundamental_health failed for {stock_code}: {e}")
+        return {'eps_growth': None, 'roe': None, 'revenue_growth': None,
+                'signal': 'warning', 'reason': f'基本面查询异常: {str(e)}'}
+
+
+def compute_entry_plan(closes: list, highs: list, lows: list, atr_value: float,
+                       pattern_result: dict, verdict: str) -> dict:
+    """精确入场建议（Minervini: 在中枢点买入，止损设在形态低点下方）
+    返回精确的入场价、止损价、仓位建议
+    """
+    cur = len(closes) - 1
+    price = closes[cur]
+
+    if verdict != '右侧确认' or atr_value <= 0 or price <= 0:
+        return {'entry_type': 'none', 'entry_price': 0, 'stop_loss_price': 0,
+                'position_size_pct': 0, 'reason': '当前不满足入场条件'}
+
+    # 寻找最近的支撑位（过去20日低点）
+    recent_low = min(lows[max(0, cur - 19):cur + 1])
+    recent_high = max(highs[max(0, cur - 9):cur + 1])
+
+    # 入场策略选择
+    signals_text = ' '.join(pattern_result.get('signals', []))
+
+    if 'VCP' in signals_text or '旗形' in signals_text:
+        # 形态突破入场
+        entry_type = 'breakout'
+        entry_price = recent_high  # 突破近期高点
+        stop_loss_price = round(recent_low - 0.5 * atr_value, 2)
+        reason = f'形态突破入场：突破{recent_high:.2f}，止损设在{stop_loss_price:.2f}'
+    elif price > recent_high * 0.98:
+        # 接近突破
+        entry_type = 'breakout'
+        entry_price = round(recent_high * 1.005, 2)  # 突破位+0.5%
+        stop_loss_price = round(price - 2.0 * atr_value, 2)
+        reason = f'接近突破位{recent_high:.2f}，突破后入场，止损{stop_loss_price:.2f}'
+    else:
+        # 回调买入
+        entry_type = 'pullback'
+        entry_price = round(price, 2)  # 当前价即可入场
+        stop_loss_price = round(price - 2.0 * atr_value, 2)
+        reason = f'趋势确认后入场，当前价{price:.2f}，止损{stop_loss_price:.2f}'
+
+    # 仓位计算（1%风险法则）
+    risk_per_share = entry_price - stop_loss_price
+    if risk_per_share <= 0:
+        risk_per_share = atr_value * 2
+
+    # 假设10万资金，单笔风险1%
+    base_capital = 100000
+    risk_amount = base_capital * 0.01  # = 1000元
+    shares = int(risk_amount / risk_per_share)  # 最多可买股数
+    # A股100股整数倍
+    lots = shares // 100
+    shares = lots * 100 if lots > 0 else 0
+    position_value = shares * entry_price
+    position_pct = round(position_value / base_capital * 100, 1)
+    position_pct = min(position_pct, 20)  # 最大20%
+
+    # 目标位
+    target_2r = round(entry_price + 2 * risk_per_share, 2)
+    target_3r = round(entry_price + 3 * risk_per_share, 2)
+
+    return {
+        'entry_type': entry_type,
+        'entry_price': round(entry_price, 2),
+        'stop_loss_price': round(stop_loss_price, 2),
+        'risk_per_share': round(risk_per_share, 2),
+        'position_size_pct': position_pct,
+        'position_shares': shares,
+        'position_value': round(position_value, 0),
+        'target_2r': target_2r,
+        'target_3r': target_3r,
+        'reason': reason,
+    }
 
 
 # ============================================================
@@ -1576,16 +2464,29 @@ def analyze_right_side(stock_code: str) -> dict:
         regime_info = detect_market_regime(adx_data['adx'], adx_data['plus_di'], adx_data['minus_di'])
         weights = get_dynamic_weights(regime_info['regime'])
 
+        # 2b. 大师级三层过滤器
+        market_timing = detect_market_timing()
+        sector_strength = detect_sector_strength(stock_code)
+        fundamental_health = detect_fundamental_health(stock_code)
+
         # 3. Weinstein阶段分析
         weinstein = detect_weinstein_stage(highs, lows, closes, volumes)
 
-        # 4. 六维度检测
+        # 4. 九维度检测
         ma_result = detect_ma_signals(closes, dates)
         macd_result = detect_macd_signals(closes, dates)
         vol_result = detect_volume_signals(volumes, closes)
         pattern_result = detect_pattern_signals(highs, lows, closes, volumes)
         rsi_kdj_result = detect_rsi_kdj_signals(closes, highs, lows)
         new_ind_result = detect_new_indicators_signals(closes, highs, lows, volumes)
+
+        # 新增三维度
+        w_closes_for_adaptive = None
+        if weekly_ohlcv and len(weekly_ohlcv) >= 30:
+            w_closes_for_adaptive = [d['close'] for d in weekly_ohlcv]
+        momentum_result = detect_momentum_signals(closes, highs, lows, volumes)
+        adaptive_result = detect_adaptive_trend_signals(closes, highs, lows, w_closes_for_adaptive)
+        td_result = detect_td_signals(closes, highs, lows)
 
         # 5. 动态权重转换为百分制
         def weighted_score(raw_score, raw_max, weight):
@@ -1599,7 +2500,10 @@ def analyze_right_side(stock_code: str) -> dict:
             weighted_score(vol_result['score'], 20, weights['volume']) +
             weighted_score(pattern_result['score'], 30, weights['pattern']) +
             weighted_score(rsi_kdj_result['score'], 15, weights['rsi_kdj']) +
-            weighted_score(new_ind_result['score'], new_ind_result['max'], weights['new_ind'])
+            weighted_score(new_ind_result['score'], new_ind_result['max'], weights['new_ind']) +
+            weighted_score(momentum_result['score'], momentum_result['max'], weights['momentum']) +
+            weighted_score(adaptive_result['score'], adaptive_result['max'], weights['adaptive_trend']) +
+            weighted_score(td_result['score'], td_result['max'], weights['td'])
         )
 
         # 6. 周线分析
@@ -1618,28 +2522,42 @@ def analyze_right_side(stock_code: str) -> dict:
             w_vol = detect_volume_signals(w_volumes, w_closes)
             w_pattern = detect_pattern_signals(w_highs, w_lows, w_closes, w_volumes)
             w_rsi_kdj = detect_rsi_kdj_signals(w_closes, w_highs, w_lows)
+            w_new_ind = detect_new_indicators_signals(w_closes, w_highs, w_lows, w_volumes)
+            w_momentum = detect_momentum_signals(w_closes, w_highs, w_lows, w_volumes)
+            w_adaptive = detect_adaptive_trend_signals(w_closes, w_highs, w_lows)
+            w_td = detect_td_signals(w_closes, w_highs, w_lows)
 
-            weekly_score = w_ma['score'] + w_macd['score'] + w_vol['score'] + w_pattern['score'] + w_rsi_kdj['score']
+            weekly_raw = (w_ma['score'] + w_macd['score'] + w_vol['score'] +
+                          w_pattern['score'] + w_rsi_kdj['score'] + w_new_ind['score'] +
+                          w_momentum['score'] + w_adaptive['score'] + w_td['score'])
+            weekly_max = (25 + 20 + 20 + 30 + 15 + w_new_ind['max'] +
+                          w_momentum['max'] + w_adaptive['max'] + w_td['max'])
+            weekly_score = round(weekly_raw / weekly_max * 100, 1) if weekly_max > 0 else 0
+
             weekly_result = {
                 'ma': {'score': w_ma['score'], 'max': 25, 'signals': w_ma['signals'], 'detail': w_ma['detail']},
                 'macd': {'score': w_macd['score'], 'max': 20, 'signals': w_macd['signals'], 'detail': w_macd['detail']},
                 'volume': {'score': w_vol['score'], 'max': 20, 'signals': w_vol['signals'], 'detail': w_vol['detail']},
                 'pattern': {'score': w_pattern['score'], 'max': 30, 'signals': w_pattern['signals'], 'detail': w_pattern['detail']},
                 'rsi_kdj': {'score': w_rsi_kdj['score'], 'max': 15, 'signals': w_rsi_kdj['signals'], 'detail': w_rsi_kdj['detail']},
+                'new_indicators': {'score': w_new_ind['score'], 'max': w_new_ind['max'], 'signals': w_new_ind['signals'], 'detail': w_new_ind['detail']},
+                'momentum': {'score': w_momentum['score'], 'max': w_momentum['max'], 'signals': w_momentum['signals'], 'detail': w_momentum['detail']},
+                'adaptive_trend': {'score': w_adaptive['score'], 'max': w_adaptive['max'], 'signals': w_adaptive['signals'], 'detail': w_adaptive['detail']},
+                'td_sequential': {'score': w_td['score'], 'max': w_td['max'], 'signals': w_td['signals'], 'detail': w_td['detail']},
             }
 
-            # 周线判定
-            if weekly_score >= 75:
+            # 周线判定 (百分制)
+            if weekly_score >= 65:
                 weekly_verdict = '右侧确认'
-            elif weekly_score >= 55:
+            elif weekly_score >= 45:
                 weekly_verdict = '疑似右侧'
-            elif weekly_score >= 35:
+            elif weekly_score >= 25:
                 weekly_verdict = '非右侧'
             else:
                 weekly_verdict = '左侧下跌'
 
         # 7. 多时间框架对齐
-        current_verdict = '右侧确认' if total_score >= 75 else ('疑似右侧' if total_score >= 55 else ('非右侧' if total_score >= 35 else '左侧下跌'))
+        current_verdict = '右侧确认' if total_score >= 72 else ('疑似右侧' if total_score >= 52 else ('非右侧' if total_score >= 32 else '左侧下跌'))
         tf_alignment = compute_timeframe_alignment(current_verdict, int(total_score), weekly_verdict, weekly_score)
         total_score += tf_alignment['alignment_score']
         total_score = min(100, total_score)
@@ -1676,27 +2594,64 @@ def analyze_right_side(stock_code: str) -> dict:
                 'message': sig,
             })
 
-        # 10. 最终判定
+        # TD序列警告
+        for sig in td_result.get('signals', []):
+            if '警告' in sig:
+                anti_fake.append({
+                    'type': 'td_warning',
+                    'severity': 'high' if 'Countdown' in sig else 'medium',
+                    'message': sig,
+                })
+
+        # 10. 最终判定（大师级逻辑：大盘一票否决 + 二元信号）
         high_warnings = [w for w in anti_fake if w['severity'] == 'high']
-        if total_score >= 75 and len(high_warnings) == 0:
+
+        # 大盘择时一票否决（O'Neil: M=Market）
+        if market_timing['signal'] == 'no_trade':
+            verdict = '左侧下跌'
+            anti_fake.insert(0, {
+                'type': 'market_veto',
+                'severity': 'high',
+                'message': f"大盘否决: {market_timing['reason']}，不做多",
+            })
+        elif total_score >= 65 and len(high_warnings) == 0:
             verdict = '右侧确认'
-        elif total_score >= 55 and len(high_warnings) <= 1:
-            verdict = '疑似右侧'
-        elif total_score >= 35:
-            verdict = '非右侧'
+        elif total_score >= 45 and len(high_warnings) <= 1:
+            verdict = '观望等待'
+        elif total_score >= 32:
+            verdict = '观望等待'
         else:
             verdict = '左侧下跌'
 
         # Weinstein Stage 4强制降级
         if weinstein['stage'] == 4 and verdict == '右侧确认':
-            verdict = '疑似右侧'
+            verdict = '观望等待'
             anti_fake.append({
                 'type': 'weinstein_stage4',
                 'severity': 'high',
                 'message': f"Weinstein阶段分析: {weinstein['stage_name']}，已降级判定",
             })
 
-        # 11. 构建图表数据
+        # 行业偏弱警告
+        if sector_strength['sector_signal'] == 'weak':
+            anti_fake.append({
+                'type': 'weak_sector',
+                'severity': 'medium',
+                'message': f"行业偏弱: {sector_strength['reason']}",
+            })
+
+        # 基本面警告
+        if fundamental_health['signal'] == 'fail':
+            anti_fake.append({
+                'type': 'weak_fundamental',
+                'severity': 'high',
+                'message': f"基本面承压: {fundamental_health['reason']}",
+            })
+
+        # 11. 精确入场建议
+        entry_plan = compute_entry_plan(closes, highs, lows, atr_val, pattern_result, verdict)
+
+        # 12. 构建图表数据
         cur = len(dates) - 1
         ma_data = ma_result.get('ma_data', {})
         macd_data = macd_result.get('macd_data', {})
@@ -1717,6 +2672,9 @@ def analyze_right_side(stock_code: str) -> dict:
         obv_data = compute_obv(closes, volumes)
         cci_vals = compute_cci(highs, lows, closes)
         sar_data = compute_parabolic_sar(highs, lows)
+        kama_data = compute_kama(closes, period=10)
+        kst_data = compute_kst(closes)
+        wr_data = compute_williams_r(highs, lows, closes)
 
         result = {
             'code': stock_code,
@@ -1729,6 +2687,9 @@ def analyze_right_side(stock_code: str) -> dict:
                 'pattern': {'score': pattern_result['score'], 'max': 30, 'signals': pattern_result['signals'], 'detail': pattern_result['detail']},
                 'rsi_kdj': {'score': rsi_kdj_result['score'], 'max': 15, 'signals': rsi_kdj_result['signals'], 'detail': rsi_kdj_result['detail']},
                 'new_indicators': {'score': new_ind_result['score'], 'max': new_ind_result['max'], 'signals': new_ind_result['signals'], 'detail': new_ind_result['detail']},
+                'momentum': {'score': momentum_result['score'], 'max': momentum_result['max'], 'signals': momentum_result['signals'], 'detail': momentum_result['detail']},
+                'adaptive_trend': {'score': adaptive_result['score'], 'max': adaptive_result['max'], 'signals': adaptive_result['signals'], 'detail': adaptive_result['detail']},
+                'td_sequential': {'score': td_result['score'], 'max': td_result['max'], 'signals': td_result['signals'], 'detail': td_result['detail']},
             },
             'anti_fake_checks': anti_fake,
             'market_regime': regime_info,
@@ -1774,7 +2735,20 @@ def analyze_right_side(stock_code: str) -> dict:
                     'sar': sar_data['sar'][start_idx:],
                     'is_long': sar_data['is_long'][start_idx:],
                 },
+                'kama': kama_data[start_idx:],
+                'kst': {
+                    'kst': kst_data['kst'][start_idx:],
+                    'signal': kst_data['signal'][start_idx:],
+                },
+                'williams_r': wr_data[start_idx:],
+                'rsi': rsi_vals[start_idx:],
             },
+            # 大师级三层过滤器
+            'market_timing': market_timing,
+            'sector_strength': sector_strength,
+            'fundamental_health': fundamental_health,
+            # 精确入场建议
+            'entry_plan': entry_plan,
             'update_time': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
         }
         return result
@@ -1790,7 +2764,7 @@ def analyze_right_side(stock_code: str) -> dict:
 
 @cached(ttl_seconds=600, key_prefix="right_side_backtest")
 def backtest_right_side(stock_code: str) -> dict:
-    """历史信号回测：统计过去'右侧确认'信号的后续收益"""
+    """历史信号回测 V2：九维度评分 + KAMA过滤 + Trailing Stop模拟"""
     try:
         ohlcv = fetch_ohlcv(stock_code, 500)
         if not ohlcv or len(ohlcv) < 250:
@@ -1812,28 +2786,36 @@ def backtest_right_side(stock_code: str) -> dict:
         macd_data = compute_macd(closes)
         rsi_vals = compute_rsi(closes)
         kdj_vals = compute_kdj(highs, lows, closes)
+        kama_vals = compute_kama(closes, period=10)
+        kst_data = compute_kst(closes)
+        wr_vals = compute_williams_r(highs, lows, closes)
+        td_data = compute_td_sequential(closes, highs, lows)
+        atr_series = compute_atr_series(highs, lows, closes, 14)
 
         signals = []
         hold_days = [5, 10, 20, 60]
 
         # 每5天采样一次，从第200天到第N-60天
         for idx in range(200, n - 60, 5):
-            # 简化评分：只计算核心指标
             score = 0
 
-            # 均线评分（简化）
+            # === 维度1: 均线（满分15） ===
             if ma5[idx] and ma10[idx] and ma5[idx] > ma10[idx]:
-                score += 3
+                score += 2
             if ma10[idx] and ma20[idx] and ma10[idx] > ma20[idx]:
-                score += 3
+                score += 2
             if ma20[idx] and ma60[idx] and ma20[idx] > ma60[idx]:
-                score += 3
+                score += 2
             if ma60[idx] and closes[idx] > ma60[idx]:
-                score += 3
+                score += 2
             if ma120[idx] and closes[idx] > ma120[idx]:
-                score += 3
+                score += 2
+            # 多头排列加分
+            if (ma5[idx] and ma10[idx] and ma20[idx] and ma60[idx] and
+                    ma5[idx] > ma10[idx] > ma20[idx] > ma60[idx]):
+                score += 5
 
-            # MACD评分（简化）
+            # === 维度2: MACD（满分12） ===
             dif = macd_data['dif'][idx]
             dea = macd_data['dea'][idx]
             hist = macd_data['histogram'][idx]
@@ -1841,32 +2823,98 @@ def backtest_right_side(stock_code: str) -> dict:
                 if dif > dea:
                     score += 4
                     if dif > 0:
-                        score += 3  # 零轴上方金叉额外加分
-                if hist is not None and idx >= 1 and hist > 0 and macd_data['histogram'][idx - 1] <= 0:
+                        score += 3
+                if hist is not None and idx >= 1 and hist > 0 and macd_data['histogram'][idx - 1] is not None and macd_data['histogram'][idx - 1] <= 0:
                     score += 3
+                # DIF趋势
+                if idx >= 5 and macd_data['dif'][idx - 5] is not None and dif > macd_data['dif'][idx - 5]:
+                    score += 2
 
-            # RSI评分
-            if rsi_vals[idx] is not None:
-                if 40 < rsi_vals[idx] < 70:
-                    score += 3
-                elif rsi_vals[idx] > 70:
-                    score -= 2
-
-            # 成交量评分
+            # === 维度3: 成交量（满分10） ===
             if idx >= 20:
                 vol_ma = sum(volumes[idx - 19:idx + 1]) / 20
-                if vol_ma > 0 and volumes[idx] / vol_ma > 1.5:
+                if vol_ma > 0:
+                    vol_ratio = volumes[idx] / vol_ma
+                    if vol_ratio > 1.5:
+                        score += 5
+                    elif vol_ratio > 1.2:
+                        score += 3
+                    # 量价配合
+                    up_vols = [volumes[j] for j in range(max(1, idx - 9), idx + 1) if closes[j] > closes[j - 1]]
+                    dn_vols = [volumes[j] for j in range(max(1, idx - 9), idx + 1) if closes[j] < closes[j - 1]]
+                    if up_vols and dn_vols:
+                        if sum(up_vols) / len(up_vols) > sum(dn_vols) / len(dn_vols) * 1.2:
+                            score += 5
+
+            # === 维度4: RSI/KDJ（满分8） ===
+            if rsi_vals[idx] is not None:
+                if 40 < rsi_vals[idx] < 65:
+                    score += 4
+                elif rsi_vals[idx] > 70:
+                    score -= 2
+            k_val = kdj_vals['k'][idx]
+            d_val = kdj_vals['d'][idx]
+            if idx >= 1 and k_val is not None and d_val is not None:
+                if kdj_vals['k'][idx - 1] <= kdj_vals['d'][idx - 1] and k_val > d_val:
+                    score += 4
+
+            # === 维度5: 动量 — KST + W%R + ROC（满分12） ===
+            kst_val = kst_data['kst'][idx]
+            kst_sig = kst_data['signal'][idx]
+            if kst_val is not None and kst_sig is not None:
+                if kst_val > kst_sig:
+                    score += 4
+                if idx >= 2 and kst_data['kst'][idx - 1] is not None and kst_data['signal'][idx - 1] is not None:
+                    if kst_data['kst'][idx - 1] <= kst_data['signal'][idx - 1] and kst_val > kst_sig:
+                        score += 2  # KST金叉
+
+            wr_val = wr_vals[idx] if idx < len(wr_vals) else None
+            if wr_val is not None:
+                min_wr = min((v for v in wr_vals[max(0, idx - 19):idx + 1] if v is not None), default=-50)
+                if min_wr < -80 and wr_val > -50:
                     score += 3
 
+            # 多周期ROC
+            if idx >= 40:
+                roc10 = (closes[idx] - closes[idx - 10]) / closes[idx - 10] * 100
+                roc20 = (closes[idx] - closes[idx - 20]) / closes[idx - 20] * 100
+                if roc10 > 0 and roc20 > 0:
+                    score += 3
+
+            # === 维度6: 自适应趋势 — KAMA（满分8） ===
+            kama_val = kama_vals[idx] if idx < len(kama_vals) else None
+            if kama_val is not None:
+                if closes[idx] > kama_val:
+                    score += 4
+                    if idx >= 5 and kama_vals[idx - 5] is not None and kama_val > kama_vals[idx - 5]:
+                        score += 2
+                # 效率比率
+                if idx >= 10:
+                    direction = abs(closes[idx] - closes[idx - 10])
+                    volatility = sum(abs(closes[j] - closes[j - 1]) for j in range(idx - 9, idx + 1))
+                    er = direction / volatility if volatility > 0 else 0
+                    if er > 0.5:
+                        score += 2
+
+            # === 维度7: TD序列（满分5，用于风控） ===
+            if td_data['setup'][idx] <= -9:
+                score += 3  # 买入Setup → 底部信号
+            if td_data['setup'][idx] >= 9:
+                score -= 2  # 卖出Setup → 风险警告
+
+            # === KAMA过滤：只在KAMA上方做多 ===
+            if kama_val is not None and closes[idx] < kama_val:
+                continue  # 价格在KAMA下方，跳过
+
             # 判定
-            if score >= 30:
+            if score >= 40:
                 verdict = '右侧确认'
-            elif score >= 20:
+            elif score >= 28:
                 verdict = '疑似右侧'
             else:
-                continue  # 只记录有意义的信号
+                continue
 
-            # 计算后续收益
+            # 计算后续收益（固定止损）
             price_at_signal = closes[idx]
             returns = {}
             for d in hold_days:
@@ -1876,12 +2924,34 @@ def backtest_right_side(stock_code: str) -> dict:
                 else:
                     returns[f'{d}d'] = None
 
+            # Trailing Stop模拟（20日持有期）
+            trailing_return = None
+            if idx + 20 < n:
+                atr_val = atr_series[idx] if idx < len(atr_series) and atr_series[idx] is not None else price_at_signal * 0.02
+                stop_price = price_at_signal - 2.0 * atr_val
+                best_price = price_at_signal
+                for j in range(idx + 1, min(idx + 21, n)):
+                    best_price = max(best_price, highs[j])
+                    # 移动止损：盈利超过5%时止损移至成本价
+                    if best_price > price_at_signal * 1.05:
+                        stop_price = max(stop_price, price_at_signal)
+                    # 盈利超过10%时止损移至盈利5%
+                    if best_price > price_at_signal * 1.10:
+                        stop_price = max(stop_price, price_at_signal * 1.05)
+                    # 检查是否触发止损
+                    if lows[j] <= stop_price:
+                        trailing_return = round((stop_price - price_at_signal) / price_at_signal * 100, 2)
+                        break
+                if trailing_return is None:
+                    trailing_return = returns.get('20d')
+
             signals.append({
                 'date': dates[idx],
                 'score': score,
                 'verdict': verdict,
                 'price_at_signal': round(price_at_signal, 2),
                 'returns': returns,
+                'trailing_return': trailing_return,
             })
 
         # 统计
@@ -1889,20 +2959,35 @@ def backtest_right_side(stock_code: str) -> dict:
             return {
                 'signals': [],
                 'stats': {'total_signals': 0, 'win_rate_20d': 0, 'avg_return_20d': 0,
-                          'max_return_20d': 0, 'min_return_20d': 0, 'sharpe_like': 0},
+                          'max_return_20d': 0, 'min_return_20d': 0, 'sharpe_like': 0,
+                          'avg_trailing_return': 0, 'win_rate_trailing': 0,
+                          'profit_loss_ratio': 0, 'avg_hold_days': 0},
                 'code': stock_code,
             }
 
         returns_20d = [s['returns']['20d'] for s in signals if s['returns']['20d'] is not None]
+        trailing_returns = [s['trailing_return'] for s in signals if s['trailing_return'] is not None]
+
         if returns_20d:
             win_count = sum(1 for r in returns_20d if r > 0)
             avg_ret = sum(returns_20d) / len(returns_20d)
             std_ret = (sum((r - avg_ret) ** 2 for r in returns_20d) / len(returns_20d)) ** 0.5
             sharpe = round(avg_ret / std_ret, 2) if std_ret > 0 else 0
+            # 盈亏比
+            wins = [r for r in returns_20d if r > 0]
+            losses = [abs(r) for r in returns_20d if r < 0]
+            avg_win = sum(wins) / len(wins) if wins else 0
+            avg_loss = sum(losses) / len(losses) if losses else 1
+            pl_ratio = round(avg_win / avg_loss, 2) if avg_loss > 0 else 0
         else:
             win_count = 0
             avg_ret = 0
             sharpe = 0
+            pl_ratio = 0
+
+        # Trailing Stop统计
+        trailing_win = sum(1 for r in trailing_returns if r > 0) if trailing_returns else 0
+        avg_trailing = round(sum(trailing_returns) / len(trailing_returns), 2) if trailing_returns else 0
 
         stats = {
             'total_signals': len(signals),
@@ -1911,10 +2996,13 @@ def backtest_right_side(stock_code: str) -> dict:
             'max_return_20d': round(max(returns_20d), 2) if returns_20d else 0,
             'min_return_20d': round(min(returns_20d), 2) if returns_20d else 0,
             'sharpe_like': sharpe,
+            'profit_loss_ratio': pl_ratio,
+            'avg_trailing_return': avg_trailing,
+            'win_rate_trailing': round(trailing_win / len(trailing_returns) * 100, 1) if trailing_returns else 0,
         }
 
         return {
-            'signals': signals[-20:],  # 最近20个信号
+            'signals': signals[-20:],
             'stats': stats,
             'code': stock_code,
         }

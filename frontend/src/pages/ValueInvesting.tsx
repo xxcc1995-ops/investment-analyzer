@@ -1,3 +1,4 @@
+import { LoadingSpinner, PageSection, TabBar, StatCard, StatCardGroup } from '../components/ui'
 import { useState, useEffect, useCallback } from 'react'
 import axios from 'axios'
 import ReactECharts from 'echarts-for-react'
@@ -75,15 +76,51 @@ interface DCFResult {
   intrinsic_value: number
   buy_price: number
   enterprise_value: number
+  equity_value?: number
+  net_debt?: number
   fcf_projections: number[]
   terminal_value: number
   pv_fcf: number
   pv_terminal: number
-  sensitivity: {
+  terminal_pct?: number
+  current_price?: number
+  upside_pct?: number
+  buy_upside_pct?: number
+  is_undervalued?: boolean
+  is_buy_zone?: boolean
+  discount_rate: number
+  growth_rate: number
+  terminal_growth_rate: number
+  safety_margin: number
+  projection_years?: number
+  data_source?: {
+    fcf_source: string
+    fcf_raw: number | null
+    growth_rate_source: string
+    discount_rate_source: string
+    debt_ratio: number
+    report_period: string
+    report_type: string
+  }
+  sensitivity?: {
     growth_rates: string[]
     discount_rates: string[]
-    matrix: number[][]
+    matrix: (number | null)[][]
   }
+}
+
+interface GrahamResult {
+  eps: number
+  bvps: number
+  graham_value: number | null
+  applicable: boolean
+  warnings: string[]
+  implied_pe?: number
+  implied_pb?: number
+  current_price?: number
+  upside_pct?: number
+  is_undervalued?: boolean
+  safety_margin_pct?: number
 }
 
 const MASTER_COLORS: Record<string, string> = {
@@ -101,7 +138,7 @@ const MASTER_LABELS: Record<string, string> = {
 }
 
 export default function ValueInvesting() {
-  const [activeTab, setActiveTab] = useState<'philosophy' | 'screener' | 'dcf'>('philosophy')
+  const [activeTab, setActiveTab] = useState<'philosophy' | 'screener' | 'dcf' | 'graham'>('philosophy')
   const [stocks, setStocks] = useState<VIStock[]>([])
   const [loading, setLoading] = useState(false)
   const [updateTime, setUpdateTime] = useState('')
@@ -117,15 +154,28 @@ export default function ValueInvesting() {
   const [maxPB, setMaxPB] = useState(5)
   const [topN, setTopN] = useState(50)
 
-  // DCF state
+  // DCF state - manual mode
+  const [dcfMode, setDcfMode] = useState<'manual' | 'auto'>('auto')
+  const [dcfStockCode, setDcfStockCode] = useState('')
+  const [dcfMarket, setDcfMarket] = useState<'a' | 'hk' | 'us'>('a')
   const [dcfFcf, setDcfFcf] = useState('100')
   const [dcfGrowth, setDcfGrowth] = useState('10')
   const [dcfShares, setDcfShares] = useState('10')
   const [dcfDiscount, setDcfDiscount] = useState('10')
   const [dcfTerminal, setDcfTerminal] = useState('3')
   const [dcfSafety, setDcfSafety] = useState('30')
+  const [dcfNetDebt, setDcfNetDebt] = useState('0')
+  const [dcfCurrentPrice, setDcfCurrentPrice] = useState('')
   const [dcfResult, setDcfResult] = useState<DCFResult | null>(null)
   const [dcfLoading, setDcfLoading] = useState(false)
+  const [dcfError, setDcfError] = useState('')
+
+  // Graham state
+  const [grahamEps, setGrahamEps] = useState('')
+  const [grahamBvps, setGrahamBvps] = useState('')
+  const [grahamPrice, setGrahamPrice] = useState('')
+  const [grahamResult, setGrahamResult] = useState<GrahamResult | null>(null)
+  const [grahamLoading, setGrahamLoading] = useState(false)
 
   const loadPhilosophy = useCallback(async () => {
     try {
@@ -156,22 +206,53 @@ export default function ValueInvesting() {
 
   const runDCF = useCallback(async () => {
     setDcfLoading(true)
+    setDcfError('')
     try {
-      const res = await axios.post(`${API_BASE}/value-investing/dcf`, {
-        current_fcf: parseFloat(dcfFcf) || 0,
-        growth_rate: (parseFloat(dcfGrowth) || 0) / 100,
-        shares: parseFloat(dcfShares) || 0,
-        discount_rate: (parseFloat(dcfDiscount) || 10) / 100,
-        terminal_growth_rate: (parseFloat(dcfTerminal) || 3) / 100,
-        safety_margin: (parseFloat(dcfSafety) || 30) / 100,
-      })
+      let res
+      if (dcfMode === 'auto' && dcfStockCode.trim()) {
+        res = await axios.post(`${API_BASE}/value-investing/dcf-auto`, {
+          stock_code: dcfStockCode.trim(),
+          market: dcfMarket,
+          growth_rate: dcfGrowth ? parseFloat(dcfGrowth) / 100 : undefined,
+          discount_rate: dcfDiscount ? parseFloat(dcfDiscount) / 100 : undefined,
+          safety_margin: (parseFloat(dcfSafety) || 30) / 100,
+        })
+      } else {
+        res = await axios.post(`${API_BASE}/value-investing/dcf`, {
+          current_fcf: parseFloat(dcfFcf) || 0,
+          growth_rate: (parseFloat(dcfGrowth) || 0) / 100,
+          shares: parseFloat(dcfShares) || 0,
+          discount_rate: (parseFloat(dcfDiscount) || 10) / 100,
+          terminal_growth_rate: (parseFloat(dcfTerminal) || 3) / 100,
+          safety_margin: (parseFloat(dcfSafety) || 30) / 100,
+          net_debt: parseFloat(dcfNetDebt) || 0,
+          current_price: parseFloat(dcfCurrentPrice) || 0,
+        })
+      }
       setDcfResult(res.data)
-    } catch (e) {
-      console.error('DCF计算失败:', e)
+    } catch (e: any) {
+      const msg = e?.response?.data?.detail || e.message || 'DCF计算失败'
+      setDcfError(msg)
     } finally {
       setDcfLoading(false)
     }
-  }, [dcfFcf, dcfGrowth, dcfShares, dcfDiscount, dcfTerminal, dcfSafety])
+  }, [dcfMode, dcfStockCode, dcfMarket, dcfFcf, dcfGrowth, dcfShares, dcfDiscount, dcfTerminal, dcfSafety, dcfNetDebt, dcfCurrentPrice])
+
+  const runGraham = useCallback(async () => {
+    setGrahamLoading(true)
+    try {
+      const res = await axios.post(`${API_BASE}/value-investing/graham`, {
+        eps: parseFloat(grahamEps) || 0,
+        bvps: parseFloat(grahamBvps) || 0,
+        current_price: parseFloat(grahamPrice) || 0,
+      })
+      setGrahamResult(res.data)
+    } catch (e) {
+      console.error('Graham计算失败:', e)
+    } finally {
+      setGrahamLoading(false)
+    }
+  }, [grahamEps, grahamBvps, grahamPrice])
 
   const getScoreColor = (score: number) => {
     if (score >= 80) return '#52c41a'
@@ -215,32 +296,26 @@ export default function ValueInvesting() {
 
   const getFragility = (s: VIStock) => {
     let score = 0
-    // Debt (20)
     const d = s.debt_ratio
     if (d !== null && d !== undefined) {
       score += d < 30 ? 20 : d < 50 ? 15 : d < 70 ? 8 : 2
     } else score += 10
-    // Gross margin (20)
     const gm = s.gross_margin
     if (gm !== null && gm !== undefined) {
       score += gm > 50 ? 20 : gm > 30 ? 14 : gm > 15 ? 8 : 2
     } else score += 10
-    // Net margin (15)
     const nm = s.net_margin
     if (nm !== null && nm !== undefined) {
       score += nm > 20 ? 15 : nm > 10 ? 10 : nm > 5 ? 6 : 2
     } else score += 7
-    // Growth (15)
     const rg = s.revenue_growth, pg = s.profit_growth
     if (rg !== null && pg !== null && rg !== undefined && pg !== undefined) {
       score += rg > 15 && pg > 15 ? 15 : rg > 5 && pg > 5 ? 10 : (rg > 0) !== (pg > 0) ? 6 : rg < 0 && pg < 0 ? 2 : 8
     } else score += 7
-    // ROE (15)
     const roe = s.roe
     if (roe !== null && roe !== undefined) {
       score += roe > 20 ? 15 : roe > 15 ? 11 : roe > 10 ? 7 : 3
     } else score += 7
-    // Valuation (15)
     const pe = s.pe, pb = s.pb
     if (pe !== null && pb !== null && pe !== undefined && pb !== undefined) {
       score += pe <= 0 ? 4 : pe < 15 && pb < 2 ? 15 : pe < 25 && pb < 4 ? 10 : pe < 40 && pb < 8 ? 6 : 4
@@ -255,9 +330,18 @@ export default function ValueInvesting() {
     borderRadius: '4px', background: 'var(--bg-primary)', color: 'var(--text-primary)',
   }
 
+  const inputStyle: React.CSSProperties = {
+    width: '100%', padding: '8px 12px',
+    border: '1px solid var(--border-primary)', borderRadius: '4px',
+    background: 'var(--bg-primary)', color: 'var(--text-primary)', fontSize: '14px',
+  }
+
   const masterKeys = ['buffett', 'munger', 'li_lu', 'duan_yongping'] as const
 
-  // DCF chart option
+  // ============================================================
+  // DCF Charts
+  // ============================================================
+
   const getDCFChartOption = () => {
     if (!dcfResult) return {}
     const years = dcfResult.fcf_projections.map((_, i) => `第${i + 1}年`)
@@ -276,29 +360,219 @@ export default function ValueInvesting() {
     }
   }
 
+  // Waterfall chart: PV(FCF) + PV(Terminal) = Enterprise Value -> Equity Value -> Per Share
+  const getWaterfallChartOption = () => {
+    if (!dcfResult) return {}
+    const categories = ['预测期FCF现值', '终值现值', '企业价值', '减: 净负债', '股权价值', '÷ 股本', '每股内在价值']
+    const values = [
+      dcfResult.pv_fcf,
+      dcfResult.pv_terminal,
+      dcfResult.enterprise_value,
+      -(dcfResult.net_debt || 0),
+      dcfResult.equity_value || dcfResult.enterprise_value,
+      0,  // placeholder for shares
+      dcfResult.intrinsic_value,
+    ]
+
+    // Build waterfall
+    const base = [0, dcfResult.pv_fcf, 0, dcfResult.enterprise_value, dcfResult.equity_value || dcfResult.enterprise_value, 0, 0]
+    const bar = [
+      dcfResult.pv_fcf,
+      dcfResult.pv_terminal,
+      dcfResult.enterprise_value,
+      -(dcfResult.net_debt || 0),
+      dcfResult.equity_value || dcfResult.enterprise_value,
+      0,
+      dcfResult.intrinsic_value,
+    ]
+
+    // Simplified: just show key values as stacked bars
+    return {
+      tooltip: {
+        trigger: 'axis' as const,
+        formatter: (params: any) => {
+          const idx = params[0]?.dataIndex
+          const labels = [
+            `预测期FCF现值: ${dcfResult.pv_fcf.toFixed(2)}亿`,
+            `终值现值: ${dcfResult.pv_terminal.toFixed(2)}亿`,
+            `企业价值: ${dcfResult.enterprise_value.toFixed(2)}亿`,
+            `净负债: ${(dcfResult.net_debt || 0).toFixed(2)}亿`,
+            `股权价值: ${(dcfResult.equity_value || dcfResult.enterprise_value).toFixed(2)}亿`,
+            `总股本`,
+            `每股内在价值: ${dcfResult.intrinsic_value.toFixed(2)}元`,
+          ]
+          return labels[idx] || ''
+        }
+      },
+      xAxis: {
+        type: 'category' as const,
+        data: categories,
+        axisLabel: { color: '#8b949e', rotate: 20, fontSize: 11 },
+      },
+      yAxis: {
+        type: 'value' as const,
+        name: '亿元',
+        axisLabel: { color: '#8b949e' },
+        nameTextStyle: { color: '#8b949e' },
+      },
+      series: [
+        {
+          name: 'base',
+          type: 'bar' as const,
+          stack: 'waterfall',
+          itemStyle: { color: 'transparent', borderColor: 'transparent' },
+          emphasis: { itemStyle: { color: 'transparent', borderColor: 'transparent' } },
+          data: base,
+        },
+        {
+          name: 'value',
+          type: 'bar' as const,
+          stack: 'waterfall',
+          data: bar.map((v, i) => ({
+            value: v,
+            itemStyle: {
+              color: i === 3 ? '#f85149' : i === 6 ? '#58a6ff' : i === 4 ? '#3fb950' : '#58a6ff90',
+              borderRadius: [4, 4, 0, 0],
+            },
+          })),
+          label: {
+            show: true,
+            position: 'top' as const,
+            color: '#e6edf3',
+            fontSize: 11,
+            formatter: (p: any) => {
+              const idx = p.dataIndex
+              if (idx === 5) return `${dcfResult.projection_years || 10}年`
+              return typeof p.value === 'number' ? p.value.toFixed(2) : ''
+            },
+          },
+        },
+      ],
+      grid: { left: 70, right: 20, top: 30, bottom: 50 },
+      backgroundColor: 'transparent',
+    }
+  }
+
+  // Sensitivity heatmap
+  const getSensitivityHeatmapOption = () => {
+    if (!dcfResult?.sensitivity) return {}
+    const { growth_rates, discount_rates, matrix } = dcfResult.sensitivity
+
+    const data: [number, number, number | null][] = []
+    for (let gi = 0; gi < growth_rates.length; gi++) {
+      for (let di = 0; di < discount_rates.length; di++) {
+        data.push([di, gi, matrix[gi][di]])
+      }
+    }
+
+    const validValues = data.filter(d => d[2] !== null).map(d => d[2] as number)
+    const minVal = Math.min(...validValues)
+    const maxVal = Math.max(...validValues)
+
+    return {
+      tooltip: {
+        formatter: (params: any) => {
+          const [di, gi, val] = params.data
+          return `增长率${growth_rates[gi]} / 折现率${discount_rates[di]}<br/>内在价值: ${val !== null ? val.toFixed(2) + '元' : 'N/A'}`
+        }
+      },
+      xAxis: {
+        type: 'category' as const,
+        data: discount_rates,
+        name: '折现率',
+        axisLabel: { color: '#8b949e' },
+        nameTextStyle: { color: '#8b949e' },
+      },
+      yAxis: {
+        type: 'category' as const,
+        data: growth_rates,
+        name: '增长率',
+        axisLabel: { color: '#8b949e' },
+        nameTextStyle: { color: '#8b949e' },
+      },
+      visualMap: {
+        min: minVal,
+        max: maxVal,
+        calculable: true,
+        orient: 'horizontal' as const,
+        left: 'center',
+        bottom: 0,
+        inRange: {
+          color: ['#f85149', '#d29922', '#3fb950', '#58a6ff'],
+        },
+        textStyle: { color: '#8b949e' },
+      },
+      series: [{
+        type: 'heatmap' as const,
+        data: data,
+        label: {
+          show: true,
+          color: '#e6edf3',
+          fontSize: 11,
+          formatter: (p: any) => p.data[2] !== null ? p.data[2].toFixed(1) : 'N/A',
+        },
+        emphasis: { itemStyle: { shadowBlur: 10, shadowColor: 'rgba(0, 0, 0, 0.5)' } },
+      }],
+      grid: { left: 80, right: 20, top: 20, bottom: 60 },
+      backgroundColor: 'transparent',
+    }
+  }
+
+  // Intrinsic value vs market price comparison bar
+  const getComparisonChartOption = () => {
+    if (!dcfResult?.current_price) return {}
+    const price = dcfResult.current_price
+    const intrinsic = dcfResult.intrinsic_value
+    const buy = dcfResult.buy_price
+
+    return {
+      tooltip: { trigger: 'axis' as const },
+      xAxis: {
+        type: 'category' as const,
+        data: ['当前价格', '安全买点', '内在价值'],
+        axisLabel: { color: '#8b949e' },
+      },
+      yAxis: {
+        type: 'value' as const,
+        name: '元/股',
+        axisLabel: { color: '#8b949e' },
+        nameTextStyle: { color: '#8b949e' },
+      },
+      series: [{
+        type: 'bar' as const,
+        data: [
+          { value: price, itemStyle: { color: '#f85149' } },
+          { value: buy, itemStyle: { color: '#d29922' } },
+          { value: intrinsic, itemStyle: { color: '#3fb950' } },
+        ],
+        label: {
+          show: true,
+          position: 'top' as const,
+          color: '#e6edf3',
+          fontSize: 13,
+          fontWeight: 'bold' as const,
+          formatter: '{c} 元',
+        },
+      }],
+      grid: { left: 60, right: 20, top: 30, bottom: 30 },
+      backgroundColor: 'transparent',
+    }
+  }
+
   return (
     <div className="cb-page">
-      <div className="stock-header">
-        <div className="stock-title-row">
-          <div>
-            <h2>价值投资筛选器</h2>
-            <span className="stock-code">巴菲特 / 芒格 / 李录 / 段永平 投资理念与筛选</span>
-          </div>
-        </div>
-      </div>
+      <PageSection title="价值投资筛选器" extra={<span className="stock-code">巴菲特 / 芒格 / 李录 / 段永平 投资理念与筛选</span>} compact>
 
-      {/* Tab */}
-      <div style={{
-        display: 'flex', gap: '8px', padding: '12px 20px',
-        borderBottom: '1px solid var(--border-primary)', background: 'var(--bg-tertiary)',
-      }}>
-        {([['philosophy', '投资理念'], ['screener', '价投筛选'], ['dcf', 'DCF计算器']] as const).map(([tab, label]) => (
-          <button key={tab} onClick={() => setActiveTab(tab)}
-            className={`tab-btn ${activeTab === tab ? 'active' : ''}`}>
-            {label}
-          </button>
-        ))}
-      </div>
+      <TabBar
+        tabs={[
+          { key: 'philosophy', label: '投资理念' },
+          { key: 'screener', label: '价投筛选' },
+          { key: 'dcf', label: 'DCF估值' },
+          { key: 'graham', label: '格雷厄姆' },
+        ]}
+        activeKey={activeTab}
+        onChange={(key) => setActiveTab(key as typeof activeTab)}
+      />
 
       {/* ===== Philosophy Tab ===== */}
       {activeTab === 'philosophy' && philosophy && (
@@ -401,7 +675,6 @@ export default function ValueInvesting() {
       {/* ===== Screener Tab ===== */}
       {activeTab === 'screener' && (
         <div style={{ padding: '16px 20px' }}>
-          {/* Filters */}
           <div style={{
             display: 'flex', flexWrap: 'wrap', gap: '12px', marginBottom: '16px',
             padding: '16px', background: 'var(--bg-secondary)', borderRadius: '8px',
@@ -472,7 +745,6 @@ export default function ValueInvesting() {
             </div>
           </div>
 
-          {/* Info bar */}
           <div className="data-freshness" style={{ marginBottom: '16px' }}>
             <span className="freshness-tag">市场: {market === 'all' ? '全部' : market === 'a' ? 'A股' : market === 'hk' ? '港股' : '美股'}</span>
             <span className="freshness-tag">标准: {master === 'combined' ? '综合' : MASTER_LABELS[master]}</span>
@@ -480,9 +752,8 @@ export default function ValueInvesting() {
             <span className="freshness-tag">结果: {total} 只</span>
           </div>
 
-          {/* Results table */}
           {loading ? (
-            <div className="loading"><div className="spinner"></div>加载中...</div>
+            <LoadingSpinner />
           ) : (
             <div className="table-container">
               <table className="arb-table">
@@ -525,7 +796,7 @@ export default function ValueInvesting() {
                           <td>{s.name}</td>
                           <td>{getMarketTag(s.market)}</td>
                           <td style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{s.report_period || '--'}</td>
-                          <td>{s.price.toFixed(2)}</td>
+                          <td>{s.price?.toFixed(2) ?? '--'}</td>
                           <td style={{ color: s.change_pct >= 0 ? '#f85149' : '#3fb950' }}>
                             {s.change_pct >= 0 ? '+' : ''}{s.change_pct.toFixed(2)}%
                           </td>
@@ -640,35 +911,81 @@ export default function ValueInvesting() {
           <div style={{ display: 'flex', gap: '20px' }}>
             {/* Input panel */}
             <div style={{
-              minWidth: '320px', padding: '20px', background: 'var(--bg-secondary)',
+              minWidth: '340px', padding: '20px', background: 'var(--bg-secondary)',
               borderRadius: '8px', border: '1px solid var(--border-primary)',
             }}>
-              <h3 style={{ marginBottom: '16px', color: 'var(--text-primary)' }}>DCF 参数输入</h3>
-              {[
-                { label: '当前自由现金流 (亿元)', value: dcfFcf, set: setDcfFcf, placeholder: '如: 100' },
-                { label: '增长率 (%)', value: dcfGrowth, set: setDcfGrowth, placeholder: '如: 10' },
-                { label: '总股本 (亿股)', value: dcfShares, set: setDcfShares, placeholder: '如: 10' },
-                { label: '折现率 (%)', value: dcfDiscount, set: setDcfDiscount, placeholder: '默认 10' },
-                { label: '永续增长率 (%)', value: dcfTerminal, set: setDcfTerminal, placeholder: '默认 3' },
-                { label: '安全边际 (%)', value: dcfSafety, set: setDcfSafety, placeholder: '默认 30' },
-              ].map(({ label, value, set, placeholder }) => (
-                <div key={label} style={{ marginBottom: '12px' }}>
-                  <label style={{ display: 'block', fontSize: '12px', color: 'var(--text-muted)', marginBottom: '4px' }}>
-                    {label}
-                  </label>
-                  <input
-                    type="number"
-                    value={value}
-                    onChange={e => set(e.target.value)}
-                    placeholder={placeholder}
-                    style={{
-                      width: '100%', padding: '8px 12px',
-                      border: '1px solid var(--border-primary)', borderRadius: '4px',
-                      background: 'var(--bg-primary)', color: 'var(--text-primary)', fontSize: '14px',
-                    }}
-                  />
-                </div>
-              ))}
+              <h3 style={{ marginBottom: '12px', color: 'var(--text-primary)' }}>DCF 估值计算器</h3>
+
+              {/* Mode toggle */}
+              <div style={{ display: 'flex', gap: '8px', marginBottom: '16px' }}>
+                {(['auto', 'manual'] as const).map(mode => (
+                  <button key={mode} onClick={() => setDcfMode(mode)} style={{
+                    flex: 1, padding: '6px 12px', borderRadius: '4px', border: 'none',
+                    cursor: 'pointer', fontWeight: 600, fontSize: '12px',
+                    background: dcfMode === mode ? 'var(--accent-blue)' : 'var(--bg-primary)',
+                    color: dcfMode === mode ? '#fff' : 'var(--text-secondary)',
+                  }}>
+                    {mode === 'auto' ? '自动获取' : '手动输入'}
+                  </button>
+                ))}
+              </div>
+
+              {dcfMode === 'auto' ? (
+                <>
+                  <div style={{ marginBottom: '12px' }}>
+                    <label style={{ display: 'block', fontSize: '12px', color: 'var(--text-muted)', marginBottom: '4px' }}>
+                      股票代码
+                    </label>
+                    <div style={{ display: 'flex', gap: '8px' }}>
+                      <input
+                        type="text" value={dcfStockCode} onChange={e => setDcfStockCode(e.target.value)}
+                        placeholder="如 600519"
+                        style={{ ...inputStyle, flex: 1 }}
+                      />
+                      <select value={dcfMarket} onChange={e => setDcfMarket(e.target.value as any)} style={selectStyle}>
+                        <option value="a">A股</option>
+                        <option value="hk">港股</option>
+                        <option value="us">美股</option>
+                      </select>
+                    </div>
+                  </div>
+                  <div style={{ marginBottom: '12px' }}>
+                    <label style={{ display: 'block', fontSize: '12px', color: 'var(--text-muted)', marginBottom: '4px' }}>
+                      折现率 (%) <span style={{ opacity: 0.6 }}>留空自动WACC</span>
+                    </label>
+                    <input type="number" value={dcfDiscount} onChange={e => setDcfDiscount(e.target.value)} placeholder="默认10" style={inputStyle} />
+                  </div>
+                  <div style={{ marginBottom: '12px' }}>
+                    <label style={{ display: 'block', fontSize: '12px', color: 'var(--text-muted)', marginBottom: '4px' }}>
+                      增长率 (%) <span style={{ opacity: 0.6 }}>留空自动估算</span>
+                    </label>
+                    <input type="number" value={dcfGrowth} onChange={e => setDcfGrowth(e.target.value)} placeholder="默认8" style={inputStyle} />
+                  </div>
+                </>
+              ) : (
+                <>
+                  {[
+                    { label: '当前自由现金流 (亿元)', value: dcfFcf, set: setDcfFcf, placeholder: '如: 100' },
+                    { label: '增长率 (%)', value: dcfGrowth, set: setDcfGrowth, placeholder: '如: 10' },
+                    { label: '总股本 (亿股)', value: dcfShares, set: setDcfShares, placeholder: '如: 10' },
+                    { label: '折现率 (%)', value: dcfDiscount, set: setDcfDiscount, placeholder: '默认 10' },
+                    { label: '永续增长率 (%)', value: dcfTerminal, set: setDcfTerminal, placeholder: '默认 3' },
+                    { label: '净负债 (亿元)', value: dcfNetDebt, set: setDcfNetDebt, placeholder: '0' },
+                    { label: '当前股价 (元)', value: dcfCurrentPrice, set: setDcfCurrentPrice, placeholder: '可选' },
+                  ].map(({ label, value, set, placeholder }) => (
+                    <div key={label} style={{ marginBottom: '12px' }}>
+                      <label style={{ display: 'block', fontSize: '12px', color: 'var(--text-muted)', marginBottom: '4px' }}>{label}</label>
+                      <input type="number" value={value} onChange={e => set(e.target.value)} placeholder={placeholder} style={inputStyle} />
+                    </div>
+                  ))}
+                </>
+              )}
+
+              <div style={{ marginBottom: '12px' }}>
+                <label style={{ display: 'block', fontSize: '12px', color: 'var(--text-muted)', marginBottom: '4px' }}>安全边际 (%)</label>
+                <input type="number" value={dcfSafety} onChange={e => setDcfSafety(e.target.value)} placeholder="默认 30" style={inputStyle} />
+              </div>
+
               <button
                 onClick={runDCF}
                 disabled={dcfLoading}
@@ -678,8 +995,25 @@ export default function ValueInvesting() {
                   fontSize: '14px', marginTop: '4px',
                 }}
               >
-                {dcfLoading ? '计算中...' : '计算内在价值'}
+                {dcfLoading ? '计算中...' : dcfMode === 'auto' ? '自动估值' : '计算内在价值'}
               </button>
+
+              {dcfError && (
+                <div style={{ marginTop: '12px', padding: '10px', background: '#f8514920', borderRadius: '4px', color: '#f85149', fontSize: '13px' }}>
+                  {dcfError}
+                </div>
+              )}
+
+              {/* Data source info for auto mode */}
+              {dcfResult?.data_source && (
+                <div style={{ marginTop: '16px', padding: '10px', background: 'var(--bg-primary)', borderRadius: '6px', fontSize: '11px', color: 'var(--text-muted)' }}>
+                  <div style={{ fontWeight: 600, marginBottom: '6px', color: 'var(--text-secondary)' }}>数据来源</div>
+                  <div>FCF: {dcfResult.data_source.fcf_source === 'cashflow_statement' ? '现金流量表' : '净利润估算'}{dcfResult.data_source.fcf_raw ? ` (${dcfResult.data_source.fcf_raw}亿)` : ''}</div>
+                  <div>增长率: {dcfResult.data_source.growth_rate_source === 'historical_cagr' ? '历史CAGR(保守)' : '手动输入'}</div>
+                  <div>折现率: {dcfResult.data_source.discount_rate_source === 'wacc_estimated' ? 'WACC估算' : '手动输入'}</div>
+                  <div>报告期: {dcfResult.data_source.report_period} ({dcfResult.data_source.report_type})</div>
+                </div>
+              )}
             </div>
 
             {/* Results panel */}
@@ -687,60 +1021,73 @@ export default function ValueInvesting() {
               {dcfResult ? (
                 <>
                   {/* Summary cards */}
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '12px', marginBottom: '20px' }}>
-                    {[
-                      { label: '每股内在价值', value: `${dcfResult.intrinsic_value} 元`, color: '#58a6ff' },
-                      { label: '安全买点', value: `${dcfResult.buy_price} 元`, color: '#3fb950' },
-                      { label: '企业价值', value: `${dcfResult.enterprise_value} 亿`, color: '#d29922' },
-                      { label: '终值', value: `${dcfResult.terminal_value} 亿`, color: '#bc8cff' },
-                    ].map(({ label, value, color }) => (
-                      <div key={label} style={{
-                        padding: '16px', background: 'var(--bg-secondary)', borderRadius: '8px',
-                        border: `1px solid ${color}40`, borderTop: `3px solid ${color}`,
-                      }}>
-                        <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginBottom: '8px' }}>{label}</div>
-                        <div style={{ fontSize: '20px', fontWeight: 700, color }}>{value}</div>
-                      </div>
-                    ))}
-                  </div>
+                  <StatCardGroup columns={4} style={{ marginBottom: '16px' }}>
+                    <StatCard label="每股内在价值" value={`${dcfResult.intrinsic_value} 元`} color="#58a6ff" />
+                    <StatCard label="安全买点" value={`${dcfResult.buy_price} 元`} color="#3fb950" />
+                    <StatCard
+                      label="上行空间"
+                      value={dcfResult.upside_pct !== undefined ? `${dcfResult.upside_pct > 0 ? '+' : ''}${dcfResult.upside_pct}%` : '--'}
+                      color={dcfResult.upside_pct !== undefined && dcfResult.upside_pct > 0 ? '#3fb950' : '#f85149'}
+                    />
+                    <StatCard
+                      label="终值占比"
+                      value={dcfResult.terminal_pct !== undefined ? `${dcfResult.terminal_pct}%` : '--'}
+                      color={dcfResult.terminal_pct !== undefined && dcfResult.terminal_pct < 60 ? '#3fb950' : '#d29922'}
+                    />
+                  </StatCardGroup>
 
-                  {/* FCF Chart */}
+                  {/* Intrinsic value vs market price */}
+                  {dcfResult.current_price && dcfResult.current_price > 0 && (
+                    <div style={{
+                      padding: '16px', background: 'var(--bg-secondary)', borderRadius: '8px',
+                      border: '1px solid var(--border-primary)', marginBottom: '16px',
+                    }}>
+                      <h4 style={{ marginBottom: '12px', color: 'var(--text-primary)' }}>
+                        内在价值 vs 市场价格
+                        {dcfResult.is_undervalued !== undefined && (
+                          <span style={{
+                            marginLeft: '12px', fontSize: '13px', padding: '2px 10px', borderRadius: '4px',
+                            background: dcfResult.is_undervalued ? '#3fb95020' : '#f8514920',
+                            color: dcfResult.is_undervalued ? '#3fb950' : '#f85149',
+                          }}>
+                            {dcfResult.is_buy_zone ? '进入买点区间' : dcfResult.is_undervalued ? '低估' : '高估'}
+                          </span>
+                        )}
+                      </h4>
+                      <ReactECharts option={getComparisonChartOption()} style={{ height: '260px' }} />
+                    </div>
+                  )}
+
+                  {/* DCF Waterfall */}
                   <div style={{
                     padding: '16px', background: 'var(--bg-secondary)', borderRadius: '8px',
-                    border: '1px solid var(--border-primary)', marginBottom: '20px',
+                    border: '1px solid var(--border-primary)', marginBottom: '16px',
                   }}>
-                    <h4 style={{ marginBottom: '12px', color: 'var(--text-primary)' }}>未来10年FCF预测</h4>
-                    <ReactECharts option={getDCFChartOption()} style={{ height: '280px' }} />
+                    <h4 style={{ marginBottom: '12px', color: 'var(--text-primary)' }}>估值拆解</h4>
+                    <ReactECharts option={getWaterfallChartOption()} style={{ height: '300px' }} />
                   </div>
 
-                  {/* FCF Projection Table */}
-                  <div className="table-container" style={{ marginBottom: '20px' }}>
-                    <table className="arb-table">
-                      <thead>
-                        <tr>
-                          <th>年份</th>
-                          <th>预测FCF (亿元)</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {dcfResult.fcf_projections.map((fcf, i) => (
-                          <tr key={i}>
-                            <td>第 {i + 1} 年</td>
-                            <td style={{ fontWeight: 600, color: '#58a6ff' }}>{fcf.toFixed(2)}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
+                  {/* FCF Projection Chart */}
+                  <div style={{
+                    padding: '16px', background: 'var(--bg-secondary)', borderRadius: '8px',
+                    border: '1px solid var(--border-primary)', marginBottom: '16px',
+                  }}>
+                    <h4 style={{ marginBottom: '12px', color: 'var(--text-primary)' }}>
+                      未来FCF预测（共{dcfResult.fcf_projections.length}年）
+                    </h4>
+                    <ReactECharts option={getDCFChartOption()} style={{ height: '260px' }} />
                   </div>
 
-                  {/* Sensitivity Analysis */}
+                  {/* Sensitivity Analysis Heatmap */}
                   {dcfResult.sensitivity && (
                     <div style={{
                       padding: '16px', background: 'var(--bg-secondary)', borderRadius: '8px',
                       border: '1px solid var(--border-primary)',
                     }}>
                       <h4 style={{ marginBottom: '12px', color: 'var(--text-primary)' }}>敏感性分析（每股内在价值）</h4>
-                      <div className="table-container">
+                      <ReactECharts option={getSensitivityHeatmapOption()} style={{ height: '320px' }} />
+                      {/* Table fallback */}
+                      <div className="table-container" style={{ marginTop: '12px' }}>
                         <table className="arb-table">
                           <thead>
                             <tr>
@@ -754,12 +1101,12 @@ export default function ValueInvesting() {
                             {dcfResult.sensitivity.growth_rates.map((gr, gi) => (
                               <tr key={gr}>
                                 <td style={{ fontWeight: 600 }}>{gr}</td>
-                                {dcfResult.sensitivity.matrix[gi].map((val, di) => (
+                                {dcfResult.sensitivity!.matrix[gi].map((val, di) => (
                                   <td key={di} style={{
-                                    color: val >= parseFloat(dcfFcf) ? '#3fb950' : '#f85149',
+                                    color: val === null ? '#666' : dcfResult.current_price && val > dcfResult.current_price ? '#3fb950' : '#f85149',
                                     fontWeight: 600,
                                   }}>
-                                    {val.toFixed(2)}
+                                    {val !== null ? val.toFixed(2) : 'N/A'}
                                   </td>
                                 ))}
                               </tr>
@@ -767,7 +1114,175 @@ export default function ValueInvesting() {
                           </tbody>
                         </table>
                       </div>
+                      <div style={{ marginTop: '8px', fontSize: '11px', color: 'var(--text-muted)' }}>
+                        {dcfResult.current_price ? `绿色 = 高于当前价${dcfResult.current_price}元 (低估) | 红色 = 低于当前价 (高估)` : '对比当前市场价格判断估值高低'}
+                      </div>
                     </div>
+                  )}
+
+                  {/* Key parameters */}
+                  <div style={{
+                    marginTop: '16px', padding: '16px', background: 'var(--bg-secondary)', borderRadius: '8px',
+                    border: '1px solid var(--border-primary)',
+                  }}>
+                    <h4 style={{ marginBottom: '12px', color: 'var(--text-primary)' }}>估值参数</h4>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '12px' }}>
+                      {[
+                        { label: '折现率', value: `${(dcfResult.discount_rate * 100).toFixed(1)}%` },
+                        { label: '增长率', value: `${(dcfResult.growth_rate * 100).toFixed(1)}%` },
+                        { label: '永续增长率', value: `${(dcfResult.terminal_growth_rate * 100).toFixed(1)}%` },
+                        { label: '安全边际', value: `${(dcfResult.safety_margin * 100).toFixed(0)}%` },
+                        { label: '企业价值', value: `${dcfResult.enterprise_value.toFixed(2)}亿` },
+                        { label: '股权价值', value: `${(dcfResult.equity_value || dcfResult.enterprise_value).toFixed(2)}亿` },
+                        { label: '净负债', value: `${(dcfResult.net_debt || 0).toFixed(2)}亿` },
+                        { label: 'FCF现值', value: `${dcfResult.pv_fcf.toFixed(2)}亿` },
+                      ].map(({ label, value }) => (
+                        <div key={label} style={{ textAlign: 'center' }}>
+                          <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginBottom: '2px' }}>{label}</div>
+                          <div style={{ fontSize: '15px', fontWeight: 600, color: 'var(--text-primary)' }}>{value}</div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </>
+              ) : (
+                <div style={{
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  height: '400px', color: 'var(--text-muted)', fontSize: '14px',
+                }}>
+                  {dcfMode === 'auto' ? '输入股票代码，自动获取财务数据并计算DCF估值' : '输入参数后点击"计算内在价值"查看DCF估值结果'}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ===== Graham Number Tab ===== */}
+      {activeTab === 'graham' && (
+        <div style={{ padding: '16px 20px' }}>
+          <div style={{ display: 'flex', gap: '20px' }}>
+            {/* Input panel */}
+            <div style={{
+              minWidth: '320px', padding: '20px', background: 'var(--bg-secondary)',
+              borderRadius: '8px', border: '1px solid var(--border-primary)',
+            }}>
+              <h3 style={{ marginBottom: '8px', color: 'var(--text-primary)' }}>格雷厄姆公式</h3>
+              <p style={{ fontSize: '12px', color: 'var(--text-muted)', marginBottom: '16px', lineHeight: '1.6' }}>
+                公式: <code style={{ background: 'var(--bg-primary)', padding: '2px 4px', borderRadius: '2px' }}>sqrt(22.5 * EPS * BVPS)</code>
+                <br />含义: 15倍PE * 1.5倍PB = 22.5，格雷厄姆认为的合理估值上限
+                <br />适用: 稳定盈利的成熟企业（EPS &gt; 0, BVPS &gt; 0）
+              </p>
+              {[
+                { label: '每股收益 EPS (元)', value: grahamEps, set: setGrahamEps, placeholder: '如: 5.0' },
+                { label: '每股净资产 BVPS (元)', value: grahamBvps, set: setGrahamBvps, placeholder: '如: 30.0' },
+                { label: '当前股价 (元)', value: grahamPrice, set: setGrahamPrice, placeholder: '可选' },
+              ].map(({ label, value, set, placeholder }) => (
+                <div key={label} style={{ marginBottom: '12px' }}>
+                  <label style={{ display: 'block', fontSize: '12px', color: 'var(--text-muted)', marginBottom: '4px' }}>{label}</label>
+                  <input type="number" value={value} onChange={e => set(e.target.value)} placeholder={placeholder} style={inputStyle} />
+                </div>
+              ))}
+              <button
+                onClick={runGraham}
+                disabled={grahamLoading}
+                style={{
+                  width: '100%', padding: '10px', background: 'var(--accent-blue)', color: '#fff',
+                  border: 'none', borderRadius: '4px', cursor: 'pointer', fontWeight: 600,
+                  fontSize: '14px', marginTop: '4px',
+                }}
+              >
+                {grahamLoading ? '计算中...' : '计算格雷厄姆价值'}
+              </button>
+            </div>
+
+            {/* Results */}
+            <div style={{ flex: 1 }}>
+              {grahamResult ? (
+                <>
+                  {!grahamResult.applicable ? (
+                    <div style={{
+                      padding: '20px', background: '#f8514920', borderRadius: '8px',
+                      border: '1px solid #f8514940', color: '#f85149',
+                    }}>
+                      <h4 style={{ marginBottom: '8px' }}>不适用</h4>
+                      {grahamResult.warnings.map((w, i) => (
+                        <p key={i} style={{ fontSize: '13px', marginBottom: '4px' }}>{w}</p>
+                      ))}
+                      <p style={{ fontSize: '12px', marginTop: '12px', color: 'var(--text-muted)' }}>
+                        格雷厄姆公式要求EPS和BVPS均为正数。对于亏损企业或资不抵债企业，请使用DCF模型。
+                      </p>
+                    </div>
+                  ) : (
+                    <>
+                      <StatCardGroup columns={3} style={{ marginBottom: '20px' }}>
+                        <StatCard label="格雷厄姆内在价值" value={`${grahamResult.graham_value} 元`} color="#58a6ff" />
+                        <StatCard label="隐含PE" value={`${grahamResult.implied_pe}x`} color="#3fb950" />
+                        <StatCard label="隐含PB" value={`${grahamResult.implied_pb}x`} color="#d29922" />
+                      </StatCardGroup>
+
+                      {grahamResult.current_price && (
+                        <div style={{
+                          padding: '20px', background: 'var(--bg-secondary)', borderRadius: '8px',
+                          border: '1px solid var(--border-primary)',
+                        }}>
+                          <h4 style={{ marginBottom: '16px', color: 'var(--text-primary)' }}>估值对比</h4>
+                          <ReactECharts option={{
+                            tooltip: { trigger: 'axis' as const },
+                            xAxis: {
+                              type: 'category' as const,
+                              data: ['当前股价', '格雷厄姆价值'],
+                              axisLabel: { color: '#8b949e' },
+                            },
+                            yAxis: {
+                              type: 'value' as const, name: '元/股',
+                              axisLabel: { color: '#8b949e' },
+                              nameTextStyle: { color: '#8b949e' },
+                            },
+                            series: [{
+                              type: 'bar' as const,
+                              data: [
+                                { value: grahamResult.current_price, itemStyle: { color: '#f85149' } },
+                                { value: grahamResult.graham_value, itemStyle: { color: '#3fb950' } },
+                              ],
+                              label: {
+                                show: true, position: 'top' as const,
+                                color: '#e6edf3', fontSize: 13, fontWeight: 'bold' as const,
+                                formatter: '{c} 元',
+                              },
+                            }],
+                            grid: { left: 60, right: 20, top: 30, bottom: 30 },
+                            backgroundColor: 'transparent',
+                          }} style={{ height: '280px' }} />
+                          <div style={{ textAlign: 'center', marginTop: '12px' }}>
+                            <span style={{
+                              fontSize: '18px', fontWeight: 700, padding: '4px 16px', borderRadius: '6px',
+                              background: grahamResult.is_undervalued ? '#3fb95020' : '#f8514920',
+                              color: grahamResult.is_undervalued ? '#3fb950' : '#f85149',
+                            }}>
+                              {grahamResult.is_undervalued
+                                ? `低估 ${grahamResult.safety_margin_pct}% 安全边际`
+                                : `高估 (安全边际 -${Math.abs(grahamResult.safety_margin_pct || 0)}%)`
+                              }
+                            </span>
+                          </div>
+                        </div>
+                      )}
+
+                      <div style={{
+                        marginTop: '16px', padding: '16px', background: 'var(--bg-secondary)', borderRadius: '8px',
+                        border: '1px solid var(--border-primary)',
+                      }}>
+                        <h4 style={{ marginBottom: '8px', color: 'var(--text-primary)' }}>公式解读</h4>
+                        <div style={{ fontSize: '13px', color: 'var(--text-secondary)', lineHeight: '1.8' }}>
+                          <div>格雷厄姆价值 = sqrt(22.5 x {grahamResult.eps} x {grahamResult.bvps}) = sqrt({(22.5 * grahamResult.eps * grahamResult.bvps).toFixed(0)}) = <strong>{grahamResult.graham_value}元</strong></div>
+                          <div style={{ marginTop: '8px', color: 'var(--text-muted)', fontSize: '12px' }}>
+                            22.5 = PE上限15 x PB上限1.5，代表格雷厄姆认为合理估值的上限
+                            <br />隐含PE={grahamResult.implied_pe}，隐含PB={grahamResult.implied_pb}
+                          </div>
+                        </div>
+                      </div>
+                    </>
                   )}
                 </>
               ) : (
@@ -775,13 +1290,15 @@ export default function ValueInvesting() {
                   display: 'flex', alignItems: 'center', justifyContent: 'center',
                   height: '400px', color: 'var(--text-muted)', fontSize: '14px',
                 }}>
-                  输入参数后点击"计算内在价值"查看DCF估值结果
+                  输入EPS和每股净资产，计算格雷厄姆内在价值
                 </div>
               )}
             </div>
           </div>
         </div>
       )}
+
+      </PageSection>
     </div>
   )
 }

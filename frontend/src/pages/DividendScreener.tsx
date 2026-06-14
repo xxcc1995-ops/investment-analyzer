@@ -1,5 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import axios from 'axios'
+import { PageSection, TabBar, DataTable, LoadingSpinner, StatCard, StatCardGroup } from '../components/ui'
+import type { Column } from '../components/ui'
 
 const API_BASE = '/api'
 
@@ -22,6 +24,10 @@ interface DividendStock {
   report_period: string
   score: number
   match_level: 'excellent' | 'good' | 'fair'
+  dividend_cagr_3y: number | null
+  dividend_cagr_5y: number | null
+  payout_sustainability: string | null
+  has_special_dividend: boolean
 }
 
 interface CalculatorInputs {
@@ -30,6 +36,7 @@ interface CalculatorInputs {
   initial_shares: string
   years: string
   dividend_growth_rate: string
+  price_appreciation_rate: string
   reinvest: boolean
 }
 
@@ -77,6 +84,7 @@ export default function DividendScreener() {
     initial_shares: '10000',
     years: '10',
     dividend_growth_rate: '5',
+    price_appreciation_rate: '0',
     reinvest: true,
   })
   const [results, setResults] = useState<CalculatorResult[]>([])
@@ -99,20 +107,22 @@ export default function DividendScreener() {
 
   useEffect(() => { loadStocks() }, [loadStocks])
 
-  // 攒股收息计算器
+  // 攒股收息计算器（含股价增长+股息再投资）
   const calculateDividend = () => {
-    const price = parseFloat(inputs.stock_price)
+    const initialPrice = parseFloat(inputs.stock_price)
     const dps = parseFloat(inputs.dividend_per_share)
     const shares = parseInt(inputs.initial_shares)
     const years = parseInt(inputs.years)
     const growthRate = parseFloat(inputs.dividend_growth_rate) / 100
+    const priceGrowth = parseFloat(inputs.price_appreciation_rate) / 100
 
-    if (isNaN(price) || isNaN(dps) || isNaN(shares) || isNaN(years) || isNaN(growthRate)) return
-    if (price <= 0 || dps <= 0 || shares <= 0 || years <= 0) return
+    if (isNaN(initialPrice) || isNaN(dps) || isNaN(shares) || isNaN(years) || isNaN(growthRate) || isNaN(priceGrowth)) return
+    if (initialPrice <= 0 || dps <= 0 || shares <= 0 || years <= 0) return
 
     const results: CalculatorResult[] = []
     let currentShares = shares
     let currentDps = dps
+    let currentPrice = initialPrice
     let cumulativeDividend = 0
 
     for (let year = 1; year <= years; year++) {
@@ -120,12 +130,12 @@ export default function DividendScreener() {
       cumulativeDividend += dividendIncome
 
       if (inputs.reinvest) {
-        const newShares = Math.floor(dividendIncome / price)
+        const newShares = Math.floor(dividendIncome / currentPrice)
         currentShares += newShares
       }
 
-      const portfolioValue = currentShares * price
-      const yieldOnCost = (currentDps / price) * 100
+      const portfolioValue = currentShares * currentPrice
+      const yieldOnCost = (currentDps / initialPrice) * 100
 
       results.push({
         year,
@@ -137,6 +147,7 @@ export default function DividendScreener() {
       })
 
       currentDps *= (1 + growthRate)
+      currentPrice *= (1 + priceGrowth)
     }
 
     setResults(results)
@@ -202,33 +213,20 @@ export default function DividendScreener() {
 
   return (
     <div className="cb-page">
-      {/* 页面标题 */}
-      <div className="stock-header">
-        <div className="stock-title-row">
-          <div>
-            <h2>王文 & 散户乙 投资筛选器</h2>
-            <span className="stock-code">
-              基于两位大师投资思想的股票筛选 + 攒股收息计算器
-            </span>
-          </div>
-        </div>
-      </div>
+      <PageSection title="王文 & 散户乙 投资筛选器" compact>
+        <span style={{ color: 'var(--text-muted)', fontSize: 13 }}>基于两位大师投资思想的股票筛选 + 攒股收息计算器</span>
+      </PageSection>
 
-      {/* Tab切换 */}
-      <div style={{
-        display: 'flex', gap: '8px', padding: '12px 20px',
-        borderBottom: '1px solid var(--border-primary)', background: 'var(--bg-tertiary)',
-      }}>
-        {(['philosophy', 'screener', 'calculator'] as const).map(tab => (
-          <button
-            key={tab}
-            onClick={() => setActiveTab(tab)}
-            className={`tab-btn ${activeTab === tab ? 'active' : ''}`}
-          >
-            {tab === 'philosophy' ? '投资思想' : tab === 'screener' ? '股票筛选' : '攒股收息计算器'}
-          </button>
-        ))}
-      </div>
+      <TabBar
+        tabs={[
+          { key: 'philosophy', label: '投资思想' },
+          { key: 'screener', label: '股票筛选' },
+          { key: 'calculator', label: '攒股收息计算器' },
+        ]}
+        activeKey={activeTab}
+        onChange={k => setActiveTab(k as any)}
+        style={{ marginBottom: 16 }}
+      />
 
       {/* 投资思想页面 */}
       {activeTab === 'philosophy' && (
@@ -407,6 +405,7 @@ export default function DividendScreener() {
                     <th>毛利率(%)</th>
                     <th>资产负债率(%)</th>
                     <th>连续分红(年)</th>
+                    <th>股息CAGR(3Y)</th>
                     <th>综合评分</th>
                     <th>匹配度</th>
                   </tr>
@@ -448,6 +447,12 @@ export default function DividendScreener() {
                             {stock.debt_ratio?.toFixed(2) ?? '--'}
                           </td>
                           <td style={{ fontWeight: 600 }}>{stock.consecutive_years}</td>
+                          <td style={{
+                            color: (stock.dividend_cagr_3y ?? -999) >= 10 ? '#52c41a' : (stock.dividend_cagr_3y ?? -999) >= 0 ? '#1890ff' : '#ff4d4f',
+                            fontWeight: 600,
+                          }}>
+                            {stock.dividend_cagr_3y != null ? `${stock.dividend_cagr_3y > 0 ? '+' : ''}${stock.dividend_cagr_3y.toFixed(1)}%` : '--'}
+                          </td>
                           <td>
                             <span style={{
                               color: getScoreColor(stock.score),
@@ -475,7 +480,7 @@ export default function DividendScreener() {
                         </tr>
                         {isExpanded && payback && (
                           <tr key={`${stock.code}-payback`}>
-                            <td colSpan={14} style={{ padding: '16px 20px', background: 'var(--bg-secondary)' }}>
+                            <td colSpan={15} style={{ padding: '16px 20px', background: 'var(--bg-secondary)' }}>
                               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 16 }}>
                                 {/* 核心指标 */}
                                 <div style={{ background: 'var(--bg-tertiary)', padding: 16, borderRadius: 8, borderLeft: '3px solid #58a6ff' }}>
@@ -485,6 +490,47 @@ export default function DividendScreener() {
                                   </div>
                                   <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 4 }}>
                                     每股股息 ¥{payback.dps.toFixed(3)} / 股价 ¥{payback.price.toFixed(2)}
+                                  </div>
+                                </div>
+
+                                {/* 股息质量分析 */}
+                                <div style={{ background: 'var(--bg-tertiary)', padding: 16, borderRadius: 8, borderLeft: '3px solid #3fb950' }}>
+                                  <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)', marginBottom: 12 }}>股息质量分析</div>
+                                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                      <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>3年CAGR</span>
+                                      <span style={{ fontWeight: 700, fontSize: 15, color: (stock.dividend_cagr_3y ?? -999) >= 5 ? '#52c41a' : (stock.dividend_cagr_3y ?? -999) >= 0 ? '#1890ff' : '#ff4d4f' }}>
+                                        {stock.dividend_cagr_3y != null ? `${stock.dividend_cagr_3y > 0 ? '+' : ''}${stock.dividend_cagr_3y.toFixed(1)}%` : '--'}
+                                      </span>
+                                    </div>
+                                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                      <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>5年CAGR</span>
+                                      <span style={{ fontWeight: 700, fontSize: 15, color: (stock.dividend_cagr_5y ?? -999) >= 5 ? '#52c41a' : (stock.dividend_cagr_5y ?? -999) >= 0 ? '#1890ff' : '#ff4d4f' }}>
+                                        {stock.dividend_cagr_5y != null ? `${stock.dividend_cagr_5y > 0 ? '+' : ''}${stock.dividend_cagr_5y.toFixed(1)}%` : '--'}
+                                      </span>
+                                    </div>
+                                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                      <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>派息率可持续性</span>
+                                      <span style={{
+                                        fontWeight: 600, fontSize: 13, padding: '2px 8px', borderRadius: 4,
+                                        background: stock.payout_sustainability === 'sustainable' ? 'rgba(82,196,26,0.15)' :
+                                          stock.payout_sustainability === 'high' ? 'rgba(250,173,20,0.15)' :
+                                          stock.payout_sustainability === 'unsustainable' ? 'rgba(255,77,79,0.15)' : 'var(--bg-secondary)',
+                                        color: stock.payout_sustainability === 'sustainable' ? '#52c41a' :
+                                          stock.payout_sustainability === 'high' ? '#faad14' :
+                                          stock.payout_sustainability === 'unsustainable' ? '#ff4d4f' : 'var(--text-muted)',
+                                      }}>
+                                        {stock.payout_sustainability === 'sustainable' ? '可持续' :
+                                          stock.payout_sustainability === 'high' ? '偏高' :
+                                          stock.payout_sustainability === 'unsustainable' ? '不可持续' : '未知'}
+                                      </span>
+                                    </div>
+                                    {stock.has_special_dividend && (
+                                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                        <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>特别股息</span>
+                                        <span style={{ fontWeight: 600, fontSize: 13, color: '#faad14' }}>疑似存在</span>
+                                      </div>
+                                    )}
                                   </div>
                                 </div>
 
@@ -533,7 +579,7 @@ export default function DividendScreener() {
                   })}
                   {stocks.length === 0 && (
                     <tr>
-                      <td colSpan={14} style={{ textAlign: 'center', padding: '40px', color: 'var(--text-muted)' }}>
+                      <td colSpan={15} style={{ textAlign: 'center', padding: '40px', color: 'var(--text-muted)' }}>
                         暂无符合条件的股票
                       </td>
                     </tr>
@@ -548,13 +594,15 @@ export default function DividendScreener() {
             <h3>评分说明</h3>
             <div className="arb-notes-content">
               <div className="arb-risk-section">
-                <h4>综合评分 (0-100分)</h4>
+                <h4>综合评分 (0-120分，归一化至100)</h4>
                 <ul>
                   <li><strong>股息率</strong> (30分)：≥5%满分，4-5%良好，3-4%及格</li>
                   <li><strong>ROE</strong> (25分)：≥20%满分，15-20%良好，10-15%及格</li>
                   <li><strong>估值</strong> (20分)：PE≤10满分，10-15良好，15-20及格</li>
                   <li><strong>连续分红</strong> (15分)：≥10年满分，5-10年良好，3-5年及格</li>
                   <li><strong>财务健康</strong> (10分)：资产负债率≤40%满分，40-60%良好</li>
+                  <li><strong>股息增长</strong> (10分)：CAGR≥10%满分，5-10%良好，0-5%及格</li>
+                  <li><strong>派息可持续性</strong> (5分)：30-80%可持续满分，&gt;80%偏高</li>
                 </ul>
               </div>
               <div className="arb-risk-section">
@@ -648,6 +696,20 @@ export default function DividendScreener() {
                     }}
                   />
                 </div>
+                <div>
+                  <label style={{ display: 'block', fontSize: '13px', color: 'var(--text-muted)', marginBottom: '4px' }}>
+                    股价年涨幅 (% / 年)
+                  </label>
+                  <input
+                    type="number"
+                    value={inputs.price_appreciation_rate}
+                    onChange={e => setInputs(prev => ({ ...prev, price_appreciation_rate: e.target.value }))}
+                    style={{
+                      width: '100%', padding: '8px 12px', border: '1px solid var(--border-primary)',
+                      borderRadius: '6px', background: 'var(--bg-secondary)', color: 'var(--text-primary)',
+                    }}
+                  />
+                </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                   <input
                     type="checkbox"
@@ -676,9 +738,10 @@ export default function DividendScreener() {
                 <div style={{ fontWeight: 600, color: 'var(--accent-blue)', marginBottom: '8px' }}>计算逻辑</div>
                 <div style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>
                   <div>1. 每年股息收入 = 持股数 × 每股股息</div>
-                  <div>2. 股息再投资：股息收入 / 股价 = 新增股数</div>
+                  <div>2. 股息再投资：股息收入 / 当年股价 = 新增股数</div>
                   <div>3. 每年股息按增长率递增</div>
-                  <div>4. 成本收益率 = 当前每股股息 / 买入价格</div>
+                  <div>4. 股价按年涨幅递增（再投资时影响买入股数）</div>
+                  <div>5. 成本收益率 = 当前每股股息 / 初始买入价格</div>
                 </div>
               </div>
             </div>

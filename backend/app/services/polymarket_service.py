@@ -50,8 +50,13 @@ if PROXY:
 # Cache
 # ============================================================
 
-from app.core.cache import get_cache as _get_cached, set_cache as _set_cached, TTL_DAILY
-_CACHE_TTL = TTL_DAILY
+from app.core.cache import get_cache as _get_cached, set_cache as _set_cached, TTL_DAILY, TTL_REALTIME
+
+# Differentiated TTL: markets/arbitrage need fresher data than history
+_TTL_MARKETS = 300      # Market lists: 5 minutes
+_TTL_ARBITRAGE = 120    # Arbitrage: 2 minutes (prices change fast)
+_TTL_HISTORY = 1800     # History: 30 minutes
+_TTL_ANALYSIS = 600     # Analysis: 10 minutes
 
 
 # ============================================================
@@ -93,7 +98,7 @@ def get_active_markets(limit: int = 100, offset: int = 0,
         _set_cached(cache_key, result)
         return result
     except Exception as e:
-        print(f"Polymarket API error: {e}")
+        logger.warning(f"Polymarket API error: {e}")
         return []
 
 
@@ -114,7 +119,7 @@ def get_market_detail(market_id: str) -> Optional[Dict]:
             _set_cached(cache_key, parsed)
         return parsed
     except Exception as e:
-        print(f"Polymarket market detail error: {e}")
+        logger.warning(f"Polymarket market detail error: {e}")
         return None
 
 
@@ -157,7 +162,7 @@ def get_price_history(market_id: str, interval: str = '1d',
         _set_cached(cache_key, history)
         return history
     except Exception as e:
-        print(f"Polymarket price history error: {e}")
+        logger.warning(f"Polymarket price history error: {e}")
         return []
 
 
@@ -194,13 +199,33 @@ def get_order_book(token_id: str) -> Optional[Dict]:
         _set_cached(cache_key, result)
         return result
     except Exception as e:
-        print(f"Polymarket order book error: {e}")
+        logger.warning(f"Polymarket order book error: {e}")
         return None
 
 
 # ============================================================
 # Market Parser
 # ============================================================
+
+def _estimate_slippage(liquidity: float, volume: float) -> float:
+    """
+    根据流动性估算滑点成本（%）
+    流动性越低、成交量越高，滑点越大
+    """
+    if liquidity <= 0:
+        return 2.0  # 无流动性数据，默认2%滑点
+    ratio = volume / liquidity if liquidity > 0 else 0
+    if ratio < 0.1:
+        return 0.1  # 流动性极好
+    elif ratio < 0.5:
+        return 0.3
+    elif ratio < 1.0:
+        return 0.5
+    elif ratio < 5.0:
+        return 1.0
+    else:
+        return 2.0  # 流动性极差
+
 
 def _parse_market(m: dict) -> Optional[Dict]:
     """解析市场数据"""
@@ -229,14 +254,20 @@ def _parse_market(m: dict) -> Optional[Dict]:
         price_sum = sum(prices) if prices else 0
         price_deviation = abs(price_sum - 1.0) if price_sum > 0 else 0
 
-        # Determine if there's an arbitrage opportunity
-        # If Yes + No < 1.0, buy both for guaranteed profit
-        has_arbitrage = price_sum > 0 and price_sum < 0.98
-        arbitrage_profit = round((1.0 - price_sum) * 100, 2) if has_arbitrage else 0
-
         # Get volume and liquidity
         volume = float(m.get('volume', 0) or 0)
         liquidity = float(m.get('liquidity', 0) or 0)
+
+        # Dynamic arbitrage threshold: base 1% + estimated slippage
+        slippage = _estimate_slippage(liquidity, volume)
+        arb_threshold = 1.0 + slippage / 100  # e.g. 1.01 for 1% slippage
+
+        # Determine if there's an arbitrage opportunity
+        # If Yes + No < 1.0 - slippage, buy both for guaranteed profit
+        has_arbitrage = price_sum > 0 and price_sum < arb_threshold
+        arbitrage_profit = round((1.0 - price_sum) * 100, 2) if has_arbitrage else 0
+        # Net profit after estimated slippage
+        net_arb_profit = round(arbitrage_profit - slippage, 2) if has_arbitrage else 0
 
         return {
             'id': m.get('id', ''),
@@ -248,6 +279,8 @@ def _parse_market(m: dict) -> Optional[Dict]:
             'price_deviation': round(price_deviation, 4),
             'has_arbitrage': has_arbitrage,
             'arbitrage_profit': arbitrage_profit,
+            'net_arbitrage_profit': net_arb_profit,
+            'estimated_slippage': round(slippage, 2),
             'tokens': token_map,
             'volume': round(volume, 2),
             'liquidity': round(liquidity, 2),
@@ -404,18 +437,22 @@ def find_trending_markets() -> List[Dict]:
 
 
 def calculate_kelly(price: float, estimated_prob: float,
-                    bankroll: float = 1000, fraction: float = 0.25) -> Dict:
+                    bankroll: float = 1000, fraction: float = 0.25,
+                    fee_rate: float = 0.01) -> Dict:
     """
-    Kelly仓位计算器
+    Kelly仓位计算器（机构级：含手续费/滑点修正 + 过度自信警告）
 
     Args:
         price: 市场价格 (0.01-0.99)
         estimated_prob: 你估计的真实概率 (0.01-0.99)
         bankroll: 总资金
         fraction: Kelly分数 (0.25 = 1/4 Kelly，更保守)
+        fee_rate: 预估交易成本率（手续费+滑点，默认1%）
     """
     if price <= 0 or price >= 1 or estimated_prob <= 0 or estimated_prob >= 1:
         return {'error': '价格和概率必须在0.01-0.99之间'}
+    if fee_rate < 0 or fee_rate >= 1:
+        return {'error': '费率必须在0%-99%之间'}
 
     # Kelly formula: f* = (b*p - q) / b
     # b = net odds = (1/price - 1)
@@ -428,43 +465,68 @@ def calculate_kelly(price: float, estimated_prob: float,
     kelly_full = (b * p - q) / b if b > 0 else 0
     kelly_fractional = kelly_full * fraction
 
-    # Expected value
-    ev = p * (1.0 - price) - q * price  # EV per dollar
-    ev_pct = ev * 100
+    # Cost-adjusted Kelly: 交易成本减少实际edge
+    # 实际赔率 b_adj = b - fee_rate/price (买入成本增加)
+    b_adj = b - fee_rate / price if price > 0 else b
+    kelly_adjusted = (b_adj * p - q) / b_adj if b_adj > 0 else 0
+    kelly_adjusted_fractional = max(0, kelly_adjusted * fraction)
 
-    # Position sizing
-    position_full = max(0, kelly_full * bankroll)
-    position_fractional = max(0, kelly_fractional * bankroll)
+    # Expected value (扣除交易成本)
+    ev_gross = p * (1.0 - price) - q * price  # EV per dollar before costs
+    ev_net = ev_gross - fee_rate  # EV after costs
+    ev_pct = ev_net * 100
 
-    # Risk assessment
-    if kelly_full <= 0:
+    # Position sizing (使用调整后的Kelly)
+    position_full = max(0, kelly_adjusted * bankroll)
+    position_fractional = max(0, kelly_adjusted_fractional * bankroll)
+
+    # Overconfidence warning: 如果估计概率偏离市场价格超过30%，发出警告
+    overconfidence_warning = None
+    edge_pct = (estimated_prob - price) * 100
+    if abs(edge_pct) > 30:
+        overconfidence_warning = f"你的概率估计({estimated_prob*100:.1f}%)偏离市场价格({price*100:.1f}%)达{abs(edge_pct):.1f}%，请重新审视你的判断依据"
+    elif abs(edge_pct) > 20:
+        overconfidence_warning = f"你的概率估计与市场价格差距较大({abs(edge_pct):.1f}%)，请注意确认信心来源"
+
+    # Risk assessment (考虑成本调整后的Kelly)
+    effective_kelly = kelly_adjusted_fractional
+    if kelly_adjusted <= 0:
         risk_level = 'negative_edge'
-        risk_msg = '没有优势，不应该下注'
-    elif kelly_full < 0.1:
+        risk_msg = '扣除交易成本后没有优势，不应该下注'
+    elif effective_kelly < 0.05:
         risk_level = 'low'
-        risk_msg = '微弱优势，小仓位试探'
-    elif kelly_full < 0.3:
+        risk_msg = '微弱优势，小仓位试探或观望'
+    elif effective_kelly < 0.15:
         risk_level = 'medium'
         risk_msg = '中等优势，适度仓位'
-    elif kelly_full < 0.5:
+    elif effective_kelly < 0.30:
         risk_level = 'high'
         risk_msg = '较强优势，较大仓位'
     else:
         risk_level = 'very_high'
-        risk_msg = '极强优势，但要注意过度自信的可能'
+        risk_msg = '极强优势，务必二次确认概率估计'
+
+    # Potential loss if wrong
+    potential_loss = position_fractional * price / (1.0 - price) if price < 1 else position_fractional
 
     return {
         'price': price,
         'estimated_prob': estimated_prob,
         'implied_prob': round(price, 4),
         'edge': round(estimated_prob - price, 4),
-        'edge_pct': round((estimated_prob - price) * 100, 2),
-        'ev_per_dollar': round(ev, 4),
+        'edge_pct': round(edge_pct, 2),
+        'ev_per_dollar_gross': round(ev_gross, 4),
+        'ev_per_dollar_net': round(ev_net, 4),
         'ev_pct': round(ev_pct, 2),
+        'fee_rate': round(fee_rate * 100, 2),
         'kelly_full': round(kelly_full, 4),
         'kelly_full_pct': round(kelly_full * 100, 2),
         'kelly_fractional': round(kelly_fractional, 4),
         'kelly_fractional_pct': round(kelly_fractional * 100, 2),
+        'kelly_adjusted': round(kelly_adjusted, 4),
+        'kelly_adjusted_pct': round(kelly_adjusted * 100, 2),
+        'kelly_adjusted_fractional': round(kelly_adjusted_fractional, 4),
+        'kelly_adjusted_fractional_pct': round(kelly_adjusted_fractional * 100, 2),
         'bankroll': bankroll,
         'fraction': fraction,
         'position_full': round(position_full, 2),
@@ -472,17 +534,22 @@ def calculate_kelly(price: float, estimated_prob: float,
         'risk_level': risk_level,
         'risk_msg': risk_msg,
         'potential_profit': round(position_fractional * (1.0 / price - 1), 2) if price > 0 else 0,
+        'potential_loss': round(potential_loss, 2),
+        'overconfidence_warning': overconfidence_warning,
     }
 
 
 def analyze_market(market_id: str) -> Dict:
-    """综合分析单个市场"""
+    """综合分析单个市场（机构级：含滑点估算、流动性风险、对手方风险）"""
     market = get_market_detail(market_id)
     if not market:
         return {'error': '市场未找到'}
 
-    # Get price history
+    # Get price history (30 days of daily data)
     history = get_price_history(market_id, interval='1d', fidelity=30)
+
+    # Also get 7-day hourly data for short-term analysis
+    history_7d = get_price_history(market_id, interval='6h', fidelity=28)
 
     # Get order book for first token
     tokens = market.get('tokens', {})
@@ -493,19 +560,44 @@ def analyze_market(market_id: str) -> Dict:
     trend = 'neutral'
     price_change_7d = 0
     price_change_30d = 0
-    if history and len(history) >= 2:
-        first_7d = history[0].get('price', 0)
-        last = history[-1].get('price', 0)
-        if first_7d > 0:
-            price_change_7d = round((last - first_7d) / first_7d * 100, 2)
-        if len(history) >= 7:
-            first_30d = history[-7].get('price', 0) if len(history) >= 7 else history[0].get('price', 0)
-            if first_30d > 0:
-                price_change_30d = round((last - first_30d) / first_30d * 100, 2)
+    volatility_30d = 0
+    trend_threshold = 5.0
 
-        if price_change_7d > 5:
+    if history and len(history) >= 2:
+        last = history[-1].get('price', 0)
+        first_price = history[0].get('price', 0)
+        # 30d change: compare first data point to last
+        if first_price > 0:
+            price_change_30d = round((last - first_price) / first_price * 100, 2)
+
+        # 7d change: find the data point ~7 entries from end (or use 7d history)
+        if len(history) >= 7:
+            price_7d_ago = history[-7].get('price', 0)
+            if price_7d_ago > 0:
+                price_change_7d = round((last - price_7d_ago) / price_7d_ago * 100, 2)
+        elif history_7d and len(history_7d) >= 2:
+            price_7d_ago = history_7d[0].get('price', 0)
+            if price_7d_ago > 0:
+                price_change_7d = round((last - price_7d_ago) / price_7d_ago * 100, 2)
+
+        # Calculate 30d volatility (standard deviation of daily returns)
+        if len(history) >= 5:
+            returns = []
+            for i in range(1, len(history)):
+                prev = history[i-1].get('price', 0)
+                curr = history[i].get('price', 0)
+                if prev > 0:
+                    returns.append((curr - prev) / prev)
+            if returns:
+                mean_ret = sum(returns) / len(returns)
+                variance = sum((r - mean_ret) ** 2 for r in returns) / len(returns)
+                volatility_30d = round((variance ** 0.5) * 100, 2)  # as percentage
+
+        # Dynamic trend threshold based on volatility
+        trend_threshold = max(5, volatility_30d * 1.5) if volatility_30d > 0 else 5.0
+        if price_change_7d > trend_threshold:
             trend = 'bullish'
-        elif price_change_7d < -5:
+        elif price_change_7d < -trend_threshold:
             trend = 'bearish'
 
     # Liquidity assessment
@@ -517,16 +609,48 @@ def analyze_market(market_id: str) -> Dict:
     elif liquidity > 10000:
         liquidity_score = 'medium'
 
+    # Order book depth analysis
+    order_book_analysis = {}
+    if order_book:
+        bids = order_book.get('bids', [])
+        asks = order_book.get('asks', [])
+        bid_depth = sum(float(b.get('size', 0)) * float(b.get('price', 0)) for b in bids[:10])
+        ask_depth = sum(float(a.get('size', 0)) * float(a.get('price', 0)) for a in asks[:10])
+        order_book_analysis = {
+            'bid_depth_10': round(bid_depth, 2),
+            'ask_depth_10': round(ask_depth, 2),
+            'spread': order_book.get('spread', 0),
+            'midpoint': order_book.get('midpoint', 0),
+        }
+
+    # Risk assessment
+    slippage_est = _estimate_slippage(liquidity, volume)
+    risk_factors = []
+    if liquidity_score == 'low':
+        risk_factors.append('低流动性：大单执行可能面临显著滑点')
+    if slippage_est > 1.0:
+        risk_factors.append(f'预估滑点{slippage_est}%：交易成本较高')
+    if order_book and order_book.get('spread', 0) > 0.03:
+        risk_factors.append(f"买卖价差{order_book['spread']:.2%}：做市深度不足")
+    if volume > 0 and liquidity > 0 and volume / liquidity > 5:
+        risk_factors.append('成交量/流动性比过高：流动性可能枯竭')
+
     return {
         'market': market,
         'history': history[-30:],  # Last 30 data points
         'order_book': order_book,
+        'order_book_analysis': order_book_analysis,
         'analysis': {
             'trend': trend,
             'price_change_7d': price_change_7d,
             'price_change_30d': price_change_30d,
+            'volatility_30d': volatility_30d,
+            'trend_threshold': round(trend_threshold, 2),
             'liquidity_score': liquidity_score,
             'volume_liquidity_ratio': round(volume / liquidity, 2) if liquidity > 0 else 0,
+            'estimated_slippage': slippage_est,
+            'risk_factors': risk_factors,
+            'risk_count': len(risk_factors),
         },
     }
 
@@ -548,7 +672,7 @@ def _get_opinion_source():
             from app.services.prediction_market.opinion import OpinionSource
             _opinion_source = OpinionSource()
         except Exception as e:
-            print(f"Opinion source init error: {e}")
+            logger.warning(f"Opinion source init error: {e}")
     return _opinion_source
 
 
@@ -560,7 +684,7 @@ def _get_polymarket_source():
             from app.services.prediction_market.polymarket import PolymarketSource
             _polymarket_source = PolymarketSource()
         except Exception as e:
-            print(f"Polymarket source init error: {e}")
+            logger.warning(f"Polymarket source init error: {e}")
     return _polymarket_source
 
 
@@ -593,12 +717,37 @@ def calculate_opinion_fee(price: float, amount: float) -> float:
     return round(fee, 2)
 
 
-def calculate_polymarket_fee(price: float, amount: float) -> float:
+def calculate_polymarket_fee(price: float, amount: float, liquidity: float = 0) -> float:
     """
-    Polymarket 手续费计算
-    基本无交易手续费，只需承担少量链上 Gas 费或滑点
+    Polymarket 手续费/滑点估算
+
+    Polymarket本身无手续费，但实际交易有：
+    1. 链上Gas费（约$0.01-0.05/笔，Polygon网络）
+    2. 价差滑点（取决于流动性）
+    3. 大单冲击成本
+
+    Args:
+        price: 价格 (0-1)
+        amount: 交易金额
+        liquidity: 市场流动性（用于估算滑点）
     """
-    return 0
+    if amount <= 0:
+        return 0
+
+    # Gas fee: 约 $0.02 per trade on Polygon
+    gas_fee = 0.02
+
+    # Slippage: based on order size vs liquidity
+    if liquidity > 0:
+        # Impact = (amount / liquidity)^0.5 * base_rate
+        impact = (amount / liquidity) ** 0.5 * 0.005
+        slippage = min(0.02, max(0.001, impact))  # 0.1% to 2%
+    else:
+        slippage = 0.005  # default 0.5% if unknown liquidity
+
+    slippage_cost = amount * slippage
+
+    return round(gas_fee + slippage_cost, 2)
 
 
 def _normalize_question(question: str) -> str:
@@ -609,49 +758,109 @@ def _normalize_question(question: str) -> str:
     # 移除多余空格
     q = re.sub(r'\s+', ' ', q)
     # 移除标点符号
-    q = re.sub(r'[?？!！.。,，]', '', q)
-    return q
+    q = re.sub(r'[?？!！.。,，\'\"]', '', q)
+    # 移除通用停用词（减少误匹配）
+    stop_words = {'will', 'the', 'a', 'an', 'is', 'are', 'be', 'by', 'in', 'on', 'at', 'to', 'of', 'for'}
+    words = [w for w in q.split() if w not in stop_words]
+    return ' '.join(words)
 
 
-def _find_matching_markets(pm_markets, op_markets):
+def _calculate_match_confidence(pm_q: str, op_q: str) -> tuple:
+    """
+    计算两个问题的匹配置信度
+
+    Returns:
+        (match_type, confidence) - confidence 0.0 to 1.0
+    """
+    import re
+
+    # Exact match
+    if pm_q == op_q:
+        return ('exact', 1.0)
+
+    # Containment match (one fully contains the other)
+    # Only if the shorter one is >60% of the longer one's length
+    shorter = min(len(pm_q), len(op_q))
+    longer = max(len(pm_q), len(op_q))
+    if longer > 0 and shorter / longer > 0.6:
+        if pm_q in op_q or op_q in pm_q:
+            return ('contains', 0.9)
+
+    # Jaccard similarity on meaningful words (min 3 chars)
+    pm_words = set(w for w in pm_q.split() if len(w) >= 3)
+    op_words = set(w for w in op_q.split() if len(w) >= 3)
+
+    if not pm_words or not op_words:
+        return ('none', 0.0)
+
+    intersection = pm_words & op_words
+    union = pm_words | op_words
+    jaccard = len(intersection) / len(union) if union else 0
+
+    # Also check bigram overlap for better precision
+    pm_bigrams = set(zip(pm_q.split()[:-1], pm_q.split()[1:]))
+    op_bigrams = set(zip(op_q.split()[:-1], op_q.split()[1:]))
+    bigram_inter = len(pm_bigrams & op_bigrams) if pm_bigrams and op_bigrams else 0
+    bigram_union = len(pm_bigrams | op_bigrams) if pm_bigrams or op_bigrams else 1
+    bigram_jaccard = bigram_inter / bigram_union
+
+    # Combined confidence: weighted average of word and bigram similarity
+    combined = jaccard * 0.6 + bigram_jaccard * 0.4
+
+    # Require at least 80% combined confidence for keyword match
+    if combined >= 0.8:
+        return ('keyword_high', round(combined, 2))
+    elif combined >= 0.6:
+        # Check if they share unique key entities (numbers, proper nouns)
+        # e.g. both mention "2024", "trump", specific amounts
+        unique_tokens = set()
+        for w in intersection:
+            if re.search(r'\d', w) or len(w) > 6:  # numbers or long words (likely proper nouns)
+                unique_tokens.add(w)
+        if len(unique_tokens) >= 2:
+            return ('keyword_entity', round(combined, 2))
+
+    return ('none', 0.0)
+
+
+def _find_matching_markets(pm_markets, op_markets, min_confidence: float = 0.6):
     """
     匹配两个平台的相同事件
 
-    使用模糊匹配：
-    1. 精确匹配（标准化后完全相同）
-    2. 包含匹配（一个包含另一个）
-    3. 关键词匹配（提取关键实体进行匹配）
+    使用多级匹配置信度：
+    1. 精确匹配（confidence=1.0）
+    2. 包含匹配（confidence=0.9，要求长度比>60%）
+    3. 高置信关键词匹配（Jaccard+bigram >= 0.8）
+    4. 实体关键词匹配（>=0.6 且包含数字/专有名词）
+
+    Args:
+        min_confidence: 最低匹配置信度（默认0.6）
     """
     matches = []
 
     for pm in pm_markets:
         pm_q = _normalize_question(pm.question)
-        if not pm_q:
+        if not pm_q or len(pm_q) < 10:
             continue
+
+        best_match = None
+        best_confidence = 0
 
         for op in op_markets:
             op_q = _normalize_question(op.question)
-            if not op_q:
+            if not op_q or len(op_q) < 10:
                 continue
 
-            # 精确匹配
-            if pm_q == op_q:
-                matches.append((pm, op, 'exact'))
-                continue
+            match_type, confidence = _calculate_match_confidence(pm_q, op_q)
 
-            # 包含匹配
-            if pm_q in op_q or op_q in pm_q:
-                matches.append((pm, op, 'contains'))
-                continue
+            if confidence >= min_confidence and confidence > best_confidence:
+                best_match = (pm, op, match_type)
+                best_confidence = confidence
 
-            # 关键词匹配（至少70%的关键词重叠）
-            pm_words = set(pm_q.split())
-            op_words = set(op_q.split())
-            if pm_words and op_words:
-                overlap = len(pm_words & op_words)
-                min_len = min(len(pm_words), len(op_words))
-                if min_len > 0 and overlap / min_len >= 0.7:
-                    matches.append((pm, op, 'keyword'))
+        if best_match:
+            # Attach confidence to the match
+            pm_ref, op_ref, mtype = best_match
+            matches.append((pm_ref, op_ref, mtype, best_confidence))
 
     return matches
 
@@ -667,7 +876,7 @@ def find_cross_platform_arbitrage(
 
     检测逻辑：
     1. 从两个平台获取市场列表
-    2. 匹配相同事件
+    2. 匹配相同事件（多级置信度过滤）
     3. 计算套利机会：
        - 策略1：Opinion买YES + Polymarket买NO
        - 策略2：Opinion买NO + Polymarket买YES
@@ -698,31 +907,36 @@ def find_cross_platform_arbitrage(
         pm_markets = pm_source.get_markets(limit=pm_limit)
         op_markets = op_source.get_markets(limit=op_limit)
     except Exception as e:
-        print(f"获取市场数据失败: {e}")
+        logger.warning(f"获取市场数据失败: {e}")
         return []
 
     if not pm_markets or not op_markets:
         return []
 
-    # 匹配相同事件
-    matches = _find_matching_markets(pm_markets, op_markets)
+    # 匹配相同事件（使用改进的置信度算法）
+    matches = _find_matching_markets(pm_markets, op_markets, min_confidence=0.6)
 
     opportunities = []
-    for pm, op, match_type in matches:
+    for pm, op, match_type, confidence in matches:
         # 策略1：Opinion买YES + Polymarket买NO
         s1_yes = op.yes_price
         s1_no = pm.no_price
         s1_sum = s1_yes + s1_no
-        s1_op_fee = calculate_opinion_fee(s1_yes, budget * s1_yes / s1_sum)
-        s1_pm_fee = calculate_polymarket_fee(s1_no, budget * s1_no / s1_sum)
+        # 按预算比例计算各平台实际投入金额
+        s1_yes_invest = budget * s1_yes / s1_sum if s1_sum > 0 else 0
+        s1_no_invest = budget * s1_no / s1_sum if s1_sum > 0 else 0
+        s1_op_fee = calculate_opinion_fee(s1_yes, s1_yes_invest)
+        s1_pm_fee = calculate_polymarket_fee(s1_no, s1_no_invest)
         s1_total_fee = s1_op_fee + s1_pm_fee
 
         # 策略2：Opinion买NO + Polymarket买YES
         s2_no = op.no_price
         s2_yes = pm.yes_price
         s2_sum = s2_no + s2_yes
-        s2_op_fee = calculate_opinion_fee(s2_no, budget * s2_no / s2_sum)
-        s2_pm_fee = calculate_polymarket_fee(s2_yes, budget * s2_yes / s2_sum)
+        s2_no_invest = budget * s2_no / s2_sum if s2_sum > 0 else 0
+        s2_yes_invest = budget * s2_yes / s2_sum if s2_sum > 0 else 0
+        s2_op_fee = calculate_opinion_fee(s2_no, s2_no_invest)
+        s2_pm_fee = calculate_polymarket_fee(s2_yes, s2_yes_invest)
         s2_total_fee = s2_op_fee + s2_pm_fee
 
         # 选择最优策略
@@ -735,21 +949,37 @@ def find_cross_platform_arbitrage(
                 best_sum = s1_sum
                 best_fee = s1_total_fee
                 best_profit = s1_profit
+                best_yes = s1_yes
+                best_no = s1_no
+                best_yes_fee_rate = s1_op_fee / s1_yes_invest if s1_yes_invest > 0 else 0
+                best_no_fee_rate = 0
             else:
                 best = 'strategy_2'
                 best_sum = s2_sum
                 best_fee = s2_total_fee
                 best_profit = s2_profit
+                best_yes = s2_yes
+                best_no = s2_no
+                best_yes_fee_rate = 0
+                best_no_fee_rate = s2_op_fee / s2_no_invest if s2_no_invest > 0 else 0
         elif s1_sum < 1:
             best = 'strategy_1'
             best_sum = s1_sum
             best_fee = s1_total_fee
             best_profit = (1 - s1_sum) * budget - s1_total_fee
+            best_yes = s1_yes
+            best_no = s1_no
+            best_yes_fee_rate = s1_op_fee / s1_yes_invest if s1_yes_invest > 0 else 0
+            best_no_fee_rate = 0
         elif s2_sum < 1:
             best = 'strategy_2'
             best_sum = s2_sum
             best_fee = s2_total_fee
             best_profit = (1 - s2_sum) * budget - s2_total_fee
+            best_yes = s2_yes
+            best_no = s2_no
+            best_yes_fee_rate = 0
+            best_no_fee_rate = s2_op_fee / s2_no_invest if s2_no_invest > 0 else 0
         else:
             continue  # 没有套利机会
 
@@ -759,30 +989,31 @@ def find_cross_platform_arbitrage(
         if profit_rate < min_profit:
             continue
 
-        # 计算最优配资
-        if best == 'strategy_1':
-            allocation = calculate_optimal_allocation(
-                yes_price=s1_yes,
-                no_price=s1_no,
-                budget=budget,
-                yes_fee_rate=calculate_opinion_fee(s1_yes, 100) / 100,
-                no_fee_rate=0
-            )
-        else:
-            allocation = calculate_optimal_allocation(
-                yes_price=s2_yes,
-                no_price=s2_no,
-                budget=budget,
-                yes_fee_rate=0,
-                no_fee_rate=calculate_opinion_fee(s2_no, 100) / 100
-            )
+        # 使用正确的费率计算最优配资
+        allocation = calculate_optimal_allocation(
+            yes_price=best_yes,
+            no_price=best_no,
+            budget=budget,
+            yes_fee_rate=best_yes_fee_rate,
+            no_fee_rate=best_no_fee_rate,
+        )
+
+        # 流动性风险评估
+        pm_liq = getattr(pm, 'liquidity', 0) or 0
+        op_liq = getattr(op, 'liquidity', 0) or 0
+        liquidity_risk = 'low'
+        if pm_liq < 5000 or op_liq < 5000:
+            liquidity_risk = 'high'
+        elif pm_liq < 50000 or op_liq < 50000:
+            liquidity_risk = 'medium'
 
         opportunities.append({
             'question': pm.question,
             'match_type': match_type,
+            'match_confidence': confidence,
             # 策略1详情
             'strategy_1': {
-                'description': f'Opinion买YES + Polymarket买NO',
+                'description': 'Opinion买YES + Polymarket买NO',
                 'opinion_yes_price': round(s1_yes, 4),
                 'polymarket_no_price': round(s1_no, 4),
                 'price_sum': round(s1_sum, 4),
@@ -790,7 +1021,7 @@ def find_cross_platform_arbitrage(
             },
             # 策略2详情
             'strategy_2': {
-                'description': f'Opinion买NO + Polymarket买YES',
+                'description': 'Opinion买NO + Polymarket买YES',
                 'opinion_no_price': round(s2_no, 4),
                 'polymarket_yes_price': round(s2_yes, 4),
                 'price_sum': round(s2_sum, 4),
@@ -804,6 +1035,8 @@ def find_cross_platform_arbitrage(
             'profit_rate': round(profit_rate, 2),
             # 配资建议
             'allocation': allocation,
+            # 风险评估
+            'liquidity_risk': liquidity_risk,
             # 市场信息
             'polymarket': {
                 'id': pm.id,

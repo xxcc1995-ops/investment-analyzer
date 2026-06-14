@@ -1,7 +1,50 @@
 import { useState, useEffect, useCallback } from 'react'
 import axios from 'axios'
+import { PageSection, TabBar, DataTable, LoadingSpinner, EmptyState, StatCard, StatCardGroup, Tag } from '../components/ui'
+import type { Column } from '../components/ui'
 
 const API_BASE = '/api'
+
+interface RiskTag {
+  tag: string
+  level: 'high' | 'medium' | 'low'
+  desc: string
+  mitigation?: string
+  recent_policy?: string
+}
+
+interface ExchangeRateData {
+  latest_rate: number
+  latest_date: string
+  change_7d_pct: number
+  change_30d_pct: number
+  change_90d_pct: number
+  trend: string
+  trend_desc: string
+  export_impact: 'positive' | 'negative' | 'neutral'
+  high_fx_sensitivity_stocks: { code: string; name: string; est_overseas_pct: number; revenue_fx_impact_pct: number }[]
+  update_time: string
+  data_source: string
+}
+
+interface PeerRanking {
+  roe_rank?: number
+  roe_total?: number
+  dividend_rank?: number
+  dividend_total?: number
+  pe_rank?: number
+  pe_total?: number
+  overseas_rank?: number
+  overseas_total?: number
+}
+
+interface TariffRiskInfo {
+  risk_level?: string
+  score?: number
+  detail?: string
+  mitigation?: string
+  recent_policy?: string
+}
 
 interface ExportStock {
   code: string
@@ -37,7 +80,16 @@ interface ExportStock {
   duan_detail: string
   vi_avg_score: number
   combined_score: number
+  risk_adjusted_score: number
+  risk_tags: RiskTag[]
+  risk_penalty: number
   match_level: 'excellent' | 'good' | 'fair' | 'poor'
+  peer_rankings?: PeerRanking
+  peer_stats?: Record<string, { mean: number; median: number; min: number; max: number }>
+  peer_count?: number
+  tariff_risk?: TariffRiskInfo
+  main_export_markets?: string[]
+  competitive_advantage?: string
 }
 
 interface ScoringDimension {
@@ -82,6 +134,35 @@ interface Philosophy {
   hard_filters: string[]
   industry_categories: IndustryCategory[]
   value_investing_integration?: ValueIntegration
+  risk_tags_system?: {
+    title: string
+    description: string
+    tags: { tag: string; level: string; desc: string }[]
+    scoring_impact: string
+    new_features?: string[]
+  }
+  tariff_risk_matrix?: {
+    title: string
+    description: string
+    disclaimer: string
+    critical_risks: { industry: string; score: number; detail: string }[]
+    high_risks: { industry: string; score: number; detail: string }[]
+    low_risks: { industry: string; score: number; detail: string }[]
+  }
+  exchange_rate_monitoring?: {
+    title: string
+    description: string
+    data_source: string
+    update_frequency: string
+    metrics: string[]
+    impact_logic: string
+  }
+  peer_comparison?: {
+    title: string
+    description: string
+    dimensions: string[]
+    additional_info: string
+  }
 }
 
 export default function ExportChampions() {
@@ -92,6 +173,8 @@ export default function ExportChampions() {
   const [total, setTotal] = useState(0)
   const [philosophy, setPhilosophy] = useState<Philosophy | null>(null)
   const [expandedStock, setExpandedStock] = useState<string | null>(null)
+  const [fxData, setFxData] = useState<ExchangeRateData | null>(null)
+  const [peerComparison, setPeerComparison] = useState<Record<string, any> | null>(null)
 
   // Screener params
   const [market, setMarket] = useState<'all' | 'A' | 'HK'>('all')
@@ -121,6 +204,8 @@ export default function ExportChampions() {
       setStocks(res.data.stocks || [])
       setTotal(res.data.total || 0)
       setUpdateTime(res.data.update_time || '')
+      setFxData(res.data.exchange_rate || null)
+      setPeerComparison(res.data.peer_comparison || null)
     } catch (e) {
       console.error('筛选失败:', e)
     } finally {
@@ -189,24 +274,31 @@ export default function ExportChampions() {
     }
   }
 
+  const getRiskTagColor = (level: string) => {
+    switch (level) {
+      case 'high': return '#f85149'
+      case 'medium': return '#d29922'
+      case 'low': return '#8b949e'
+      default: return '#8b949e'
+    }
+  }
+
   return (
     <div className="cb-page">
-      <div className="stock-header">
-        <div className="stock-title-row">
-          <div>
-            <h2>出口冠军筛选</h2>
-            <span className="stock-code">筛选具备全球竞争力且分红稳健的中国企业</span>
-          </div>
-        </div>
-      </div>
+      <PageSection title="出口冠军筛选" compact>
+        <span style={{ color: 'var(--text-secondary)', fontSize: 13 }}>筛选具备全球竞争力且分红稳健的中国企业</span>
+      </PageSection>
 
-      {/* Tabs */}
-      <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
-        <button className={`tab-btn ${activeTab === 'philosophy' ? 'active' : ''}`}
-          onClick={() => setActiveTab('philosophy')}>筛选理念</button>
-        <button className={`tab-btn ${activeTab === 'screener' ? 'active' : ''}`}
-          onClick={() => setActiveTab('screener')}>股票筛选</button>
-      </div>
+      <TabBar
+        tabs={[
+          { key: 'philosophy', label: '筛选理念' },
+          { key: 'screener', label: '股票筛选' },
+        ]}
+        activeKey={activeTab}
+        onChange={(key) => setActiveTab(key as 'philosophy' | 'screener')}
+        size="small"
+        style={{ marginBottom: 16 }}
+      />
 
       {/* Philosophy Tab */}
       {activeTab === 'philosophy' && philosophy && (
@@ -236,8 +328,7 @@ export default function ExportChampions() {
           </div>
 
           {/* Japan Mirror */}
-          <div className="arb-risk-section" style={{ marginBottom: 16 }}>
-            <h3 style={{ color: 'var(--text-primary)', marginBottom: 12 }}>{philosophy.japan_mirror.title}</h3>
+          <PageSection title={philosophy.japan_mirror.title} style={{ marginBottom: 16 }}>
             <div style={{
               background: 'var(--bg-secondary)', borderRadius: 8, padding: 16,
               border: '1px solid var(--border-primary)', marginBottom: 12,
@@ -252,11 +343,10 @@ export default function ExportChampions() {
             }}>
               {philosophy.japan_mirror.lesson}
             </div>
-          </div>
+          </PageSection>
 
           {/* China Context */}
-          <div className="arb-risk-section" style={{ marginBottom: 16 }}>
-            <h3 style={{ color: 'var(--text-primary)', marginBottom: 12 }}>{philosophy.china_context.title}</h3>
+          <PageSection title={philosophy.china_context.title} style={{ marginBottom: 16 }}>
             <div style={{
               background: 'var(--bg-secondary)', borderRadius: 8, padding: 16,
               border: '1px solid var(--border-primary)', marginBottom: 12,
@@ -271,11 +361,10 @@ export default function ExportChampions() {
             }}>
               {philosophy.china_context.implication}
             </div>
-          </div>
+          </PageSection>
 
           {/* Why Export + Dividend */}
-          <div className="arb-risk-section" style={{ marginBottom: 16 }}>
-            <h3 style={{ color: 'var(--text-primary)', marginBottom: 12 }}>{philosophy.why_export_why_dividend.title}</h3>
+          <PageSection title={philosophy.why_export_why_dividend.title} style={{ marginBottom: 16 }}>
             <div style={{ display: 'grid', gap: 8 }}>
               {philosophy.why_export_why_dividend.reasons.map((r, i) => (
                 <div key={i} style={{
@@ -287,7 +376,7 @@ export default function ExportChampions() {
                 </div>
               ))}
             </div>
-          </div>
+          </PageSection>
 
           {/* Hard Filters */}
           <div className="arb-notes" style={{ marginBottom: 16 }}>
@@ -302,8 +391,7 @@ export default function ExportChampions() {
           </div>
 
           {/* Scoring Dimensions */}
-          <div className="arb-risk-section" style={{ marginBottom: 16 }}>
-            <h3 style={{ color: 'var(--text-primary)', marginBottom: 12 }}>评分维度 (满分100)</h3>
+          <PageSection title="评分维度 (满分100)" style={{ marginBottom: 16 }}>
             {philosophy.scoring_dimensions.map((dim, i) => (
               <div key={i} style={{
                 background: 'var(--bg-secondary)',
@@ -331,11 +419,10 @@ export default function ExportChampions() {
                 )}
               </div>
             ))}
-          </div>
+          </PageSection>
 
           {/* Industry Categories */}
-          <div className="arb-risk-section">
-            <h3 style={{ color: 'var(--text-primary)', marginBottom: 12 }}>覆盖行业</h3>
+          <PageSection title="覆盖行业">
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: 12 }}>
               {philosophy.industry_categories.map((cat, i) => (
                 <div key={i} style={{
@@ -352,14 +439,184 @@ export default function ExportChampions() {
                 </div>
               ))}
             </div>
-          </div>
+          </PageSection>
+
+          {/* Risk Tags System */}
+          {philosophy.risk_tags_system && (
+            <PageSection title={philosophy.risk_tags_system.title} style={{ marginTop: 16 }}>
+              <div style={{
+                background: 'linear-gradient(135deg, rgba(248,81,73,0.12), rgba(210,153,34,0.08))',
+                borderRadius: 10, padding: 16, marginBottom: 16,
+                border: '1px solid rgba(248,81,73,0.3)',
+              }}>
+                <p style={{ color: 'var(--text-secondary)', margin: '0 0 8px', fontSize: 13, lineHeight: 1.7 }}>
+                  {philosophy.risk_tags_system.description}
+                </p>
+                <div style={{ fontSize: 13, color: '#f85149', fontWeight: 600 }}>
+                  {philosophy.risk_tags_system.scoring_impact}
+                </div>
+              </div>
+
+              <div style={{ display: 'grid', gap: 8 }}>
+                {philosophy.risk_tags_system.tags.map((tag, i) => (
+                  <div key={i} style={{
+                    padding: '10px 14px',
+                    background: 'var(--bg-secondary)',
+                    borderRadius: 8,
+                    border: '1px solid var(--border-primary)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 12,
+                  }}>
+                    <span style={{
+                      color: getRiskTagColor(tag.level),
+                      fontWeight: 600,
+                      fontSize: 12,
+                      padding: '2px 8px',
+                      borderRadius: 6,
+                      background: `${getRiskTagColor(tag.level)}15`,
+                      border: `1px solid ${getRiskTagColor(tag.level)}30`,
+                      minWidth: 100,
+                      textAlign: 'center',
+                    }}>
+                      {tag.tag}
+                    </span>
+                    <span style={{ fontSize: 13, color: 'var(--text-secondary)' }}>
+                      {tag.desc}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </PageSection>
+          )}
+
+          {/* Tariff Risk Matrix */}
+          {philosophy.tariff_risk_matrix && (
+            <PageSection title={philosophy.tariff_risk_matrix.title} style={{ marginTop: 16 }}>
+              <div style={{
+                background: 'linear-gradient(135deg, rgba(248,81,73,0.12), rgba(210,153,34,0.08))',
+                borderRadius: 10, padding: 16, marginBottom: 16,
+                border: '1px solid rgba(248,81,73,0.3)',
+              }}>
+                <p style={{ color: 'var(--text-secondary)', margin: '0 0 8px', fontSize: 13, lineHeight: 1.7 }}>
+                  {philosophy.tariff_risk_matrix.description}
+                </p>
+                <div style={{ fontSize: 12, color: '#d29922' }}>
+                  {philosophy.tariff_risk_matrix.disclaimer}
+                </div>
+              </div>
+
+              <h4 style={{ color: '#f85149', marginBottom: 8 }}>极高风险行业</h4>
+              <div style={{ display: 'grid', gap: 8, marginBottom: 16 }}>
+                {philosophy.tariff_risk_matrix.critical_risks.map((r, i) => (
+                  <div key={i} style={{
+                    padding: '10px 14px', background: 'rgba(248,81,73,0.08)', borderRadius: 8,
+                    border: '1px solid rgba(248,81,73,0.2)', display: 'flex', alignItems: 'center', gap: 12,
+                  }}>
+                    <span style={{
+                      color: '#f85149', fontWeight: 700, fontSize: 14, padding: '2px 8px',
+                      borderRadius: 6, background: 'rgba(248,81,73,0.15)', minWidth: 40, textAlign: 'center',
+                    }}>
+                      {r.score}
+                    </span>
+                    <span style={{ fontWeight: 600, color: 'var(--text-primary)' }}>{r.industry}</span>
+                    <span style={{ color: 'var(--text-secondary)', fontSize: 13 }}>{r.detail}</span>
+                  </div>
+                ))}
+              </div>
+
+              <h4 style={{ color: '#d29922', marginBottom: 8 }}>高风险行业</h4>
+              <div style={{ display: 'grid', gap: 6, marginBottom: 16 }}>
+                {philosophy.tariff_risk_matrix.high_risks.map((r, i) => (
+                  <div key={i} style={{
+                    padding: '8px 12px', background: 'rgba(210,153,34,0.06)', borderRadius: 6,
+                    border: '1px solid rgba(210,153,34,0.2)', display: 'flex', alignItems: 'center', gap: 10,
+                  }}>
+                    <span style={{ color: '#d29922', fontWeight: 700, fontSize: 13 }}>{r.score}</span>
+                    <span style={{ fontWeight: 600, color: 'var(--text-primary)', fontSize: 13 }}>{r.industry}</span>
+                    <span style={{ color: 'var(--text-secondary)', fontSize: 12 }}>{r.detail}</span>
+                  </div>
+                ))}
+              </div>
+
+              <h4 style={{ color: '#3fb950', marginBottom: 8 }}>低风险行业</h4>
+              <div style={{ display: 'grid', gap: 6 }}>
+                {philosophy.tariff_risk_matrix.low_risks.map((r, i) => (
+                  <div key={i} style={{
+                    padding: '8px 12px', background: 'rgba(63,185,80,0.04)', borderRadius: 6,
+                    border: '1px solid rgba(63,185,80,0.15)', display: 'flex', alignItems: 'center', gap: 10,
+                  }}>
+                    <span style={{ color: '#3fb950', fontWeight: 700, fontSize: 13 }}>{r.score}</span>
+                    <span style={{ fontWeight: 600, color: 'var(--text-primary)', fontSize: 13 }}>{r.industry}</span>
+                    <span style={{ color: 'var(--text-secondary)', fontSize: 12 }}>{r.detail}</span>
+                  </div>
+                ))}
+              </div>
+            </PageSection>
+          )}
+
+          {/* Exchange Rate Monitoring */}
+          {philosophy.exchange_rate_monitoring && (
+            <PageSection title={philosophy.exchange_rate_monitoring.title} style={{ marginTop: 16 }}>
+              <div style={{
+                background: 'linear-gradient(135deg, rgba(88,166,255,0.12), rgba(63,185,80,0.08))',
+                borderRadius: 10, padding: 16, marginBottom: 16,
+                border: '1px solid rgba(88,166,255,0.3)',
+              }}>
+                <p style={{ color: 'var(--text-secondary)', margin: '0 0 8px', fontSize: 13, lineHeight: 1.7 }}>
+                  {philosophy.exchange_rate_monitoring.description}
+                </p>
+                <div style={{ fontSize: 12, color: '#58a6ff' }}>
+                  数据源: {philosophy.exchange_rate_monitoring.data_source} | 更新频率: {philosophy.exchange_rate_monitoring.update_frequency}
+                </div>
+              </div>
+              <div style={{
+                padding: '10px 14px', background: 'var(--bg-secondary)', borderRadius: 8,
+                border: '1px solid var(--border-primary)', marginBottom: 12,
+              }}>
+                <div style={{ fontWeight: 600, color: 'var(--text-primary)', marginBottom: 4 }}>影响逻辑</div>
+                <div style={{ fontSize: 13, color: '#d29922', lineHeight: 1.6 }}>
+                  {philosophy.exchange_rate_monitoring.impact_logic}
+                </div>
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 8 }}>
+                {philosophy.exchange_rate_monitoring.metrics.map((m, i) => (
+                  <div key={i} style={{
+                    padding: '8px 12px', background: 'var(--bg-secondary)', borderRadius: 6,
+                    border: '1px solid var(--border-primary)', fontSize: 13, color: 'var(--text-secondary)',
+                  }}>
+                    {m}
+                  </div>
+                ))}
+              </div>
+            </PageSection>
+          )}
+
+          {/* Peer Comparison */}
+          {philosophy.peer_comparison && (
+            <PageSection title={philosophy.peer_comparison.title} style={{ marginTop: 16 }}>
+              <p style={{ color: 'var(--text-secondary)', margin: '0 0 12px', fontSize: 13, lineHeight: 1.7 }}>
+                {philosophy.peer_comparison.description}
+              </p>
+              <div style={{ display: 'grid', gap: 8, marginBottom: 12 }}>
+                {philosophy.peer_comparison.dimensions.map((d, i) => (
+                  <div key={i} style={{
+                    padding: '8px 12px', background: 'var(--bg-secondary)', borderRadius: 6,
+                    border: '1px solid var(--border-primary)', fontSize: 13, color: 'var(--text-secondary)',
+                  }}>
+                    {d}
+                  </div>
+                ))}
+              </div>
+              <div style={{ fontSize: 12, color: '#58a6ff' }}>
+                {philosophy.peer_comparison.additional_info}
+              </div>
+            </PageSection>
+          )}
 
           {/* Value Investing Integration */}
           {philosophy.value_investing_integration && (
-            <div className="arb-risk-section" style={{ marginTop: 16 }}>
-              <h3 style={{ color: 'var(--text-primary)', marginBottom: 12 }}>
-                {philosophy.value_investing_integration.title}
-              </h3>
+            <PageSection title={philosophy.value_investing_integration.title} style={{ marginTop: 16 }}>
               <div style={{
                 background: 'linear-gradient(135deg, rgba(63,185,80,0.12), rgba(210,153,34,0.08))',
                 borderRadius: 10, padding: 16, marginBottom: 16,
@@ -438,7 +695,7 @@ export default function ExportChampions() {
                   ))}
                 </div>
               </div>
-            </div>
+            </PageSection>
           )}
         </div>
       )}
@@ -451,6 +708,36 @@ export default function ExportChampions() {
             display: 'flex', gap: 12, marginBottom: 16, flexWrap: 'wrap',
             alignItems: 'center',
           }}>
+            {/* Exchange Rate Widget */}
+            {fxData && (
+              <div style={{
+                display: 'flex', alignItems: 'center', gap: 8,
+                padding: '6px 12px', borderRadius: 6,
+                background: fxData.export_impact === 'positive' ? 'rgba(63,185,80,0.1)' :
+                           fxData.export_impact === 'negative' ? 'rgba(248,81,73,0.1)' : 'var(--bg-secondary)',
+                border: `1px solid ${fxData.export_impact === 'positive' ? 'rgba(63,185,80,0.3)' :
+                         fxData.export_impact === 'negative' ? 'rgba(248,81,73,0.3)' : 'var(--border-primary)'}`,
+                fontSize: 12,
+              }}>
+                <span style={{ color: 'var(--text-secondary)' }}>USD/CNY</span>
+                <span style={{ fontWeight: 700, color: 'var(--text-primary)' }}>{fxData.latest_rate}</span>
+                <span style={{
+                  color: fxData.change_30d_pct > 0 ? '#3fb950' : fxData.change_30d_pct < 0 ? '#f85149' : 'var(--text-secondary)',
+                  fontWeight: 600,
+                }}>
+                  {fxData.change_30d_pct > 0 ? '+' : ''}{fxData.change_30d_pct}% (30d)
+                </span>
+                <span style={{
+                  padding: '1px 6px', borderRadius: 4, fontSize: 11,
+                  background: fxData.export_impact === 'positive' ? 'rgba(63,185,80,0.15)' :
+                             fxData.export_impact === 'negative' ? 'rgba(248,81,73,0.15)' : 'rgba(139,148,158,0.15)',
+                  color: fxData.export_impact === 'positive' ? '#3fb950' :
+                         fxData.export_impact === 'negative' ? '#f85149' : '#8b949e',
+                }}>
+                  {fxData.trend}
+                </span>
+              </div>
+            )}
             <select value={market} onChange={e => setMarket(e.target.value as any)}
               style={{ padding: '6px 10px', borderRadius: 6, background: 'var(--bg-secondary)', color: 'var(--text-primary)', border: '1px solid var(--border-primary)' }}>
               <option value="all">全部市场</option>
@@ -494,7 +781,7 @@ export default function ExportChampions() {
 
           {/* Results Table */}
           {loading ? (
-            <div className="loading"><div className="spinner"></div>筛选中...</div>
+            <LoadingSpinner text="筛选中..." />
           ) : (
             <table className="arb-table">
               <thead>
@@ -513,6 +800,8 @@ export default function ExportChampions() {
                   <th>李录</th>
                   <th>段永平</th>
                   <th>综合</th>
+                  <th>风险调整</th>
+                  <th>风险标签</th>
                   <th>匹配</th>
                 </tr>
               </thead>
@@ -571,6 +860,35 @@ export default function ExportChampions() {
                           </span>
                         </td>
                         <td>
+                          <span style={{ color: getScoreColor(stock.risk_adjusted_score), fontWeight: 700, fontSize: 14 }}>
+                            {stock.risk_adjusted_score}
+                          </span>
+                          {stock.risk_penalty > 0 && (
+                            <span style={{ color: '#f85149', fontSize: 10, marginLeft: 4 }}>
+                              (-{stock.risk_penalty})
+                            </span>
+                          )}
+                        </td>
+                        <td>
+                          <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', maxWidth: 120 }}>
+                            {stock.risk_tags?.slice(0, 2).map((tag, i) => (
+                              <span key={i} style={{
+                                color: getRiskTagColor(tag.level),
+                                fontSize: 10,
+                                padding: '1px 4px',
+                                borderRadius: 4,
+                                background: `${getRiskTagColor(tag.level)}15`,
+                                border: `1px solid ${getRiskTagColor(tag.level)}30`,
+                              }}>
+                                {tag.tag}
+                              </span>
+                            ))}
+                            {(stock.risk_tags?.length || 0) > 2 && (
+                              <span style={{ color: '#8b949e', fontSize: 10 }}>+{stock.risk_tags!.length - 2}</span>
+                            )}
+                          </div>
+                        </td>
+                        <td>
                           <span style={{
                             color: getMatchLevelColor(stock.match_level),
                             fontSize: 12,
@@ -584,7 +902,7 @@ export default function ExportChampions() {
                       </tr>
                       {isExpanded && (
                         <tr key={`${stock.code}-detail`}>
-                          <td colSpan={15} style={{ padding: '12px 16px', background: 'var(--bg-secondary)' }}>
+                          <td colSpan={17} style={{ padding: '12px 16px', background: 'var(--bg-secondary)' }}>
                             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, fontSize: 13, color: 'var(--text-secondary)', lineHeight: 1.8 }}>
                               <div>
                                 <strong style={{ color: '#58a6ff' }}>出口竞争力 ({stock.export_score}分)</strong>
@@ -634,6 +952,126 @@ export default function ExportChampions() {
                                   <span>报告期: {stock.report_period || '-'}</span>
                                 </div>
                               </div>
+
+                              {/* 竞争优势 & 主要出口市场 */}
+                              <div>
+                                <strong style={{ color: '#58a6ff' }}>竞争优势 & 出口市场</strong>
+                                <div style={{ marginTop: 4 }}>
+                                  {stock.competitive_advantage && (
+                                    <div style={{ marginBottom: 4 }}>
+                                      <span style={{ color: '#d29922', fontWeight: 600 }}>竞争壁垒: </span>
+                                      {stock.competitive_advantage}
+                                    </div>
+                                  )}
+                                  {stock.main_export_markets && stock.main_export_markets.length > 0 && (
+                                    <div>
+                                      <span style={{ color: '#d29922', fontWeight: 600 }}>主要市场: </span>
+                                      {stock.main_export_markets.join(' / ')}
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
+
+                              {/* 同行业对比 */}
+                              {stock.peer_rankings && stock.peer_count && stock.peer_count > 1 && (
+                                <div>
+                                  <strong style={{ color: '#bc8cff' }}>同行业排名 ({stock.industry}, {stock.peer_count}家)</strong>
+                                  <div style={{ marginTop: 4, display: 'flex', gap: 12, flexWrap: 'wrap' }}>
+                                    {stock.peer_rankings.roe_rank != null && (
+                                      <span>ROE排名: <b style={{ color: stock.peer_rankings.roe_rank <= Math.ceil((stock.peer_rankings.roe_total ?? 0) / 3) ? '#3fb950' : '#d29922' }}>
+                                        {stock.peer_rankings.roe_rank}/{stock.peer_rankings.roe_total}
+                                      </b></span>
+                                    )}
+                                    {stock.peer_rankings.dividend_rank != null && (
+                                      <span>股息率排名: <b style={{ color: stock.peer_rankings.dividend_rank <= Math.ceil((stock.peer_rankings.dividend_total ?? 0) / 3) ? '#3fb950' : '#d29922' }}>
+                                        {stock.peer_rankings.dividend_rank}/{stock.peer_rankings.dividend_total}
+                                      </b></span>
+                                    )}
+                                    {stock.peer_rankings.pe_rank != null && (
+                                      <span>估值排名: <b style={{ color: stock.peer_rankings.pe_rank <= Math.ceil((stock.peer_rankings.pe_total ?? 0) / 3) ? '#3fb950' : '#d29922' }}>
+                                        {stock.peer_rankings.pe_rank}/{stock.peer_rankings.pe_total}
+                                      </b> (越低越好)</span>
+                                    )}
+                                    {stock.peer_rankings.overseas_rank != null && (
+                                      <span>海外占比排名: <b style={{ color: stock.peer_rankings.overseas_rank <= Math.ceil((stock.peer_rankings.overseas_total ?? 0) / 3) ? '#3fb950' : '#d29922' }}>
+                                        {stock.peer_rankings.overseas_rank}/{stock.peer_rankings.overseas_total}
+                                      </b></span>
+                                    )}
+                                  </div>
+                                  {stock.peer_stats && (
+                                    <div style={{ marginTop: 6, fontSize: 12, color: 'var(--text-secondary)' }}>
+                                      行业均值 -- ROE: {stock.peer_stats.roe?.mean ?? '-'}% | 毛利率: {stock.peer_stats.gross_margin?.mean ?? '-'}% | 股息率: {stock.peer_stats.dividend_yield?.mean ?? '-'}%
+                                    </div>
+                                  )}
+                                </div>
+                              )}
+
+                              {/* 关税/贸易政策风险 */}
+                              {stock.tariff_risk && stock.tariff_risk.detail && (
+                                <div style={{ gridColumn: 'span 2' }}>
+                                  <strong style={{ color: stock.tariff_risk.risk_level === 'critical' ? '#f85149' : stock.tariff_risk.risk_level === 'high' ? '#d29922' : '#58a6ff' }}>
+                                    关税/贸易政策风险评估
+                                  </strong>
+                                  <div style={{
+                                    marginTop: 6, padding: '10px 14px', borderRadius: 8,
+                                    background: stock.tariff_risk.risk_level === 'critical' ? 'rgba(248,81,73,0.08)' : 'var(--bg-primary)',
+                                    border: `1px solid ${stock.tariff_risk.risk_level === 'critical' ? 'rgba(248,81,73,0.3)' : 'var(--border-primary)'}`,
+                                  }}>
+                                    <div style={{ marginBottom: 4 }}>
+                                      <span style={{ fontWeight: 600 }}>风险等级: </span>
+                                      <span style={{
+                                        color: stock.tariff_risk.risk_level === 'critical' ? '#f85149' : stock.tariff_risk.risk_level === 'high' ? '#d29922' : '#8b949e',
+                                        fontWeight: 700,
+                                      }}>
+                                        {stock.tariff_risk.risk_level === 'critical' ? '极高' : stock.tariff_risk.risk_level === 'high' ? '高' : stock.tariff_risk.risk_level === 'medium' ? '中' : '低'}
+                                        ({stock.tariff_risk.score}/100)
+                                      </span>
+                                    </div>
+                                    <div style={{ marginBottom: 4 }}>{stock.tariff_risk.detail}</div>
+                                    {stock.tariff_risk.recent_policy && (
+                                      <div style={{ color: '#d29922', marginBottom: 4 }}>最新政策: {stock.tariff_risk.recent_policy}</div>
+                                    )}
+                                    {stock.tariff_risk.mitigation && (
+                                      <div style={{ color: '#3fb950' }}>应对措施: {stock.tariff_risk.mitigation}</div>
+                                    )}
+                                  </div>
+                                </div>
+                              )}
+
+                              {stock.risk_tags && stock.risk_tags.length > 0 && (
+                                <div style={{ gridColumn: 'span 2' }}>
+                                  <strong style={{ color: '#f85149' }}>风险提示</strong>
+                                  <div style={{ marginTop: 8, display: 'grid', gap: 6 }}>
+                                    {stock.risk_tags.map((tag, i) => (
+                                      <div key={i} style={{
+                                        padding: '8px 12px',
+                                        background: `${getRiskTagColor(tag.level)}08`,
+                                        borderRadius: 6,
+                                        borderLeft: `3px solid ${getRiskTagColor(tag.level)}`,
+                                      }}>
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: tag.mitigation ? 4 : 0 }}>
+                                          <span style={{
+                                            color: getRiskTagColor(tag.level),
+                                            fontWeight: 600,
+                                            fontSize: 12,
+                                            padding: '2px 6px',
+                                            borderRadius: 4,
+                                            background: `${getRiskTagColor(tag.level)}15`,
+                                          }}>
+                                            {tag.tag}
+                                          </span>
+                                          <span style={{ fontSize: 12 }}>{tag.desc}</span>
+                                        </div>
+                                        {tag.mitigation && (
+                                          <div style={{ fontSize: 11, color: '#3fb950', paddingLeft: 8, marginTop: 2 }}>
+                                            应对: {tag.mitigation}
+                                          </div>
+                                        )}
+                                      </div>
+                                    ))}
+                                  </div>
+                                </div>
+                              )}
                             </div>
                           </td>
                         </tr>
@@ -643,8 +1081,8 @@ export default function ExportChampions() {
                 })}
                 {stocks.length === 0 && !loading && (
                   <tr>
-                    <td colSpan={15} style={{ textAlign: 'center', padding: '40px', color: 'var(--text-muted)' }}>
-                      暂无符合条件的股票
+                    <td colSpan={17}>
+                      <EmptyState title="暂无符合条件的股票" description="请调整筛选条件后重试" />
                     </td>
                   </tr>
                 )}

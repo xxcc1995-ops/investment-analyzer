@@ -286,6 +286,147 @@ def get_usdcny_rate() -> float:
     return 7.25
 
 
+def get_hkdcny_rate() -> float:
+    """获取港币人民币汇率（带缓存）
+
+    优先从新浪外汇获取实时汇率，降级到基于USD/CNY和USD/HKD交叉计算。
+    缓存1小时。
+
+    Returns:
+        HKD/CNY 汇率，失败返回默认值 0.92
+    """
+    cache_key = "hkdcny_rate"
+    cached_rate = get_cache(cache_key, TTL_DAILY)
+    if cached_rate is not None:
+        return cached_rate
+
+    # 方法1：新浪外汇直接获取 HKD/CNY
+    try:
+        sina_data = get_sina_realtime(["fx_shkdcny"])
+        if "fx_shkdcny" in sina_data and len(sina_data["fx_shkdcny"]) > 1:
+            rate = safe_float(sina_data["fx_shkdcny"][1])
+            if rate and rate > 0:
+                set_cache(cache_key, rate)
+                return rate
+    except Exception as e:
+        logger.debug(f"获取新浪HKD/CNY汇率失败: {e}")
+
+    # 方法2：通过USD/CNY和USD/HKD交叉计算
+    try:
+        usdcny = get_usdcny_rate()
+        sina_data = get_sina_realtime(["fx_susdhkd"])
+        if "fx_susdhkd" in sina_data and len(sina_data["fx_susdhkd"]) > 1:
+            usdhkd = safe_float(sina_data["fx_susdhkd"][1])
+            if usdhkd and usdhkd > 0:
+                rate = round(usdcny / usdhkd, 4)
+                set_cache(cache_key, rate)
+                return rate
+    except Exception as e:
+        logger.debug(f"交叉计算HKD/CNY汇率失败: {e}")
+
+    # 方法3：使用USD/CNY近似计算（USD/HKD约7.78-7.85）
+    try:
+        usdcny = get_usdcny_rate()
+        rate = round(usdcny / 7.82, 4)  # 近似中间值
+        set_cache(cache_key, rate)
+        return rate
+    except Exception:
+        pass
+
+    logger.warning("获取HKD/CNY汇率失败，使用默认值 0.92")
+    return 0.92
+
+
+# ==================== EST历史准确度跟踪 ====================
+
+# 存储结构：{fund_code: [{"date", "est_nav", "official_nav", "deviation"}, ...]}
+_est_accuracy_history: Dict[str, list] = {}
+_MAX_HISTORY_DAYS = 60  # 保留最近60个交易日
+
+
+def record_est_accuracy(fund_code: str, est_nav: float, official_nav: float, nav_date: str = ""):
+    """记录EST估算净值与官方净值的偏差，用于准确度回测
+
+    Args:
+        fund_code: 基金代码
+        est_nav: EST估算净值
+        official_nav: 官方净值
+        nav_date: 净值日期
+    """
+    if not est_nav or not official_nav or official_nav <= 0:
+        return
+
+    deviation = round((est_nav - official_nav) / official_nav * 100, 4)
+    record = {
+        "date": nav_date or datetime.now().strftime("%Y-%m-%d"),
+        "est_nav": round(est_nav, 4),
+        "official_nav": round(official_nav, 4),
+        "deviation": deviation,
+        "abs_deviation": abs(deviation),
+    }
+
+    if fund_code not in _est_accuracy_history:
+        _est_accuracy_history[fund_code] = []
+
+    history = _est_accuracy_history[fund_code]
+    # 避免同一天重复记录
+    if history and history[-1]["date"] == record["date"]:
+        history[-1] = record
+    else:
+        history.append(record)
+
+    # 保留最近N天
+    if len(history) > _MAX_HISTORY_DAYS:
+        _est_accuracy_history[fund_code] = history[-_MAX_HISTORY_DAYS:]
+
+
+def get_est_accuracy_stats(fund_code: str = "") -> dict:
+    """获取EST估算准确度统计
+
+    Args:
+        fund_code: 指定基金代码，空字符串表示全部基金汇总
+
+    Returns:
+        {
+            "total_records": int,
+            "avg_deviation": float,       # 平均偏差%
+            "avg_abs_deviation": float,   # 平均绝对偏差%
+            "max_abs_deviation": float,   # 最大绝对偏差%
+            "accuracy_rate": float,       # 偏差<0.5%的比率
+            "recent_records": list,       # 最近10条记录
+        }
+    """
+    if fund_code:
+        records = _est_accuracy_history.get(fund_code, [])
+    else:
+        records = []
+        for code_records in _est_accuracy_history.values():
+            records.extend(code_records)
+
+    if not records:
+        return {
+            "total_records": 0,
+            "avg_deviation": 0,
+            "avg_abs_deviation": 0,
+            "max_abs_deviation": 0,
+            "accuracy_rate": 0,
+            "recent_records": [],
+        }
+
+    deviations = [r["deviation"] for r in records]
+    abs_deviations = [r["abs_deviation"] for r in records]
+    accurate_count = sum(1 for d in abs_deviations if d < 0.5)
+
+    return {
+        "total_records": len(records),
+        "avg_deviation": round(sum(deviations) / len(deviations), 4),
+        "avg_abs_deviation": round(sum(abs_deviations) / len(abs_deviations), 4),
+        "max_abs_deviation": round(max(abs_deviations), 4),
+        "accuracy_rate": round(accurate_count / len(records) * 100, 2),
+        "recent_records": records[-10:],
+    }
+
+
 # ==================== 市场状态 ====================
 
 

@@ -188,16 +188,25 @@ class DataService:
             return {"code": stock_code, "error": "获取行情数据失败，请稍后重试"}
 
     @staticmethod
-    def _get_valuation_data(stock_code: str, market: str, price: float) -> tuple:
-        """获取估值数据：总股本、PE(TTM)、PB"""
+    def _fetch_eastmoney_report(stock_code: str, columns: str, page_size: str = "20") -> list:
+        """从东方财富获取财报数据的共享方法
+
+        Args:
+            stock_code: 股票代码
+            columns: 需要的列名，逗号分隔
+            page_size: 返回条数，默认20
+
+        Returns:
+            报告数据列表，失败时返回空列表
+        """
         try:
             url = "https://datacenter.eastmoney.com/securities/api/data/v1/get"
             params = {
                 "reportName": "RPT_F10_FINANCE_MAINFINADATA",
-                "columns": "REPORT_DATE,TOTAL_SHARE,EPSJB,BPS",
+                "columns": columns,
                 "filter": f"(SECURITY_CODE=\"{stock_code}\")",
                 "pageNumber": "1",
-                "pageSize": "6",
+                "pageSize": page_size,
                 "sortTypes": "-1",
                 "sortColumns": "REPORT_DATE",
                 "source": "HSF10",
@@ -207,7 +216,23 @@ class DataService:
             data = r.json()
 
             if data.get("result") and data["result"].get("data"):
-                items = data["result"]["data"]
+                return data["result"]["data"]
+            return []
+        except Exception as e:
+            logger.warning(f"_fetch_eastmoney_report failed for {stock_code}: {e}")
+            return []
+
+    @staticmethod
+    def _get_valuation_data(stock_code: str, market: str, price: float) -> tuple:
+        """获取估值数据：总股本、PE(TTM)、PB"""
+        try:
+            items = DataService._fetch_eastmoney_report(
+                stock_code,
+                columns="REPORT_DATE,TOTAL_SHARE,EPSJB,BPS",
+                page_size="6",
+            )
+
+            if items:
                 latest = items[0]
                 total_share = latest.get("TOTAL_SHARE", 0) / 1e8  # 转换为亿股
                 bps = latest.get("BPS", 0)
@@ -624,27 +649,17 @@ class DataService:
         if DataService._is_hk_code(stock_code):
             return DataService._get_hk_financial_indicators(stock_code)
         try:
-            url = "https://datacenter.eastmoney.com/securities/api/data/v1/get"
-            params = {
-                "reportName": "RPT_F10_FINANCE_MAINFINADATA",
-                "columns": "REPORT_DATE,REPORT_DATE_NAME,EPSJB,BPS,ROEJQ,TOTALOPERATEREVE,PARENTNETPROFIT,TOTALOPERATEREVETZ,PARENTNETPROFITTZ,XSMLL,XSJLL,ZCFZL",
-                "filter": f"(SECURITY_CODE=\"{stock_code}\")",
-                "pageNumber": "1",
-                "pageSize": "20",
-                "sortTypes": "-1",
-                "sortColumns": "REPORT_DATE",
-                "source": "HSF10",
-                "client": "PC"
-            }
+            items = DataService._fetch_eastmoney_report(
+                stock_code,
+                columns="REPORT_DATE,REPORT_DATE_NAME,EPSJB,BPS,ROEJQ,TOTALOPERATEREVE,PARENTNETPROFIT,TOTALOPERATEREVETZ,PARENTNETPROFITTZ,XSMLL,XSJLL,ZCFZL",
+                page_size="20",
+            )
 
-            r = _session.get(url, params=params, timeout=15)
-            data = r.json()
-
-            if not data.get("result") or not data["result"].get("data"):
+            if not items:
                 return {"code": stock_code, "error": "未找到财务数据", "reports": []}
 
             all_reports = []
-            for item in data["result"]["data"]:
+            for item in items:
                 report_date = item.get("REPORT_DATE", "")[:10]
                 report = {
                     "date": report_date,
@@ -660,6 +675,8 @@ class DataService:
                     "net_margin": _safe_float(item.get("XSJLL")),
                     "debt_ratio": _safe_float(item.get("ZCFZL")),
                 }
+                # 数据合理性校验
+                report = _validate_report(report)
                 all_reports.append(_classify_report(report))
 
             # 最新财报的BPS（市净率用最新数据）
@@ -688,6 +705,275 @@ class DataService:
         except Exception as e:
             logger.error(f"get_financial_indicators failed for {stock_code}: {e}")
             return {"code": stock_code, "error": "获取财务数据失败，请稍后重试", "reports": []}
+
+    # ========== 三大报表（F12功能）==========
+
+    @staticmethod
+    def _fetch_eastmoney_report_v2(report_name: str, columns: str, stock_code: str,
+                                     page_size: int = 30) -> list:
+        """通用东方财富财务报表API调用"""
+        try:
+            from app.core.rate_limiter import eastmoney_limiter
+            eastmoney_limiter.wait()
+            url = "https://datacenter.eastmoney.com/securities/api/data/v1/get"
+            params = {
+                "reportName": report_name,
+                "columns": columns,
+                "filter": f'(SECURITY_CODE="{stock_code}")',
+                "pageNumber": "1",
+                "pageSize": str(page_size),
+                "sortTypes": "-1",
+                "sortColumns": "REPORT_DATE",
+                "source": "HSF10",
+                "client": "PC",
+            }
+            r = _session.get(url, params=params, timeout=15)
+            data = r.json()
+            if data.get("result") and data["result"].get("data"):
+                return data["result"]["data"]
+            return []
+        except Exception as e:
+            logger.error(f"_fetch_eastmoney_report_v2({report_name}) failed for {stock_code}: {e}")
+            return []
+
+    @staticmethod
+    def _classify_report_type(report_date: str) -> str:
+        """根据报告日期判断报告类型"""
+        month_day = report_date[5:] if len(report_date) >= 10 else ""
+        if month_day == "12-31":
+            return "annual"
+        elif month_day == "09-30":
+            return "q3"
+        elif month_day == "06-30":
+            return "semi"
+        elif month_day == "03-31":
+            return "q1"
+        return "other"
+
+    @staticmethod
+    def _fetch_income_statement(stock_code: str) -> list:
+        """获取利润表数据"""
+        columns = (
+            "REPORT_DATE,REPORT_DATE_NAME,OPERATE_INCOME,OPERATE_COST,"
+            "SALE_EXPENSE,MANAGE_EXPENSE,RESEARCH_EXPENSE,FINANCE_EXPENSE,"
+            "OPERATE_PROFIT,TOTAL_PROFIT,INCOME_TAX,NETPROFIT,PARENT_NETPROFIT"
+        )
+        raw_data = DataService._fetch_eastmoney_report_v2(
+            "RPT_F10_FINANCE_GINCOME", columns, stock_code
+        )
+        result = []
+        for item in raw_data:
+            report_date = item.get("REPORT_DATE", "")[:10]
+            total_revenue = _safe_float(item.get("OPERATE_INCOME"))
+            operating_cost = _safe_float(item.get("OPERATE_COST"))
+            sell_expense = _safe_float(item.get("SALE_EXPENSE"))
+            manage_expense = _safe_float(item.get("MANAGE_EXPENSE"))
+            research_expense = _safe_float(item.get("RESEARCH_EXPENSE"))
+            finance_expense = _safe_float(item.get("FINANCE_EXPENSE"))
+            operate_profit = _safe_float(item.get("OPERATE_PROFIT"))
+            parent_net_profit = _safe_float(item.get("PARENT_NETPROFIT"))
+
+            # 计算衍生比率
+            def _ratio(val):
+                if val is not None and total_revenue and total_revenue != 0:
+                    return round(val / total_revenue * 100, 2)
+                return None
+
+            gross_margin = None
+            if total_revenue and total_revenue != 0 and operating_cost is not None:
+                gross_margin = round((total_revenue - operating_cost) / total_revenue * 100, 2)
+
+            report = {
+                "report_date": report_date,
+                "report_name": item.get("REPORT_DATE_NAME", ""),
+                "report_type": DataService._classify_report_type(report_date),
+                "total_revenue": total_revenue,
+                "operating_cost": operating_cost,
+                "sell_expense": sell_expense,
+                "manage_expense": manage_expense,
+                "research_expense": research_expense,
+                "finance_expense": finance_expense,
+                "operate_profit": operate_profit,
+                "total_profit": _safe_float(item.get("TOTAL_PROFIT")),
+                "income_tax": _safe_float(item.get("INCOME_TAX")),
+                "net_profit": _safe_float(item.get("NETPROFIT")),
+                "parent_net_profit": parent_net_profit,
+                "sell_expense_ratio": _ratio(sell_expense),
+                "manage_expense_ratio": _ratio(manage_expense),
+                "research_expense_ratio": _ratio(research_expense),
+                "finance_expense_ratio": _ratio(finance_expense),
+                "gross_margin": gross_margin,
+                "net_margin": _ratio(parent_net_profit),
+                "operating_margin": _ratio(operate_profit),
+            }
+            result.append(report)
+        return result
+
+    @staticmethod
+    def _fetch_balance_sheet(stock_code: str) -> list:
+        """获取资产负债表数据"""
+        columns = (
+            "REPORT_DATE,REPORT_DATE_NAME,MONETARYFUNDS,ACCOUNTS_RECE,INVENTORY,"
+            "TOTAL_CURRENT_ASSETS,TOTAL_NONCURRENT_ASSETS,TOTAL_ASSETS,"
+            "SHORT_LOAN,LONG_LOAN,TOTAL_CURRENT_LIAB,TOTAL_NONCURRENT_LIAB,"
+            "TOTAL_LIABILITIES,TOTAL_EQUITY,TOTAL_PARENT_EQUITY"
+        )
+        raw_data = DataService._fetch_eastmoney_report_v2(
+            "RPT_F10_FINANCE_GBALANCE", columns, stock_code
+        )
+        result = []
+        for item in raw_data:
+            report_date = item.get("REPORT_DATE", "")[:10]
+            total_assets = _safe_float(item.get("TOTAL_ASSETS"))
+            total_liabilities = _safe_float(item.get("TOTAL_LIABILITIES"))
+            total_current_assets = _safe_float(item.get("TOTAL_CURRENT_ASSETS"))
+            total_current_liabilities = _safe_float(item.get("TOTAL_CURRENT_LIAB"))
+            inventory = _safe_float(item.get("INVENTORY"))
+
+            # 计算衍生比率
+            debt_ratio = None
+            if total_assets and total_assets != 0 and total_liabilities is not None:
+                debt_ratio = round(total_liabilities / total_assets * 100, 2)
+
+            current_ratio = None
+            if total_current_liabilities and total_current_liabilities != 0 and total_current_assets is not None:
+                current_ratio = round(total_current_assets / total_current_liabilities, 2)
+
+            quick_ratio = None
+            if total_current_liabilities and total_current_liabilities != 0:
+                if total_current_assets is not None and inventory is not None:
+                    quick_ratio = round((total_current_assets - inventory) / total_current_liabilities, 2)
+
+            total_non_current_assets = _safe_float(item.get("TOTAL_NONCURRENT_ASSETS"))
+            # 如果API没有直接返回非流动资产，用总资产减去流动资产
+            if total_non_current_assets is None and total_assets and total_current_assets:
+                total_non_current_assets = round(total_assets - total_current_assets, 2)
+
+            total_non_current_liabilities = _safe_float(item.get("TOTAL_NONCURRENT_LIAB"))
+            if total_non_current_liabilities is None and total_liabilities and total_current_liabilities:
+                total_non_current_liabilities = round(total_liabilities - total_current_liabilities, 2)
+
+            report = {
+                "report_date": report_date,
+                "report_name": item.get("REPORT_DATE_NAME", ""),
+                "report_type": DataService._classify_report_type(report_date),
+                "monetary_funds": _safe_float(item.get("MONETARYFUNDS")),
+                "accounts_receivable": _safe_float(item.get("ACCOUNTS_RECE")),
+                "inventory": inventory,
+                "total_current_assets": total_current_assets,
+                "total_non_current_assets": total_non_current_assets,
+                "total_assets": total_assets,
+                "short_term_borrowing": _safe_float(item.get("SHORT_LOAN")),
+                "long_term_borrowing": _safe_float(item.get("LONG_LOAN")),
+                "total_current_liabilities": total_current_liabilities,
+                "total_non_current_liabilities": total_non_current_liabilities,
+                "total_liabilities": total_liabilities,
+                "total_equity": _safe_float(item.get("TOTAL_EQUITY")),
+                "parent_equity": _safe_float(item.get("TOTAL_PARENT_EQUITY")),
+                "debt_ratio": debt_ratio,
+                "current_ratio": current_ratio,
+                "quick_ratio": quick_ratio,
+            }
+            result.append(report)
+        return result
+
+    @staticmethod
+    def _fetch_cashflow_statement(stock_code: str) -> list:
+        """获取现金流量表数据
+
+        东方财富RPT_F10_FINANCE_GCASHFLOW关键列：
+        - NETCASH_OPERATE: 经营活动现金流净额
+        - NETCASH_INVEST: 投资活动现金流净额
+        - NETCASH_FINANCE: 筹资活动现金流净额
+        - CCE_ADD: 现金及等价物净增加额
+        - END_CCE: 期末现金及等价物余额
+        - FIX_ASSET_DEPR: 固定资产折旧
+        - INTANGIBLE_ASSET_AMORT: 无形资产摊销
+        - LTD_EXPENSE_AMORT: 长期待摊费用摊销
+        """
+        columns = (
+            "REPORT_DATE,REPORT_DATE_NAME,NETCASH_OPERATE,NETCASH_INVEST,"
+            "NETCASH_FINANCE,CCE_ADD,END_CCE,"
+            "FIX_ASSET_DEPR,INTANGIBLE_ASSET_AMORT,LTD_EXPENSE_AMORT"
+        )
+        raw_data = DataService._fetch_eastmoney_report_v2(
+            "RPT_F10_FINANCE_GCASHFLOW", columns, stock_code
+        )
+        result = []
+        for item in raw_data:
+            report_date = item.get("REPORT_DATE", "")[:10]
+            netcash_operate = _safe_float(item.get("NETCASH_OPERATE"))
+            netcash_invest = _safe_float(item.get("NETCASH_INVEST"))
+
+            # 折旧摊销（用于EBITDA计算）
+            fix_depr = _safe_float(item.get("FIX_ASSET_DEPR")) or 0
+            intangible_amort = _safe_float(item.get("INTANGIBLE_ASSET_AMORT")) or 0
+            ltd_amort = _safe_float(item.get("LTD_EXPENSE_AMORT")) or 0
+            depreciation_amortization = round(fix_depr + intangible_amort + ltd_amort, 2) if (fix_depr or intangible_amort or ltd_amort) else None
+
+            # 资本开支估算：投资活动现金流为负通常意味着资本开支
+            # 真实CAPEX = |投资活动现金流| - 股权/债权投资收益 + 资产处置收益
+            # 简化：当投资现金流为负时，取其绝对值作为CAPEX的近似
+            capex = abs(netcash_invest) if netcash_invest is not None and netcash_invest < 0 else 0
+
+            # 自由现金流 = 经营现金流 - 资本开支
+            # 使用投资现金流负值部分作为CAPEX近似（比原逻辑更准确）
+            free_cashflow = None
+            if netcash_operate is not None and netcash_invest is not None:
+                if netcash_invest < 0:
+                    free_cashflow = round(netcash_operate + netcash_invest, 2)
+                else:
+                    # 投资活动为正（收回投资），CAPEX为0，FCF=经营现金流
+                    free_cashflow = round(netcash_operate, 2)
+
+            report = {
+                "report_date": report_date,
+                "report_name": item.get("REPORT_DATE_NAME", ""),
+                "report_type": DataService._classify_report_type(report_date),
+                "netcash_operate": netcash_operate,
+                "netcash_invest": netcash_invest,
+                "netcash_finance": _safe_float(item.get("NETCASH_FINANCE")),
+                "cash_begin": None,
+                "cash_end": _safe_float(item.get("END_CCE")),
+                "capex": round(capex, 2) if capex else None,
+                "free_cashflow": free_cashflow,
+                "depreciation_amortization": depreciation_amortization,
+                "operating_to_profit_ratio": None,  # 后续用利润表数据补充
+            }
+            result.append(report)
+        return result
+
+    @staticmethod
+    @cached(ttl_seconds=300, key_prefix="financial_statements")
+    def get_financial_statements(stock_code: str) -> dict:
+        """获取三大报表（利润表/资产负债表/现金流量表）"""
+        if DataService._is_hk_code(stock_code):
+            return {"code": stock_code, "error": "港股暂不支持三大报表查询", "income": [], "balance": [], "cashflow": []}
+        try:
+            income = DataService._fetch_income_statement(stock_code)
+            balance = DataService._fetch_balance_sheet(stock_code)
+            cashflow = DataService._fetch_cashflow_statement(stock_code)
+
+            # 用利润表数据补充现金流的经营现金流/净利润比率
+            income_by_date = {item["report_date"]: item for item in income}
+            for cf in cashflow:
+                inc = income_by_date.get(cf["report_date"])
+                if inc and inc.get("parent_net_profit") and inc["parent_net_profit"] != 0:
+                    if cf.get("netcash_operate") is not None:
+                        cf["operating_to_profit_ratio"] = round(
+                            cf["netcash_operate"] / inc["parent_net_profit"] * 100, 2
+                        )
+
+            return {
+                "code": stock_code,
+                "income": income,
+                "balance": balance,
+                "cashflow": cashflow,
+                "fetch_time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            }
+        except Exception as e:
+            logger.error(f"get_financial_statements failed for {stock_code}: {e}")
+            return {"code": stock_code, "error": "获取三大报表失败", "income": [], "balance": [], "cashflow": []}
 
     @staticmethod
     @cached(ttl_seconds=TTL_WEEKLY, key_prefix="search_stock")
@@ -824,8 +1110,11 @@ class DataService:
 
             latest = _get_annual_report(reports)
 
-            # 获取实际分红数据
-            dividend_per_share, consecutive_years, dividend_ratio = DataService._get_actual_dividend(stock_code)
+            # 获取实际分红数据（含CAGR、可持续性等高级指标）
+            div_data = DataService._get_actual_dividend(stock_code)
+            dividend_per_share = div_data["dividend_per_share"]
+            consecutive_years = div_data["consecutive_years"]
+            dividend_ratio = div_data["dividend_ratio"]
 
             # 计算股息率（使用实际分红数据）
             if dividend_per_share > 0 and basic["price"] > 0:
@@ -852,6 +1141,11 @@ class DataService:
                 "consecutive_years": consecutive_years,
                 "operating_cashflow": 1,
                 "report_period": latest.get("report_period", ""),
+                # 新增：机构级股息分析指标
+                "dividend_cagr_3y": div_data["dividend_cagr_3y"],
+                "dividend_cagr_5y": div_data["dividend_cagr_5y"],
+                "payout_sustainability": div_data["payout_sustainability"],
+                "has_special_dividend": div_data["has_special_dividend"],
             }
         except Exception as e:
             logger.warning(f"获取{stock_code}数据失败: {e}")
@@ -973,8 +1267,27 @@ class DataService:
             return {"code": stock_code, "dividends": [], "error": "获取港股分红数据失败"}
 
     @staticmethod
-    def _get_actual_dividend(stock_code: str) -> tuple:
-        """获取实际分红数据：每股股息、连续分红年数、分红比例"""
+    def _get_actual_dividend(stock_code: str) -> dict:
+        """获取实际分红数据：每股股息、连续分红年数、分红比例、增长率等
+
+        Returns:
+            {
+                "dividend_per_share": float,  # 最近12个月每股股息
+                "consecutive_years": int,     # 连续分红年数
+                "dividend_ratio": float,      # 分红比例(%)
+                "dividend_cagr_3y": float|None,  # 3年股息CAGR(%)
+                "dividend_cagr_5y": float|None,  # 5年股息CAGR(%)
+                "payout_sustainability": str,    # sustainable/high/unsustainable
+                "has_special_dividend": bool,    # 是否有特别股息
+                "year_dividends": dict,          # 各年度分红明细
+            }
+        """
+        empty = {
+            "dividend_per_share": 0, "consecutive_years": 0, "dividend_ratio": 0,
+            "dividend_cagr_3y": None, "dividend_cagr_5y": None,
+            "payout_sustainability": "unknown", "has_special_dividend": False,
+            "year_dividends": {},
+        }
         try:
             from datetime import datetime, timedelta
 
@@ -988,7 +1301,7 @@ class DataService:
                 "columns": "SECURITY_CODE,REPORT_DATE,PRETAX_BONUS_RMB,BASIC_EPS,ASSIGN_PROGRESS",
                 "filter": f"(SECURITY_CODE=\"{query_code}\")",
                 "pageNumber": "1",
-                "pageSize": "20",
+                "pageSize": "30",
                 "sortTypes": "-1",
                 "sortColumns": "REPORT_DATE",
                 "source": "HSF10",
@@ -999,19 +1312,58 @@ class DataService:
             data = r.json()
 
             if not data.get("result") or not data["result"].get("data"):
-                return 0, 0, 0
+                return empty
 
-            dividends = data["result"]["data"]
+            raw_dividends = data["result"]["data"]
 
-            # 计算过去12个月的总分红（包括中期分红和年终分红）
-            # PRETAX_BONUS_RMB 是每10股的分红金额，需要除以10
+            # === 按财政年度分组，合并中期+年终分红 ===
+            year_dividends = {}  # {year_str: {"total_dps": float, "eps": float, "progress": str}}
+            for div in raw_dividends:
+                bonus_per_10 = _safe_float(div.get("PRETAX_BONUS_RMB"))
+                if not bonus_per_10 or bonus_per_10 <= 0:
+                    # bonus为0表示该年度不分红，记录为0
+                    report_date_str = div.get("REPORT_DATE", "")[:10]
+                    if report_date_str:
+                        y = report_date_str[:4]
+                        if y not in year_dividends:
+                            year_dividends[y] = {"total_dps": 0, "eps": 0, "progress": ""}
+                    continue
+
+                report_date_str = div.get("REPORT_DATE", "")[:10]
+                if not report_date_str:
+                    continue
+                year = report_date_str[:4]
+                dps = round(bonus_per_10 / 10, 4)
+                eps = _safe_float(div.get("BASIC_EPS")) or 0
+                progress = div.get("ASSIGN_PROGRESS", "")
+
+                if year not in year_dividends:
+                    year_dividends[year] = {"total_dps": 0, "eps": 0, "progress": ""}
+                year_dividends[year]["total_dps"] = round(year_dividends[year]["total_dps"] + dps, 4)
+                # 年报的EPS更准确
+                if report_date_str.endswith("12-31") and eps > 0:
+                    year_dividends[year]["eps"] = eps
+                elif eps > 0 and year_dividends[year]["eps"] == 0:
+                    year_dividends[year]["eps"] = eps
+                # 取最新的实施进度
+                if progress:
+                    year_dividends[year]["progress"] = progress
+
+            if not year_dividends:
+                return empty
+
+            # === 按年度排序 ===
+            sorted_years = sorted(year_dividends.keys(), reverse=True)
+            annual_dps = [(y, year_dividends[y]["total_dps"]) for y in sorted_years]
+
+            # === 最近12个月的股息（累计同年中期+年终） ===
             now = datetime.now()
             one_year_ago = now - timedelta(days=365)
-            total_dividend_per_share = 0
+            ttm_dividend = 0
             latest_eps = 0
-            has_dividend_in_year = False
+            has_recent = False
 
-            for div in dividends:
+            for div in raw_dividends:
                 report_date_str = div.get("REPORT_DATE", "")[:10]
                 if not report_date_str:
                     continue
@@ -1019,46 +1371,86 @@ class DataService:
                     report_date = datetime.strptime(report_date_str, "%Y-%m-%d")
                 except ValueError:
                     continue
-
                 bonus_per_10 = _safe_float(div.get("PRETAX_BONUS_RMB"))
-                if bonus_per_10 and bonus_per_10 > 0:
-                    # 检查是否在过去12个月内
-                    if report_date >= one_year_ago:
-                        total_dividend_per_share += bonus_per_10 / 10
-                        has_dividend_in_year = True
-                        if latest_eps == 0:
-                            latest_eps = _safe_float(div.get("BASIC_EPS")) or 0
-
-            # 如果过去12个月没有分红，取最近一次有分红的数据
-            if not has_dividend_in_year:
-                for div in dividends:
-                    bonus_per_10 = _safe_float(div.get("PRETAX_BONUS_RMB"))
-                    if bonus_per_10 and bonus_per_10 > 0:
-                        total_dividend_per_share = bonus_per_10 / 10
+                if bonus_per_10 and bonus_per_10 > 0 and report_date >= one_year_ago:
+                    ttm_dividend += bonus_per_10 / 10
+                    has_recent = True
+                    if latest_eps == 0:
                         latest_eps = _safe_float(div.get("BASIC_EPS")) or 0
+
+            # 如果过去12个月没有分红，取最近一年的年度分红
+            if not has_recent and annual_dps:
+                latest_year, latest_dps = annual_dps[0]
+                ttm_dividend = latest_dps
+                latest_eps = year_dividends[latest_year].get("eps", 0)
+
+            # === 连续分红年数（按年度分组统计） ===
+            consecutive_years = 0
+            for y, dps in annual_dps:
+                if dps > 0:
+                    consecutive_years += 1
+                else:
+                    break  # 遇到不分红的年份则中断
+
+            # === 特别股息检测 ===
+            # 如果某一年的分红显著高于其他年份（>2倍中位数），标记为特别股息
+            has_special_dividend = False
+            positive_dps = [d for _, d in annual_dps if d > 0]
+            if len(positive_dps) >= 3:
+                median_dps = sorted(positive_dps)[len(positive_dps) // 2]
+                for _, dps in annual_dps:
+                    if dps > median_dps * 2.5 and median_dps > 0:
+                        has_special_dividend = True
                         break
 
-            # 计算连续分红年数（跳过没有分红金额的数据）
-            consecutive_years = 0
-            for div in dividends:
-                bonus = _safe_float(div.get("PRETAX_BONUS_RMB"))
-                if bonus and bonus > 0:
-                    consecutive_years += 1
-                # 只有当bonus为0时才中断（表示没有分红）
-                elif bonus == 0:
-                    break
-                # bonus为None表示还未公布，跳过继续检查
-
-            # 计算分红比例
+            # === 分红比例 ===
             dividend_ratio = 0
-            if latest_eps > 0 and total_dividend_per_share > 0:
-                dividend_ratio = round((total_dividend_per_share / latest_eps) * 100, 2)
+            if latest_eps > 0 and ttm_dividend > 0:
+                dividend_ratio = round((ttm_dividend / latest_eps) * 100, 2)
 
-            return total_dividend_per_share, consecutive_years, dividend_ratio
+            # 派息率可持续性评估
+            if dividend_ratio > 100:
+                payout_sustainability = "unsustainable"
+            elif dividend_ratio > 80:
+                payout_sustainability = "high"
+            elif dividend_ratio > 0:
+                payout_sustainability = "sustainable"
+            else:
+                payout_sustainability = "unknown"
+
+            # === 股息增长率 CAGR ===
+            def _calc_cagr(years_back: int):
+                """计算N年股息CAGR"""
+                if len(annual_dps) < years_back + 1:
+                    return None
+                # 找years_back年前和最近一年都有分红的数据
+                recent = annual_dps[0]
+                target = annual_dps[years_back]
+                if recent[1] <= 0 or target[1] <= 0:
+                    return None
+                try:
+                    cagr = (pow(recent[1] / target[1], 1.0 / years_back) - 1) * 100
+                    return round(cagr, 2)
+                except (ZeroDivisionError, ValueError):
+                    return None
+
+            dividend_cagr_3y = _calc_cagr(3)
+            dividend_cagr_5y = _calc_cagr(5)
+
+            return {
+                "dividend_per_share": round(ttm_dividend, 4),
+                "consecutive_years": consecutive_years,
+                "dividend_ratio": dividend_ratio,
+                "dividend_cagr_3y": dividend_cagr_3y,
+                "dividend_cagr_5y": dividend_cagr_5y,
+                "payout_sustainability": payout_sustainability,
+                "has_special_dividend": has_special_dividend,
+                "year_dividends": year_dividends,
+            }
 
         except Exception as e:
             logger.warning(f"获取{stock_code}分红数据失败: {e}")
-            return 0, 0, 0
+            return empty
 
     @staticmethod
     @cached(ttl_seconds=TTL_STATIC, key_prefix="valuation_history", persist=True)
@@ -1093,13 +1485,18 @@ class DataService:
 
     @staticmethod
     def _calc_valuation_stats(pe_history: list, pb_history: list, div_history: list = None) -> dict:
-        """计算估值统计指标"""
+        """计算估值统计指标（含异常值过滤）"""
         import numpy as np
 
-        def calc_stats(history):
+        def calc_stats(history, upper_limit=None):
             if not history:
                 return None
             values = [h["value"] for h in history if h["value"] and h["value"] > 0]
+            if not values:
+                return None
+            # 过滤极端异常值（如PE>500的亏损边缘股票）
+            if upper_limit is not None:
+                values = [v for v in values if v < upper_limit]
             if not values:
                 return None
             current = values[-1]
@@ -1117,11 +1514,11 @@ class DataService:
             }
 
         result = {
-            "pe": calc_stats(pe_history),
-            "pb": calc_stats(pb_history),
+            "pe": calc_stats(pe_history, upper_limit=500),
+            "pb": calc_stats(pb_history, upper_limit=100),
         }
         if div_history is not None:
-            result["div"] = calc_stats(div_history)
+            result["div"] = calc_stats(div_history, upper_limit=30)
         return result
 
     @staticmethod
@@ -1375,8 +1772,10 @@ class DataService:
     def _fetch_hk_kline(stock_code: str) -> list:
         """从腾讯财经获取港股历史日K线数据，返回[(date, close_price), ...]"""
         try:
+            from datetime import datetime
+            end_date = datetime.now().strftime("%Y-%m-%d")
             url = 'https://web.ifzq.gtimg.cn/appstock/app/fqkline/get'
-            params = {'param': f'hk{stock_code},day,2015-01-01,2026-12-31,1500,qfq'}
+            params = {'param': f'hk{stock_code},day,2010-01-01,{end_date},1500,qfq'}
             headers = {
                 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
                 'Referer': 'https://stockapp.finance.qq.com/'
@@ -1402,6 +1801,48 @@ class DataService:
 
 
 # _safe_float is now imported from app.core.utils (see top of file)
+
+
+def _validate_report(report: dict) -> dict:
+    """校验财务数据合理性，标记异常值"""
+    warnings = []
+
+    # 毛利率/净利率范围校验
+    gm = report.get("gross_margin")
+    if gm is not None and (gm < -50 or gm > 100):
+        warnings.append(f"毛利率异常({gm:.1f}%)")
+        report["gross_margin"] = None  # 置为None，避免误导
+
+    nm = report.get("net_margin")
+    if nm is not None and (nm < -100 or nm > 100):
+        warnings.append(f"净利率异常({nm:.1f}%)")
+        report["net_margin"] = None
+
+    # ROE范围校验
+    roe = report.get("roe")
+    if roe is not None and (roe < -100 or roe > 200):
+        warnings.append(f"ROE异常({roe:.1f}%)")
+        report["roe"] = None
+
+    # 资产负债率范围校验
+    dr = report.get("debt_ratio")
+    if dr is not None and (dr < 0 or dr > 100):
+        warnings.append(f"资产负债率异常({dr:.1f}%)")
+        report["debt_ratio"] = None
+
+    # 增长率异常检测（超过1000%通常有特殊原因，标记但不置None）
+    rg = report.get("revenue_growth")
+    if rg is not None and abs(rg) > 1000:
+        warnings.append(f"营收增长率异常({rg:.1f}%)")
+
+    pg = report.get("profit_growth")
+    if pg is not None and abs(pg) > 5000:
+        warnings.append(f"利润增长率异常({pg:.1f}%)")
+
+    if warnings:
+        report["_warnings"] = warnings
+
+    return report
 
 
 def _classify_report(report: dict) -> dict:

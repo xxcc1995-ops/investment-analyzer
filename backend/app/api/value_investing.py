@@ -1,21 +1,60 @@
 """价值投资筛选 - 巴菲特、芒格、李录、段永平投资体系"""
 
 from fastapi import APIRouter, HTTPException, Query
-from pydantic import BaseModel
-from app.services.vi_service import screen_stocks
-from app.services.dcf import DCFService
+from pydantic import BaseModel, Field
+from typing import Optional
+from app.services.vi_service import screen_stocks, _get_a_stock_data, _get_hk_stock_data, _get_us_stock_data
+from app.services.dcf import DCFService, calculate_graham_number, estimate_wacc
+from app.services.data_service import DataService, _get_annual_report
 
 router = APIRouter()
 
 
-class DCFRequest(BaseModel):
-    current_fcf: float
-    growth_rate: float
-    shares: float
-    discount_rate: float = 0.10
-    terminal_growth_rate: float = 0.03
-    safety_margin: float = 0.30
+# ============================================================
+# Request Models
+# ============================================================
 
+class DCFRequest(BaseModel):
+    current_fcf: float = Field(..., description="当前自由现金流（亿元）")
+    growth_rate: float = Field(..., description="增长率（小数，如0.10表示10%）")
+    shares: float = Field(..., description="总股本（亿股）")
+    discount_rate: float = Field(0.10, description="折现率/WACC（小数）")
+    terminal_growth_rate: float = Field(0.03, description="永续增长率（小数）")
+    safety_margin: float = Field(0.30, description="安全边际（小数）")
+    net_debt: float = Field(0.0, description="净负债（亿元）")
+    current_price: float = Field(0.0, description="当前市场价格（元）")
+
+
+class TwoStageDCFRequest(BaseModel):
+    current_fcf: float = Field(..., description="当前自由现金流（亿元）")
+    high_growth_rate: float = Field(..., description="高增长阶段增长率（小数）")
+    stable_growth_rate: float = Field(0.05, description="稳定增长阶段增长率（小数）")
+    shares: float = Field(..., description="总股本（亿股）")
+    high_growth_years: int = Field(5, description="高增长阶段年数")
+    discount_rate: float = Field(0.10, description="折现率/WACC（小数）")
+    terminal_growth_rate: float = Field(0.03, description="永续增长率（小数）")
+    safety_margin: float = Field(0.30, description="安全边际（小数）")
+    net_debt: float = Field(0.0, description="净负债（亿元）")
+    current_price: float = Field(0.0, description="当前市场价格（元）")
+
+
+class AutoDCFRequest(BaseModel):
+    stock_code: str = Field(..., description="股票代码（如 600519、00700、AAPL）")
+    market: str = Field("a", description="市场: a/hk/us")
+    growth_rate: Optional[float] = Field(None, description="增长率（小数），不填则自动估算")
+    discount_rate: Optional[float] = Field(None, description="折现率，不填则自动估算WACC")
+    safety_margin: float = Field(0.30, description="安全边际")
+
+
+class GrahamRequest(BaseModel):
+    eps: float = Field(..., description="每股收益（EPS）")
+    bvps: float = Field(..., description="每股净资产（BVPS）")
+    current_price: float = Field(0.0, description="当前市场价格")
+
+
+# ============================================================
+# 投资理念
+# ============================================================
 
 @router.get("/philosophy")
 def get_philosophy():
@@ -304,6 +343,10 @@ def get_philosophy():
     }
 
 
+# ============================================================
+# 筛选器
+# ============================================================
+
 @router.get("/screener")
 def value_investing_screener(
     market: str = Query("all", description="市场: all/a/hk/us"),
@@ -329,25 +372,272 @@ def value_investing_screener(
         raise HTTPException(500, f"筛选失败: {str(e)}")
 
 
+# ============================================================
+# DCF 估值
+# ============================================================
+
 @router.post("/dcf")
 def dcf_calculator(req: DCFRequest):
-    """DCF自由现金流折现计算器"""
+    """DCF自由现金流折现计算器（单阶段）"""
     if req.current_fcf <= 0 or req.shares <= 0:
         raise HTTPException(400, "FCF和股本必须大于0")
 
-    dcf = DCFService(
-        discount_rate=req.discount_rate,
-        terminal_growth_rate=req.terminal_growth_rate,
-        safety_margin=req.safety_margin,
-    )
+    try:
+        dcf = DCFService(
+            discount_rate=req.discount_rate,
+            terminal_growth_rate=req.terminal_growth_rate,
+            safety_margin=req.safety_margin,
+        )
+    except ValueError as e:
+        raise HTTPException(400, str(e))
 
     result = dcf.calculate_intrinsic_value(
         current_fcf=req.current_fcf,
         growth_rate=req.growth_rate,
         shares=req.shares,
+        net_debt=req.net_debt,
+        current_price=req.current_price,
     )
 
-    # Sensitivity analysis
+    # 敏感性分析
+    result['sensitivity'] = _build_sensitivity_matrix(req)
+
+    return result
+
+
+@router.post("/dcf-two-stage")
+def dcf_two_stage_calculator(req: TwoStageDCFRequest):
+    """两阶段DCF模型（高增长 + 稳定增长）"""
+    if req.current_fcf <= 0 or req.shares <= 0:
+        raise HTTPException(400, "FCF和股本必须大于0")
+
+    try:
+        dcf = DCFService(
+            discount_rate=req.discount_rate,
+            terminal_growth_rate=req.terminal_growth_rate,
+            safety_margin=req.safety_margin,
+            projection_years=req.high_growth_years + 5,  # 高增长 + 5年稳定
+        )
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+    result = dcf.calculate_two_stage_dcf(
+        current_fcf=req.current_fcf,
+        high_growth_rate=req.high_growth_rate,
+        stable_growth_rate=req.stable_growth_rate,
+        shares=req.shares,
+        high_growth_years=req.high_growth_years,
+        net_debt=req.net_debt,
+        current_price=req.current_price,
+    )
+
+    return result
+
+
+@router.post("/dcf-auto")
+def dcf_auto_fetch(req: AutoDCFRequest):
+    """
+    自动获取股票数据并计算DCF估值
+
+    自动获取: FCF（从现金流表）、增长率（历史CAGR）、股本、净负债、WACC
+    """
+    code = req.stock_code.strip()
+    market = req.market.lower()
+    if market not in ("a", "hk", "us"):
+        raise HTTPException(400, "market必须为 a/hk/us")
+
+    try:
+        # 获取财务数据
+        financials = DataService.get_financial_indicators(code)
+        reports = financials.get("reports", [])
+        if not reports:
+            raise HTTPException(404, f"未找到 {code} 的财务数据")
+
+        annual_reports = [r for r in reports if r.get("report_type") == "annual"]
+        if not annual_reports:
+            annual_reports = reports[:3]
+
+        # 获取现金流数据
+        cashflow_data = DataService.get_financial_statements(code)
+        cf_list = cashflow_data.get("cashflow", [])
+
+        # 估算FCF = 经营现金流 - 资本开支
+        fcf_estimates = []
+        for cf in cf_list[:5]:
+            ocf = cf.get("netcash_operate")
+            invest = cf.get("netcash_invest")
+            if ocf is not None:
+                # 简化: FCF = 经营现金流 + 投资现金流（投资通常为负）
+                fcf = ocf + (invest if invest and invest < 0 else 0)
+                if fcf > 0:
+                    fcf_estimates.append(fcf)
+
+        if not fcf_estimates:
+            # fallback: 用净利润的80%估算FCF
+            latest_profit = annual_reports[0].get("parent_net_profit")
+            if latest_profit and latest_profit > 0:
+                current_fcf = latest_profit * 0.8
+            else:
+                raise HTTPException(400, f"无法估算 {code} 的自由现金流，请手动输入")
+        else:
+            current_fcf = fcf_estimates[0]
+
+        # 估算增长率
+        if req.growth_rate is not None:
+            growth_rate = req.growth_rate
+        elif len(fcf_estimates) >= 2:
+            dcf_svc = DCFService(discount_rate=0.10, terminal_growth_rate=0.03, safety_margin=0.30)
+            growth_rate = dcf_svc.estimate_growth_rate(fcf_estimates)
+        else:
+            growth_rate = 0.08  # 默认8%
+
+        # 获取股本和价格
+        basic = DataService.get_stock_basic(code)
+        if "error" in basic:
+            raise HTTPException(404, f"未找到 {code} 的基本信息")
+
+        current_price = basic.get("price", 0)
+        market_cap = basic.get("market_cap")  # 亿元
+        if not current_price or current_price <= 0:
+            raise HTTPException(400, f"无法获取 {code} 的价格数据")
+        # 从市值和价格推导股本（亿股）
+        shares = market_cap / current_price if market_cap and market_cap > 0 else None
+        if not shares or shares <= 0:
+            raise HTTPException(400, f"无法获取 {code} 的股本数据")
+
+        # 获取资产负债表数据（用于净负债和WACC估算）
+        balance_list = cashflow_data.get("balance", [])
+        debt_ratio = annual_reports[0].get("debt_ratio", 0) or 0
+
+        # 净负债估算
+        net_debt = 0.0
+        if balance_list:
+            bal = balance_list[0]
+            short_debt = bal.get("short_term_borrowing") or 0
+            long_debt = bal.get("long_term_borrowing") or 0
+            cash = bal.get("monetary_funds") or 0
+            net_debt = short_debt + long_debt - cash
+
+        # WACC估算
+        if req.discount_rate is not None:
+            discount_rate = req.discount_rate
+        else:
+            # Beta默认1.0，保守估算
+            discount_rate = estimate_wacc(
+                risk_free_rate=0.025,
+                market_risk_premium=0.06,
+                beta=1.0,
+                debt_ratio=debt_ratio,
+            )
+
+        # DCF计算
+        dcf = DCFService(
+            discount_rate=discount_rate,
+            terminal_growth_rate=0.03,
+            safety_margin=req.safety_margin,
+        )
+
+        result = dcf.calculate_intrinsic_value(
+            current_fcf=current_fcf / 1e8,  # 转为亿元
+            growth_rate=growth_rate,
+            shares=shares,
+            net_debt=net_debt / 1e8 if net_debt > 0 else 0,
+            current_price=current_price,
+        )
+
+        # 附加数据来源信息
+        result['data_source'] = {
+            'fcf_source': 'cashflow_statement' if fcf_estimates else 'estimated_from_profit',
+            'fcf_raw': round(current_fcf / 1e8, 2) if current_fcf > 0 else None,
+            'growth_rate_source': 'historical_cagr' if req.growth_rate is None else 'manual',
+            'discount_rate_source': 'wacc_estimated' if req.discount_rate is None else 'manual',
+            'debt_ratio': round(debt_ratio, 1),
+            'report_period': annual_reports[0].get('report_period', ''),
+            'report_type': annual_reports[0].get('report_type', ''),
+        }
+
+        # 敏感性分析
+        class MockReq:
+            pass
+        mock = MockReq()
+        mock.current_fcf = result.get('fcf_raw', current_fcf / 1e8)
+        mock.growth_rate = growth_rate
+        mock.shares = shares
+        mock.discount_rate = discount_rate
+        mock.terminal_growth_rate = 0.03
+        mock.safety_margin = req.safety_margin
+        mock.net_debt = net_debt / 1e8 if net_debt > 0 else 0
+        mock.current_price = current_price
+        result['sensitivity'] = _build_sensitivity_matrix(mock)
+
+        return result
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(500, f"DCF自动估值失败: {str(e)}")
+
+
+@router.post("/graham")
+def graham_number_calculator(req: GrahamRequest):
+    """
+    格雷厄姆公式计算器
+
+    公式: sqrt(22.5 * EPS * BVPS)
+    含义: 15倍PE * 1.5倍PB = 22.5，这是格雷厄姆认为的合理估值上限
+    """
+    result = calculate_graham_number(eps=req.eps, bvps=req.bvps)
+
+    if result["applicable"] and req.current_price > 0:
+        graham_val = result["graham_value"]
+        result["current_price"] = req.current_price
+        result["upside_pct"] = round((graham_val / req.current_price - 1) * 100, 1)
+        result["is_undervalued"] = req.current_price < graham_val
+        result["safety_margin_pct"] = round((1 - req.current_price / graham_val) * 100, 1) if graham_val > 0 else 0
+
+    return result
+
+
+@router.get("/wacc-estimate")
+def estimate_wacc_endpoint(
+    debt_ratio: float = Query(0.0, description="资产负债率 (%)"),
+    beta: float = Query(1.0, description="Beta系数"),
+    risk_free_rate: float = Query(0.025, description="无风险利率"),
+    market_risk_premium: float = Query(0.06, description="市场风险溢价"),
+):
+    """WACC估算（基于CAPM模型）"""
+    wacc = estimate_wacc(
+        risk_free_rate=risk_free_rate,
+        market_risk_premium=market_risk_premium,
+        beta=beta,
+        debt_ratio=debt_ratio,
+    )
+
+    cost_of_equity = risk_free_rate + beta * market_risk_premium
+
+    return {
+        "wacc": round(wacc, 4),
+        "wacc_pct": f"{wacc * 100:.1f}%",
+        "cost_of_equity": round(cost_of_equity, 4),
+        "cost_of_equity_pct": f"{cost_of_equity * 100:.1f}%",
+        "risk_free_rate": risk_free_rate,
+        "market_risk_premium": market_risk_premium,
+        "beta": beta,
+        "debt_ratio": debt_ratio,
+        "suggested_discount_rates": {
+            "conservative": f"{max(wacc + 0.02, 0.12) * 100:.0f}%",
+            "base": f"{wacc * 100:.1f}%",
+            "aggressive": f"{max(wacc - 0.02, 0.08) * 100:.0f}%",
+        }
+    }
+
+
+# ============================================================
+# 辅助函数
+# ============================================================
+
+def _build_sensitivity_matrix(req) -> dict:
+    """构建DCF敏感性分析矩阵"""
     growth_rates = [0.02, 0.05, 0.08, 0.10, 0.12, 0.15, 0.20]
     discount_rates = [0.08, 0.10, 0.12, 0.15]
     matrix = []
@@ -355,23 +645,28 @@ def dcf_calculator(req: DCFRequest):
     for gr in growth_rates:
         row = []
         for dr in discount_rates:
-            s_dcf = DCFService(
-                discount_rate=dr,
-                terminal_growth_rate=req.terminal_growth_rate,
-                safety_margin=req.safety_margin,
-            )
-            s_result = s_dcf.calculate_intrinsic_value(
-                current_fcf=req.current_fcf,
-                growth_rate=gr,
-                shares=req.shares,
-            )
-            row.append(s_result['intrinsic_value'])
+            if dr <= req.terminal_growth_rate:
+                row.append(None)
+                continue
+            try:
+                s_dcf = DCFService(
+                    discount_rate=dr,
+                    terminal_growth_rate=req.terminal_growth_rate,
+                    safety_margin=req.safety_margin,
+                )
+                s_result = s_dcf.calculate_intrinsic_value(
+                    current_fcf=req.current_fcf,
+                    growth_rate=gr,
+                    shares=req.shares,
+                    net_debt=getattr(req, 'net_debt', 0),
+                )
+                row.append(s_result['intrinsic_value'])
+            except (ValueError, ZeroDivisionError):
+                row.append(None)
         matrix.append(row)
 
-    result['sensitivity'] = {
+    return {
         'growth_rates': [f"{g*100:.0f}%" for g in growth_rates],
         'discount_rates': [f"{d*100:.0f}%" for d in discount_rates],
         'matrix': matrix,
     }
-
-    return result

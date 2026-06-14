@@ -1,3 +1,4 @@
+import { LoadingSpinner } from '../components/ui'
 import { useState, useEffect, useCallback } from 'react'
 import axios from 'axios'
 
@@ -11,6 +12,8 @@ interface Market {
   price_sum: number
   has_arbitrage: boolean
   arbitrage_profit: number
+  net_arbitrage_profit?: number
+  estimated_slippage?: number
   tokens: Record<string, string>
   volume: number
   liquidity: number
@@ -39,12 +42,18 @@ interface KellyResult {
   implied_prob: number
   edge: number
   edge_pct: number
-  ev_per_dollar: number
+  ev_per_dollar_gross: number
+  ev_per_dollar_net: number
   ev_pct: number
+  fee_rate: number
   kelly_full: number
   kelly_full_pct: number
   kelly_fractional: number
   kelly_fractional_pct: number
+  kelly_adjusted: number
+  kelly_adjusted_pct: number
+  kelly_adjusted_fractional: number
+  kelly_adjusted_fractional_pct: number
   bankroll: number
   fraction: number
   position_full: number
@@ -52,6 +61,8 @@ interface KellyResult {
   risk_level: string
   risk_msg: string
   potential_profit: number
+  potential_loss: number
+  overconfidence_warning?: string
   error?: string
 }
 
@@ -104,6 +115,7 @@ interface AllocationResult {
 interface CrossArbOpportunity {
   question: string
   match_type: string
+  match_confidence?: number
   strategy_1: StrategyDetail
   strategy_2: StrategyDetail
   best_strategy: string
@@ -112,6 +124,7 @@ interface CrossArbOpportunity {
   guaranteed_profit: number
   profit_rate: number
   allocation: AllocationResult
+  liquidity_risk?: string
   polymarket: {
     id: string
     yes_price: number
@@ -172,6 +185,8 @@ export default function PolymarketPage() {
   const [kellyPrice, setKellyPrice] = useState('')
   const [kellyProb, setKellyProb] = useState('')
   const [kellyBankroll, setKellyBankroll] = useState('1000')
+  const [kellyFraction, setKellyFraction] = useState('0.25')
+  const [kellyFeeRate, setKellyFeeRate] = useState('1')
   const [kellyResult, setKellyResult] = useState<KellyResult | null>(null)
 
   // Detail
@@ -291,16 +306,18 @@ export default function PolymarketPage() {
     const price = parseFloat(kellyPrice)
     const prob = parseFloat(kellyProb)
     const bankroll = parseFloat(kellyBankroll) || 1000
+    const fraction = parseFloat(kellyFraction) || 0.25
+    const feeRate = (parseFloat(kellyFeeRate) || 1) / 100
     if (isNaN(price) || isNaN(prob)) return
     try {
       const res = await axios.post(`${API_BASE}/kelly`, {
-        price, estimated_prob: prob, bankroll, fraction: 0.25,
+        price, estimated_prob: prob, bankroll, fraction, fee_rate: feeRate,
       })
       setKellyResult(res.data)
     } catch (e) {
       console.error('Kelly计算失败:', e)
     }
-  }, [kellyPrice, kellyProb, kellyBankroll])
+  }, [kellyPrice, kellyProb, kellyBankroll, kellyFraction, kellyFeeRate])
 
   useEffect(() => {
     if (activeTab === 'markets') loadMarkets()
@@ -395,7 +412,7 @@ export default function PolymarketPage() {
           </div>
 
           {marketsLoading ? (
-            <div className="loading"><div className="spinner"></div>加载中...</div>
+            <LoadingSpinner />
           ) : (
             <table className="arb-table">
               <thead>
@@ -416,17 +433,17 @@ export default function PolymarketPage() {
                   <tr key={m.id}>
                     <td style={{ maxWidth: 300, fontSize: 13 }}>{m.question}</td>
                     <td><span style={{ fontSize: 11, color: '#d29922' }}>{m.tag || '-'}</span></td>
-                    <td style={{ color: m.prices[0] > 0.5 ? '#3fb950' : '#f85149', fontWeight: 600 }}>
-                      {formatPrice(m.prices[0] || 0)}
+                    <td style={{ color: (m.prices?.[0] ?? 0) > 0.5 ? '#3fb950' : '#f85149', fontWeight: 600 }}>
+                      {formatPrice(m.prices?.[0] || 0)}
                     </td>
-                    <td style={{ color: m.prices[1] > 0.5 ? '#3fb950' : '#f85149', fontWeight: 600 }}>
-                      {formatPrice(m.prices[1] || 0)}
+                    <td style={{ color: (m.prices?.[1] ?? 0) > 0.5 ? '#3fb950' : '#f85149', fontWeight: 600 }}>
+                      {formatPrice(m.prices?.[1] || 0)}
                     </td>
                     <td style={{
-                      color: m.price_sum < 0.98 ? '#3fb950' : m.price_sum > 1.02 ? '#f85149' : '#8b949e',
+                      color: (m.price_sum ?? 1) < 0.98 ? '#3fb950' : (m.price_sum ?? 1) > 1.02 ? '#f85149' : '#8b949e',
                       fontWeight: 600
                     }}>
-                      {m.price_sum.toFixed(4)}
+                      {m.price_sum?.toFixed(4) ?? '-'}
                     </td>
                     <td>{formatVolume(m.volume)}</td>
                     <td>{formatLiq(m.liquidity)}</td>
@@ -494,20 +511,26 @@ export default function PolymarketPage() {
                   <th>Yes价格</th>
                   <th>No价格</th>
                   <th>合计</th>
-                  <th>套利利润</th>
-                  <th>成交量</th>
+                  <th>毛利润</th>
+                  <th>滑点</th>
+                  <th>净利润</th>
+                  <th>流动性</th>
                   <th>操作</th>
                 </tr>
               </thead>
               <tbody>
                 {arbOpps.map(m => (
                   <tr key={m.id}>
-                    <td style={{ maxWidth: 400, fontSize: 13 }}>{m.question}</td>
+                    <td style={{ maxWidth: 350, fontSize: 13 }}>{m.question}</td>
                     <td style={{ fontWeight: 600 }}>{formatPrice(m.prices[0] || 0)}</td>
                     <td style={{ fontWeight: 600 }}>{formatPrice(m.prices[1] || 0)}</td>
                     <td style={{ color: '#3fb950', fontWeight: 700 }}>{m.price_sum.toFixed(4)}</td>
-                    <td style={{ color: '#3fb950', fontWeight: 700, fontSize: 16 }}>+{m.arbitrage_profit.toFixed(2)}%</td>
-                    <td>{formatVolume(m.volume)}</td>
+                    <td style={{ fontWeight: 600 }}>+{m.arbitrage_profit.toFixed(2)}%</td>
+                    <td style={{ color: '#d29922', fontSize: 12 }}>{m.estimated_slippage?.toFixed(1) || '?'}%</td>
+                    <td style={{ color: (m.net_arbitrage_profit ?? m.arbitrage_profit) > 0 ? '#3fb950' : '#f85149', fontWeight: 700, fontSize: 15 }}>
+                      +{(m.net_arbitrage_profit ?? m.arbitrage_profit).toFixed(2)}%
+                    </td>
+                    <td style={{ fontSize: 12 }}>{formatLiq(m.liquidity)}</td>
                     <td>
                       <button onClick={() => loadDetail(m.id)}
                         style={{ padding: '2px 8px', borderRadius: 4, background: '#58a6ff20', color: '#58a6ff', border: '1px solid #58a6ff40', cursor: 'pointer', fontSize: 12 }}>
@@ -587,7 +610,10 @@ export default function PolymarketPage() {
                         <div style={{ flex: 1 }}>
                           <div style={{ fontSize: 15, fontWeight: 600, marginBottom: 4 }}>{opp.question}</div>
                           <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>
-                            匹配方式: {opp.match_type === 'exact' ? '精确匹配' : opp.match_type === 'contains' ? '包含匹配' : '关键词匹配'}
+                            匹配: {opp.match_type === 'exact' ? '精确' : opp.match_type === 'contains' ? '包含' : opp.match_type === 'keyword_high' ? '高置信关键词' : opp.match_type === 'keyword_entity' ? '实体关键词' : '关键词'}
+                            {opp.match_confidence && ` (${(opp.match_confidence * 100).toFixed(0)}%)`}
+                            {opp.liquidity_risk === 'high' && <span style={{ color: '#f85149', marginLeft: 8 }}>低流动性风险</span>}
+                            {opp.liquidity_risk === 'medium' && <span style={{ color: '#d29922', marginLeft: 8 }}>中流动性风险</span>}
                           </div>
                         </div>
                         <div style={{
@@ -776,6 +802,13 @@ export default function PolymarketPage() {
 
           {allocResult && !allocResult.error && (
             <>
+              {/* Warning for thin margins */}
+              {allocResult.profit_rate < 1 && allocResult.profit_rate > 0 && (
+                <div style={{ background: '#d2992220', border: '1px solid #d29922', borderRadius: 8, padding: 12, marginBottom: 16, fontSize: 13, color: '#d29922' }}>
+                  利润率仅{allocResult.profit_rate.toFixed(2)}%，需注意：价格微小波动或手续费变动可能导致亏损。建议仅在确认价格稳定后操作。
+                </div>
+              )}
+
               {/* 配资方案 */}
               <div style={{
                 display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))',
@@ -1116,6 +1149,22 @@ export default function PolymarketPage() {
                 value={kellyBankroll} onChange={e => setKellyBankroll(e.target.value)}
                 style={{ width: '100%', padding: '8px 12px', borderRadius: 6, background: 'var(--bg-secondary)', color: 'var(--text-primary)', border: '1px solid var(--border-primary)' }} />
             </div>
+            <div>
+              <label style={{ display: 'block', fontSize: 12, color: 'var(--text-secondary)', marginBottom: 4 }}>Kelly分数</label>
+              <select value={kellyFraction} onChange={e => setKellyFraction(e.target.value)}
+                style={{ width: '100%', padding: '8px 12px', borderRadius: 6, background: 'var(--bg-secondary)', color: 'var(--text-primary)', border: '1px solid var(--border-primary)' }}>
+                <option value="0.1">1/10 Kelly (极保守)</option>
+                <option value="0.25">1/4 Kelly (保守)</option>
+                <option value="0.5">1/2 Kelly (中等)</option>
+                <option value="1">Full Kelly (激进)</option>
+              </select>
+            </div>
+            <div>
+              <label style={{ display: 'block', fontSize: 12, color: 'var(--text-secondary)', marginBottom: 4 }}>预估交易成本 (%)</label>
+              <input type="number" min="0" max="10" step="0.1" placeholder="1"
+                value={kellyFeeRate} onChange={e => setKellyFeeRate(e.target.value)}
+                style={{ width: '100%', padding: '8px 12px', borderRadius: 6, background: 'var(--bg-secondary)', color: 'var(--text-primary)', border: '1px solid var(--border-primary)' }} />
+            </div>
             <div style={{ display: 'flex', alignItems: 'flex-end' }}>
               <button onClick={calcKelly}
                 style={{ padding: '8px 24px', borderRadius: 6, background: '#58a6ff', color: '#fff', border: 'none', cursor: 'pointer', fontWeight: 600, width: '100%' }}>
@@ -1125,67 +1174,78 @@ export default function PolymarketPage() {
           </div>
 
           {kellyResult && !kellyResult.error && (
-            <div style={{
-              display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
-              gap: 12, marginBottom: 16,
-            }}>
+            <>
+              {/* Overconfidence warning */}
+              {kellyResult.overconfidence_warning && (
+                <div style={{ background: '#d2992230', border: '1px solid #d29922', borderRadius: 8, padding: 12, marginBottom: 16, fontSize: 13, color: '#d29922' }}>
+                  {kellyResult.overconfidence_warning}
+                </div>
+              )}
+
               <div style={{
-                background: 'var(--bg-secondary)', borderRadius: 8, padding: 16,
-                border: '1px solid var(--border-primary)',
+                display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
+                gap: 12, marginBottom: 16,
               }}>
-                <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 4 }}>优势 (Edge)</div>
-                <div style={{ fontSize: 20, fontWeight: 700, color: kellyResult.edge > 0 ? '#3fb950' : '#f85149' }}>
-                  {kellyResult.edge_pct > 0 ? '+' : ''}{kellyResult.edge_pct.toFixed(2)}%
+                <div style={{
+                  background: 'var(--bg-secondary)', borderRadius: 8, padding: 16,
+                  border: '1px solid var(--border-primary)',
+                }}>
+                  <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 4 }}>优势 (Edge)</div>
+                  <div style={{ fontSize: 20, fontWeight: 700, color: kellyResult.edge > 0 ? '#3fb950' : '#f85149' }}>
+                    {kellyResult.edge_pct > 0 ? '+' : ''}{kellyResult.edge_pct.toFixed(2)}%
+                  </div>
+                </div>
+                <div style={{
+                  background: 'var(--bg-secondary)', borderRadius: 8, padding: 16,
+                  border: '1px solid var(--border-primary)',
+                }}>
+                  <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 4 }}>期望值 (EV)</div>
+                  <div style={{ fontSize: 20, fontWeight: 700, color: kellyResult.ev_pct > 0 ? '#3fb950' : '#f85149' }}>
+                    {kellyResult.ev_pct > 0 ? '+' : ''}{kellyResult.ev_pct.toFixed(2)}%
+                  </div>
+                  <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>扣除{ kellyResult.fee_rate }%成本后</div>
+                </div>
+                <div style={{
+                  background: 'var(--bg-secondary)', borderRadius: 8, padding: 16,
+                  border: '1px solid var(--border-primary)',
+                }}>
+                  <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 4 }}>成本调整Kelly</div>
+                  <div style={{ fontSize: 20, fontWeight: 700, color: '#58a6ff' }}>
+                    {kellyResult.kelly_adjusted_fractional_pct.toFixed(2)}%
+                  </div>
+                  <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>原始: {kellyResult.kelly_fractional_pct.toFixed(2)}%</div>
+                </div>
+                <div style={{
+                  background: 'var(--bg-secondary)', borderRadius: 8, padding: 16,
+                  border: '1px solid var(--border-primary)',
+                }}>
+                  <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 4 }}>建议仓位</div>
+                  <div style={{ fontSize: 20, fontWeight: 700, color: '#3fb950' }}>
+                    ${kellyResult.position_fractional.toFixed(2)}
+                  </div>
+                  <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>资金: ${kellyResult.bankroll}</div>
+                </div>
+                <div style={{
+                  background: 'var(--bg-secondary)', borderRadius: 8, padding: 16,
+                  border: '1px solid var(--border-primary)',
+                }}>
+                  <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 4 }}>预期收益/损失</div>
+                  <div style={{ fontSize: 20, fontWeight: 700, color: '#3fb950' }}>
+                    +${kellyResult.potential_profit.toFixed(2)}
+                  </div>
+                  <div style={{ fontSize: 11, color: '#f85149' }}>若错: -${kellyResult.potential_loss.toFixed(2)}</div>
+                </div>
+                <div style={{
+                  background: 'var(--bg-secondary)', borderRadius: 8, padding: 16,
+                  border: '1px solid var(--border-primary)',
+                }}>
+                  <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 4 }}>风险评级</div>
+                  <div style={{ fontSize: 16, fontWeight: 700, color: getRiskColor(kellyResult.risk_level) }}>
+                    {kellyResult.risk_msg}
+                  </div>
                 </div>
               </div>
-              <div style={{
-                background: 'var(--bg-secondary)', borderRadius: 8, padding: 16,
-                border: '1px solid var(--border-primary)',
-              }}>
-                <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 4 }}>期望值 (EV)</div>
-                <div style={{ fontSize: 20, fontWeight: 700, color: kellyResult.ev_pct > 0 ? '#3fb950' : '#f85149' }}>
-                  {kellyResult.ev_pct > 0 ? '+' : ''}{kellyResult.ev_pct.toFixed(2)}%
-                </div>
-              </div>
-              <div style={{
-                background: 'var(--bg-secondary)', borderRadius: 8, padding: 16,
-                border: '1px solid var(--border-primary)',
-              }}>
-                <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 4 }}>Kelly比例</div>
-                <div style={{ fontSize: 20, fontWeight: 700, color: '#58a6ff' }}>
-                  {kellyResult.kelly_fractional_pct.toFixed(2)}%
-                </div>
-                <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>Full Kelly: {kellyResult.kelly_full_pct.toFixed(2)}%</div>
-              </div>
-              <div style={{
-                background: 'var(--bg-secondary)', borderRadius: 8, padding: 16,
-                border: '1px solid var(--border-primary)',
-              }}>
-                <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 4 }}>建议仓位</div>
-                <div style={{ fontSize: 20, fontWeight: 700, color: '#3fb950' }}>
-                  ${kellyResult.position_fractional.toFixed(2)}
-                </div>
-                <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>资金: ${kellyResult.bankroll}</div>
-              </div>
-              <div style={{
-                background: 'var(--bg-secondary)', borderRadius: 8, padding: 16,
-                border: '1px solid var(--border-primary)',
-              }}>
-                <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 4 }}>潜在利润</div>
-                <div style={{ fontSize: 20, fontWeight: 700, color: '#f0883e' }}>
-                  ${kellyResult.potential_profit.toFixed(2)}
-                </div>
-              </div>
-              <div style={{
-                background: 'var(--bg-secondary)', borderRadius: 8, padding: 16,
-                border: '1px solid var(--border-primary)',
-              }}>
-                <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 4 }}>风险评级</div>
-                <div style={{ fontSize: 16, fontWeight: 700, color: getRiskColor(kellyResult.risk_level) }}>
-                  {kellyResult.risk_msg}
-                </div>
-              </div>
-            </div>
+            </>
           )}
 
           {kellyResult?.error && (
@@ -1195,13 +1255,15 @@ export default function PolymarketPage() {
           )}
 
           <div className="arb-risk-section" style={{ marginTop: 16 }}>
-            <h4>Kelly公式说明</h4>
+            <h4>Kelly公式说明（机构级修正版）</h4>
             <ul>
               <li><strong>Full Kelly</strong>: f* = (b*p - q) / b，其中 b = 赔率, p = 你估计的概率, q = 1-p</li>
-              <li><strong>Fractional Kelly</strong>: 使用1/4 Kelly，牺牲部分收益换取更低的波动</li>
+              <li><strong>成本调整Kelly</strong>: 扣除交易手续费(1%)和滑点后的实际推荐仓位，更贴近真实可执行</li>
+              <li><strong>Fractional Kelly</strong>: 可选1/10~Full Kelly，牺牲收益换取更低的破产风险</li>
               <li><strong>优势(Edge)</strong>: 你估计的概率 - 市场隐含概率，正数表示你认为市场低估了</li>
-              <li><strong>期望值(EV)</strong>: 每投入$1的预期收益</li>
-              <li>Kelly公式假设你的概率估计是准确的，过度自信会导致过度下注</li>
+              <li><strong>期望值(EV)</strong>: 扣除交易成本后每投入$1的预期收益，负EV不应下注</li>
+              <li><strong>过度自信警告</strong>: 当你的概率估计偏离市场{'>'}20%时自动提醒，请确保有充分理由</li>
+              <li><strong>潜在损失</strong>: 如果判断错误，预估的亏损金额，帮助评估最坏情况</li>
             </ul>
           </div>
         </div>

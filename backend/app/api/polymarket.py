@@ -25,6 +25,7 @@ class KellyRequest(BaseModel):
     estimated_prob: float
     bankroll: float = 1000
     fraction: float = 0.25
+    fee_rate: float = 0.01  # 预估交易成本率（默认1%）
 
 
 class AllocationRequest(BaseModel):
@@ -99,12 +100,13 @@ def order_book(token_id: str):
 
 @router.post("/kelly")
 def kelly(req: KellyRequest):
-    """Kelly仓位计算器"""
+    """Kelly仓位计算器（含手续费修正）"""
     return calculate_kelly(
         price=req.price,
         estimated_prob=req.estimated_prob,
         bankroll=req.bankroll,
         fraction=req.fraction,
+        fee_rate=req.fee_rate,
     )
 
 

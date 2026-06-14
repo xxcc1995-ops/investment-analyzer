@@ -1,6 +1,9 @@
 import os
 import httpx
+import logging
 from dotenv import load_dotenv
+
+logger = logging.getLogger(__name__)
 
 load_dotenv()
 
@@ -28,24 +31,36 @@ class NeoDataService:
             "data_type": data_type
         }
 
-        async with httpx.AsyncClient() as client:
-            response = await client.post(
-                self.base_url,
-                json=payload,
-                headers=headers,
-                timeout=30.0
-            )
+        try:
+            async with httpx.AsyncClient() as client:
+                response = await client.post(
+                    self.base_url,
+                    json=payload,
+                    headers=headers,
+                    timeout=30.0
+                )
 
-            if response.status_code == 401:
-                # Token过期，需要重新获取
-                raise Exception("Token已过期，请重新获取")
+                if response.status_code == 401:
+                    # Token过期，需要重新获取
+                    raise Exception("Token已过期，请重新获取")
 
-            data = response.json()
+                data = response.json()
 
-            if data.get("code") != "200":
-                raise Exception(f"查询失败: {data.get('msg', '未知错误')}")
+                if data.get("code") != "200":
+                    raise Exception(f"查询失败: {data.get('msg', '未知错误')}")
 
-            return data.get("data", {})
+                return data.get("data", {})
+        except httpx.TimeoutException:
+            logger.error(f"NeoData查询超时: {query}")
+            raise Exception("NeoData查询超时，请稍后重试")
+        except httpx.ConnectError:
+            logger.error(f"NeoData连接失败: {query}")
+            raise Exception("NeoData服务连接失败，请检查网络")
+        except httpx.HTTPStatusError as e:
+            logger.error(f"NeoData HTTP错误 {e.response.status_code}: {query}")
+            raise Exception(f"NeoData请求失败: HTTP {e.response.status_code}")
+        except Exception:
+            raise  # 重新抛出已有的业务异常
 
     async def get_stock_metrics(self, stock_code: str) -> dict:
         """获取股票关键指标"""

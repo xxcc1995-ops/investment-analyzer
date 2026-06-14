@@ -157,7 +157,8 @@ def _persist_to_file(key: str, data: Any):
         os.makedirs(CACHE_DIR, exist_ok=True)
         path = _file_cache_path(key)
         with open(path, "w", encoding="utf-8") as f:
-            json.dump({"data": data, "ts": time.time()}, f, ensure_ascii=False)
+            # 存储原始key以便后续还原
+            json.dump({"key": key, "data": data, "ts": time.time()}, f, ensure_ascii=False)
         logger.debug(f"持久化缓存到文件: {key}")
     except Exception as e:
         logger.debug(f"持久化缓存失败 {key}: {e}")
@@ -170,11 +171,22 @@ def _clear_file_cache(prefix: str):
             return
         for filename in os.listdir(CACHE_DIR):
             if filename.endswith(".json"):
-                safe_key = filename[:-5]  # 去掉.json
-                original_key = safe_key.replace("_", ":")  # 简单还原
-                if original_key.startswith(prefix):
-                    os.remove(os.path.join(CACHE_DIR, filename))
-                    logger.debug(f"删除文件缓存: {filename}")
+                filepath = os.path.join(CACHE_DIR, filename)
+                try:
+                    with open(filepath, "r", encoding="utf-8") as f:
+                        stored = json.load(f)
+                    # 优先使用存储的原始key
+                    original_key = stored.get("key", "")
+                    if not original_key:
+                        # 兼容旧格式：从文件名还原
+                        safe_key = filename[:-5]
+                        original_key = safe_key.replace("_", ":")
+                    if original_key.startswith(prefix):
+                        os.remove(filepath)
+                        logger.debug(f"删除文件缓存: {filename}")
+                except Exception:
+                    # 读取失败的文件跳过
+                    pass
     except Exception as e:
         logger.debug(f"清除文件缓存失败: {e}")
 

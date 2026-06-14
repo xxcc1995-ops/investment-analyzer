@@ -40,3 +40,16 @@ Thumbs.db
 
 # Sensitive login data
 backend/.jisilu_login.json
+
+# Capacitor / Android build
+frontend/android/app/build/
+frontend/android/.gradle/
+frontend/android/capacitor.config.json
+*.apk
+*.aab
+
+# Claude Code
+.claude/scheduled_tasks.json
+*.pkl
+test.json
+test_result.json

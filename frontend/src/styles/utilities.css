@@ -1,0 +1,290 @@
+/* ============================================================
+   Utilities — Bond yield, responsive, touch, capacitor
+   ============================================================ */
+
+.bond-yield-card {
+  flex: 1;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  padding: 10px;
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+.bond-yield-card:hover {
+  border-color: var(--accent-blue);
+  box-shadow: 0 2px 8px rgba(88,166,255,0.1);
+}
+
+.bond-yield-label { font-size: 11px; color: var(--text-muted); margin-bottom: 4px; font-weight: 600; }
+.bond-yield-value { font-size: 20px; font-weight: 700; letter-spacing: -0.3px; }
+.bond-yield-change { font-size: 11px; margin-top: 2px; font-weight: 600; }
+.bond-yield-desc { font-size: 11px; color: var(--text-muted); margin-top: 4px; }
+.bond-yield-details {
+  font-size: 11px; color: var(--text-secondary); margin-top: 6px;
+  border-top: 1px dashed var(--border-primary); padding-top: 6px;
+  font-weight: 500;
+}
+
+/* ============================================================
+   移动端响应式适配 (Capacitor / Android APP)
+   ============================================================ */
+
+/* 安全区域适配 */
+@supports (padding-top: env(safe-area-inset-top)) {
+  body {
+    padding-top: env(safe-area-inset-top);
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+}
+
+/* 平板 (768px以下) */
+@media (max-width: 768px) {
+  .metrics-grid {
+    grid-template-columns: repeat(2, 1fr);
+    gap: 10px;
+  }
+
+  .buffett-grid {
+    grid-template-columns: repeat(2, 1fr);
+    gap: 10px;
+  }
+
+  .charts-row {
+    grid-template-columns: 1fr;
+  }
+
+  .price-section {
+    flex-direction: column;
+    gap: 16px;
+  }
+
+  .price-details {
+    gap: 12px;
+  }
+
+  .price-big {
+    font-size: 28px;
+  }
+
+  .change-big {
+    font-size: 16px;
+  }
+
+  .stock-header,
+  .metrics-section,
+  .buffett-section {
+    padding: 14px 16px;
+  }
+
+  .tabs {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .tab {
+    padding: 10px 16px;
+    font-size: 13px;
+    white-space: nowrap;
+  }
+
+  .table-container {
+    padding: 10px;
+    overflow-x: auto;
+  }
+
+  table {
+    font-size: 12px;
+  }
+
+  th, td {
+    padding: 8px;
+  }
+
+  .valuation-summary {
+    flex-wrap: wrap;
+    gap: 12px;
+    padding: 12px 16px;
+  }
+
+  .stat-value {
+    font-size: 20px;
+  }
+
+  .dividend-summary {
+    gap: 10px;
+  }
+
+  .empty-state .icon {
+    font-size: 48px;
+  }
+
+  .empty-state .text {
+    font-size: 18px;
+  }
+}
+
+/* 手机 (480px以下) */
+@media (max-width: 480px) {
+  .metrics-grid {
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+  }
+
+  .metric-card {
+    padding: 10px;
+  }
+
+  .metric-value {
+    font-size: 18px;
+  }
+
+  .metric-label {
+    font-size: 11px;
+  }
+
+  .buffett-grid {
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+  }
+
+  .buffett-item {
+    padding: 10px;
+  }
+
+  .buffett-value {
+    font-size: 18px;
+  }
+
+  .stock-header {
+    padding: 12px;
+  }
+
+  .stock-title-row h2 {
+    font-size: 18px;
+  }
+
+  .data-freshness {
+    gap: 6px;
+  }
+
+  .freshness-tag {
+    font-size: 10px;
+    padding: 2px 6px;
+  }
+
+  .price-big {
+    font-size: 24px;
+  }
+
+  .charts-row {
+    margin-bottom: 10px;
+  }
+
+  .chart-container {
+    padding: 10px;
+  }
+
+  .chart-title {
+    font-size: 13px;
+  }
+
+  .tabs {
+    gap: 0;
+  }
+
+  .tab {
+    padding: 8px 12px;
+    font-size: 12px;
+  }
+
+  .valuation-summary {
+    gap: 8px;
+    padding: 10px 12px;
+  }
+
+  .stat-value {
+    font-size: 18px;
+  }
+
+  .stat-label {
+    font-size: 11px;
+  }
+
+  /* 表格横向滚动 */
+  .table-container {
+    -webkit-overflow-scrolling: touch;
+  }
+
+  /* 搜索框适配 */
+  .arb-login-form {
+    flex-direction: column;
+  }
+
+  .arb-login-form input {
+    width: 100%;
+  }
+
+  .arb-notes-grid {
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+  }
+
+  .arb-filters {
+    flex-direction: column;
+    gap: 10px;
+    align-items: flex-start;
+  }
+
+  .arb-info {
+    flex-direction: column;
+    gap: 12px;
+  }
+}
+
+/* 触摸优化 */
+@media (pointer: coarse) {
+  .tab {
+    min-height: 44px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .metric-card {
+    min-height: 80px;
+  }
+
+  .buffett-item {
+    min-height: 80px;
+  }
+
+  /* 增大可点击区域 */
+  .search-item {
+    min-height: 44px;
+  }
+
+  tr {
+    min-height: 40px;
+  }
+}
+
+/* Capacitor 安全区域 */
+.capacitor-statusbar-overlay {
+  padding-top: var(--ion-statusbar-height, 24px);
+}
+
+/* 禁用长按上下文菜单 (APP内) */
+.capacitor-app {
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+/* 允许文本选择的内容区域 */
+.capacitor-app .selectable,
+.capacitor-app input,
+.capacitor-app textarea {
+  -webkit-user-select: text;
+  user-select: text;
+}

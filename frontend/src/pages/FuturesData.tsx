@@ -1,3 +1,4 @@
+import { LoadingSpinner } from '../components/ui'
 import { useState, useEffect, useCallback } from 'react'
 import axios from 'axios'
 
@@ -112,7 +113,7 @@ export default function FuturesData() {
         ))}
       </div>
 
-      {loading ? <div className="loading"><div className="spinner"></div>加载中...</div> : (
+      {loading ? <LoadingSpinner /> : (
         <>
           {activeTab === 'commodities' && (
             <>
