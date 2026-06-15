@@ -3,6 +3,29 @@ import axios from 'axios'
 import ReactECharts from 'echarts-for-react'
 import { PageSection, TabBar, StatCard, StatCardGroup, LoadingSpinner, EmptyState } from '../components/ui'
 import { useTradingInterceptor } from '../hooks/useTradingInterceptor'
+
+/** 鼠标悬停提示组件 */
+function Tip({ text, children }: { text: string; children: React.ReactNode }) {
+  const [show, setShow] = useState(false)
+  return (
+    <span style={{ position: 'relative', cursor: 'help', borderBottom: '1px dotted #666' }}
+      onMouseEnter={() => setShow(true)} onMouseLeave={() => setShow(false)}>
+      {children}
+      {show && (
+        <span style={{
+          position: 'absolute', bottom: '100%', left: '50%', transform: 'translateX(-50%)',
+          background: '#1a1a2e', color: '#e0e0e0', border: '1px solid #d4a76a',
+          borderRadius: 6, padding: '8px 12px', fontSize: 12, lineHeight: 1.6,
+          whiteSpace: 'pre-wrap', minWidth: 180, maxWidth: 320, zIndex: 1000,
+          boxShadow: '0 4px 16px rgba(0,0,0,0.5)', pointerEvents: 'none',
+          marginBottom: 6,
+        }}>
+          {text}
+        </span>
+      )}
+    </span>
+  )
+}
 import RationalCheckpoint from '../components/RationalCheckpoint'
 
 const API_BASE = '/api'
@@ -680,10 +703,19 @@ export default function FutuOptionChain() {
                   <table className="arb-table" style={{ width: '100%', minWidth: 950 }}>
                     <thead>
                       <tr>
-                        <th>类型</th><th>行权价</th><th>到期</th><th>天数</th>
-                        <th>买入</th><th>卖出</th><th>最新</th>
-                        <th>成交量</th><th>IV%</th><th>Delta</th>
-                        <th>OTM%</th><th>胜率</th><th>年化%</th><th>价差%</th><th>评分</th>
+                        <th>类型</th><th>行权价</th><th>到期</th>
+                        <th><Tip text="DTE (Days To Expiration)\n距离到期日的自然天数\n越接近到期，时间价值衰减越快">天数</Tip></th>
+                        <th><Tip text="Bid 买价\n市场上有人愿意出这个价买你的期权">买入</Tip></th>
+                        <th><Tip text="Ask 卖价\n市场上有人愿意以这个价卖给你期权\n买卖价差越小，流动性越好">卖出</Tip></th>
+                        <th>最新</th>
+                        <th><Tip text="Volume 成交量\n今日成交的合约数量\n成交量越高，流动性越好，越容易成交">成交量</Tip></th>
+                        <th><Tip text="IV 隐含波动率 (Implied Volatility)\n市场对未来波动幅度的预期\nIV越高，期权越贵\n适合卖期权：IV高时收更多权利金">IV%</Tip></th>
+                        <th><Tip text="Delta 方向性敞口\n股价变动1元，期权价格变动多少\nCall Delta: 0~1，Put Delta: -1~0\n|Delta|越小，越虚值（OTM）\n也近似表示到期盈利概率">Delta</Tip></th>
+                        <th><Tip text="OTM 虚值百分比 (Out of The Money)\n行权价距现价的距离百分比\nCall: (行权价-现价)/现价\nPut: (现价-行权价)/现价\nOTM≥5%较安全，被行权概率低">OTM%</Tip></th>
+                        <th><Tip text="胜率 Pop (Probability of Profit)\n基于Delta估算的到期盈利概率\n= 1 - |Delta|\n胜率>70%比较稳妥">胜率</Tip></th>
+                        <th><Tip text="年化收益率\n假设持有到期并按当前价格计算\n卖Put: 权利金/保证金 × 365/天数\n卖Call: 收益/正股成本 × 365/天数\n注意：未扣除手续费">年化%</Tip></th>
+                        <th><Tip text="Bid-Ask Spread 买卖价差\n= (卖价-买价)/中间价 × 100%\n价差越小，流动性越好\n<10%适合交易，>20%谨慎">价差%</Tip></th>
+                        <th><Tip text="综合评分 (0-100分)\n7个维度加权：\nIV/HV溢价、IV百分位、年化收益、\nOTM缓冲、Theta效率、胜率、流动性\n分数越高越值得交易">评分</Tip></th>
                       </tr>
                     </thead>
                     <tbody>
@@ -715,11 +747,11 @@ export default function FutuOptionChain() {
                                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 16, fontSize: 13 }}>
                                     <div>
                                       <p style={{ color: '#d4a76a', fontWeight: 600, marginBottom: 8 }}>Greeks (BSM)</p>
-                                      <p style={{ color: '#ccc' }}>Delta: {c.delta?.toFixed(4)}</p>
-                                      <p style={{ color: '#ccc' }}>Gamma: {c.gamma?.toFixed(6)}</p>
-                                      <p style={{ color: '#ccc' }}>Theta: {c.theta?.toFixed(4)}/天</p>
-                                      <p style={{ color: '#ccc' }}>Vega: {c.vega?.toFixed(4)}</p>
-                                      {c.rho != null && <p style={{ color: '#ccc' }}>Rho: {c.rho?.toFixed(4)}</p>}
+                                      <p style={{ color: '#ccc' }}><span title="股价变动1元→期权价变动量。Call:0~1, Put:-1~0">Delta</span>: {c.delta?.toFixed(4)}</p>
+                                      <p style={{ color: '#ccc' }}><span title="Delta的变化率，衡量Delta对股价变动的敏感度">Gamma</span>: {c.gamma?.toFixed(6)}</p>
+                                      <p style={{ color: '#ccc' }}><span title="每天时间价值衰减金额，卖期权者的朋友（每天赚钱）">Theta</span>: {c.theta?.toFixed(4)}/天</p>
+                                      <p style={{ color: '#ccc' }}><span title="波动率变动1%→期权价变动量。IV上升时Vega越大赚越多">Vega</span>: {c.vega?.toFixed(4)}</p>
+                                      {c.rho != null && <p style={{ color: '#ccc' }}><span title="利率变动1%→期权价变动量，影响较小">Rho</span>: {c.rho?.toFixed(4)}</p>}
                                     </div>
                                     <div>
                                       <p style={{ color: '#d4a76a', fontWeight: 600, marginBottom: 8 }}>流动性分析</p>
@@ -762,9 +794,17 @@ export default function FutuOptionChain() {
                         <th colSpan={6} style={{ textAlign: 'center', color: '#1890ff' }}>Call</th>
                       </tr>
                       <tr>
-                        <th>评分</th><th>年化%</th><th>胜率</th><th>Delta</th><th>成交量</th><th>价格</th>
+                        <th><Tip text="综合评分 (0-100)，越高越好">评分</Tip></th>
+                        <th><Tip text="年化收益率（未扣手续费）">年化%</Tip></th>
+                        <th><Tip text="到期盈利概率 Pop = 1 - |Delta|">胜率</Tip></th>
+                        <th><Tip text="Delta：股价变动1元，期权价格变动量">Delta</Tip></th>
+                        <th>成交量</th><th>价格</th>
                         <th style={{ background: '#2a2a4e' }}></th>
-                        <th>价格</th><th>成交量</th><th>Delta</th><th>胜率</th><th>年化%</th><th>评分</th>
+                        <th>价格</th><th>成交量</th>
+                        <th><Tip text="Delta：股价变动1元，期权价格变动量">Delta</Tip></th>
+                        <th><Tip text="到期盈利概率 Pop = 1 - |Delta|">胜率</Tip></th>
+                        <th><Tip text="年化收益率（未扣手续费）">年化%</Tip></th>
+                        <th><Tip text="综合评分 (0-100)，越高越好">评分</Tip></th>
                       </tr>
                     </thead>
                     <tbody>
@@ -1086,7 +1126,7 @@ export default function FutuOptionChain() {
                 <div style={{ color: '#999', fontSize: 12 }}>期权价格</div>
                 <div style={{ color: '#d4a76a', fontSize: 20, fontWeight: 700 }}>{calcResult?.greeks?.price?.toFixed(4) ?? '-'}</div>
               </div>
-              <div style={{ background: '#1a1a2e', padding: 14, borderRadius: 8, border: '1px solid #333' }}>
+              <div title="股价变动1元→期权价变动量。Call:0~1, Put:-1~0" style={{ background: '#1a1a2e', padding: 14, borderRadius: 8, border: '1px solid #333', cursor: 'help' }}>
                 <div style={{ color: '#999', fontSize: 12 }}>Delta</div>
                 <div style={{ color: '#1890ff', fontSize: 20, fontWeight: 700 }}>{calcResult?.greeks?.delta?.toFixed(4) ?? '-'}</div>
               </div>
@@ -1560,17 +1600,17 @@ export default function FutuOptionChain() {
                         <th style={futuThStyle}>策略</th>
                         <th style={futuThStyle}>行权价</th>
                         <th style={futuThStyle}>权利金</th>
-                        <th style={futuThStyle}>天数</th>
-                        <th style={futuThStyle}>OTM%</th>
-                        <th style={{ ...futuThStyle, color: '#52c41a' }}>扣费后年化</th>
-                        <th style={futuThStyle}>扣费前年化</th>
-                        <th style={futuThStyle}>净利润</th>
-                        <th style={futuThStyle}>盈利概率</th>
-                        <th style={futuThStyle}>IV</th>
-                        <th style={futuThStyle}>Delta</th>
-                        <th style={futuThStyle}>成交量</th>
-                        <th style={futuThStyle}>价差%</th>
-                        <th style={futuThStyle}>评分</th>
+                        <th style={futuThStyle}><span style={tipSpan} title="DTE：距离到期日的自然天数">天数</span></th>
+                        <th style={futuThStyle}><span style={tipSpan} title="OTM 虚值百分比：行权价距现价的距离。≥5%较安全">OTM%</span></th>
+                        <th style={{ ...futuThStyle, color: '#52c41a' }}><span style={tipSpan} title="扣除交易费+行权费后的年化收益率（按被行权的保守情况计算）">扣费后年化</span></th>
+                        <th style={futuThStyle}><span style={tipSpan} title="未扣除手续费的年化收益率">扣费前年化</span></th>
+                        <th style={futuThStyle}><span style={tipSpan} title="扣除全部手续费后的净利润">净利润</span></th>
+                        <th style={futuThStyle}><span style={tipSpan} title="Pop 到期盈利概率 = 1 - |Delta|，越高越稳妥">盈利概率</span></th>
+                        <th style={futuThStyle}><span style={tipSpan} title="IV 隐含波动率：市场对未来波动的预期，IV越高期权越贵">IV</span></th>
+                        <th style={futuThStyle}><span style={tipSpan} title="Delta：股价变动1元，期权价格变动量。|Delta|越小越虚值">Delta</span></th>
+                        <th style={futuThStyle}><span style={tipSpan} title="今日成交量，越高流动性越好">成交量</span></th>
+                        <th style={futuThStyle}><span style={tipSpan} title="买卖价差百分比，<10%流动性好，>20%谨慎">价差%</span></th>
+                        <th style={futuThStyle}><span style={tipSpan} title="综合评分(0-100)，7维度加权，越高越值得交易">评分</span></th>
                       </tr>
                     </thead>
                     <tbody>
@@ -1652,4 +1692,7 @@ const futuThStyle: React.CSSProperties = {
 }
 const futuTdStyle: React.CSSProperties = {
   padding: '6px 10px', verticalAlign: 'middle', color: '#ccc',
+}
+const tipSpan: React.CSSProperties = {
+  borderBottom: '1px dotted #666', cursor: 'help',
 }

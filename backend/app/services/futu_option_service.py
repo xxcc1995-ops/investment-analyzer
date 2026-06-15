@@ -2028,6 +2028,7 @@ def get_option_chain_from_futu(
             'best_yield': best_yield, 'safest': safest,
             'total': len(chain), 'update_time': datetime.now().isoformat(),
             'data_source': 'Futu OpenD (真实市场数据 + BSM Greeks + 改进评分)',
+            '_dte_fix': 'v2_date_only',
         }
 
         _set_cached(cache_key, result)

@@ -43,6 +43,7 @@ const CryptoMasterPage = lazy(() => import('./pages/CryptoMasterPage'))
 const QuantBacktest = lazy(() => import('./pages/QuantBacktest'))
 const PrefrontalTraining = lazy(() => import('./pages/PrefrontalTraining'))
 const AirdropScannerPage = lazy(() => import('./pages/AirdropScannerPage'))
+const WechatDigest = lazy(() => import('./pages/WechatDigest'))
 
 // ============ 类型定义 ============
 
@@ -216,6 +217,7 @@ function App() {
               <Route path="/hki" element={<HKIpoPage />} />
               <Route path="/crypto" element={<CryptoMasterPage />} />
               <Route path="/airdrop-scanner" element={<AirdropScannerPage />} />
+              <Route path="/wechat-digest" element={<WechatDigest />} />
               <Route path="/national-team" element={<NationalTeamMonitor />} />
               <Route path="/decision-guard" element={<DecisionGuard />} />
               <Route path="/prefrontal-training" element={<PrefrontalTraining />} />

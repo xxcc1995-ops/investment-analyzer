@@ -31,6 +31,7 @@ import {
   LinkOutlined,
   FireOutlined,
   GiftOutlined,
+  FileTextOutlined,
 } from '@ant-design/icons'
 import type { MenuProps } from 'antd'
 
@@ -73,6 +74,7 @@ const keyToPath: Record<string, string> = {
   hki: '/hki',
   cryptoMaster: '/crypto',
   airdropScanner: '/airdrop-scanner',
+  wechatDigest: '/wechat-digest',
   nationalTeam: '/national-team',
   strategyValidation: '/strategy-validation',
   bankValuation: '/bank-valuation',
@@ -101,6 +103,7 @@ const menuItems: MenuItem[] = [
   getItem('行情总览', 'market', <LineChartOutlined />, [
     getItem('我的持仓', 'portfolio', <PieChartOutlined />),
     getItem('每日资讯', 'dailyInfo', <DashboardOutlined />),
+    getItem('公众号日报', 'wechatDigest', <FileTextOutlined />),
     getItem('我的自选', 'stock', <DashboardOutlined />),
     getItem('指数估值', 'indexVal', <BarChartOutlined />),
     getItem('宏观数据', 'macro', <AreaChartOutlined />),

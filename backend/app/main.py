@@ -31,8 +31,16 @@ async def lifespan(app: FastAPI):
     """Application lifespan: startup and shutdown hooks."""
     # Startup
     import threading
+    from app.core.database import init_db
     from app.services.fund_service import FundService
     from app.services.akshare_service import AKShareService
+
+    # 初始化 SQLite 数据库（建表 + 迁移旧 JSON 数据）
+    try:
+        init_db()
+        logger.info("SQLite 数据库初始化完成")
+    except Exception as e:
+        logger.error(f"SQLite 数据库初始化失败: {e}")
 
     # 恢复集思录登录态
     try:

@@ -22,11 +22,12 @@ import time
 from datetime import datetime
 from typing import Optional
 
+from app.core.database import get_db
+
 # ============================================================
-# 路径
+# 路径（仅用于兼容旧文件迁移检查，数据库模式下不再直接使用）
 # ============================================================
 LOG_DIR = os.path.join(os.path.dirname(__file__), "..", "..", "data")
-LOG_FILE = os.path.join(LOG_DIR, "decision_log.json")
 
 # ============================================================
 # 模块一：快思维检测 (System 1 Trap Detection)
@@ -245,25 +246,34 @@ EMOTIONAL_PATTERNS = [
 
 
 # ============================================================
-# 数据持久化
+# 数据持久化（SQLite）
 # ============================================================
 
 def _load_log() -> list:
     """加载决策日志"""
-    if os.path.exists(LOG_FILE):
-        try:
-            with open(LOG_FILE, "r", encoding="utf-8") as f:
-                return json.load(f)
-        except (json.JSONDecodeError, IOError):
-            pass
-    return []
+    conn = get_db()
+    try:
+        rows = conn.execute(
+            "SELECT data FROM decision_log ORDER BY timestamp"
+        ).fetchall()
+        return [json.loads(r["data"]) for r in rows]
+    finally:
+        conn.close()
 
 
 def _save_log(records: list):
-    """保存决策日志"""
-    os.makedirs(LOG_DIR, exist_ok=True)
-    with open(LOG_FILE, "w", encoding="utf-8") as f:
-        json.dump(records, f, ensure_ascii=False, indent=2)
+    """保存决策日志（全量覆盖 — 内部使用，由具体写入函数替代）"""
+    conn = get_db()
+    try:
+        conn.execute("DELETE FROM decision_log")
+        for r in records:
+            conn.execute(
+                "INSERT INTO decision_log(id, timestamp, data) VALUES(?, ?, ?)",
+                (r["id"], r.get("timestamp", ""), json.dumps(r, ensure_ascii=False)),
+            )
+        conn.commit()
+    finally:
+        conn.close()
 
 
 # ============================================================
@@ -1593,19 +1603,30 @@ CALIBRATION_LOG_FILE = os.path.join(LOG_DIR, "calibration_log.json")
 
 
 def _load_calibration_log() -> list:
-    if os.path.exists(CALIBRATION_LOG_FILE):
-        try:
-            with open(CALIBRATION_LOG_FILE, "r", encoding="utf-8") as f:
-                return json.load(f)
-        except (json.JSONDecodeError, IOError):
-            pass
-    return []
+    """从 SQLite 加载校准训练日志"""
+    conn = get_db()
+    try:
+        rows = conn.execute(
+            "SELECT data FROM calibration_log ORDER BY id"
+        ).fetchall()
+        return [json.loads(r["data"]) for r in rows]
+    finally:
+        conn.close()
 
 
 def _save_calibration_log(records: list):
-    os.makedirs(LOG_DIR, exist_ok=True)
-    with open(CALIBRATION_LOG_FILE, "w", encoding="utf-8") as f:
-        json.dump(records, f, ensure_ascii=False, indent=2)
+    """保存校准训练日志（全量覆盖）"""
+    conn = get_db()
+    try:
+        conn.execute("DELETE FROM calibration_log")
+        for r in records:
+            conn.execute(
+                "INSERT INTO calibration_log(question_id, data) VALUES(?, ?)",
+                (r.get("question_id", ""), json.dumps(r, ensure_ascii=False)),
+            )
+        conn.commit()
+    finally:
+        conn.close()
 
 
 def get_calibration_question(index: int = None) -> dict:
@@ -1997,19 +2018,31 @@ TRAINING_LOG_FILE = os.path.join(LOG_DIR, "training_log.json")
 
 
 def _load_training_log() -> list:
-    if os.path.exists(TRAINING_LOG_FILE):
-        try:
-            with open(TRAINING_LOG_FILE, "r", encoding="utf-8") as f:
-                return json.load(f)
-        except (json.JSONDecodeError, IOError):
-            pass
-    return []
+    """从 SQLite 加载训练日志"""
+    conn = get_db()
+    try:
+        rows = conn.execute(
+            "SELECT data FROM training_log ORDER BY id"
+        ).fetchall()
+        return [json.loads(r["data"]) for r in rows]
+    finally:
+        conn.close()
 
 
 def _save_training_log(records: list):
-    os.makedirs(LOG_DIR, exist_ok=True)
-    with open(TRAINING_LOG_FILE, "w", encoding="utf-8") as f:
-        json.dump(records, f, ensure_ascii=False, indent=2)
+    """保存训练日志（全量覆盖）"""
+    conn = get_db()
+    try:
+        conn.execute("DELETE FROM training_log")
+        for r in records:
+            conn.execute(
+                "INSERT INTO training_log(exercise_type, question_id, data) VALUES(?, ?, ?)",
+                (r.get("exercise_type", ""), r.get("question_id", ""),
+                 json.dumps(r, ensure_ascii=False)),
+            )
+        conn.commit()
+    finally:
+        conn.close()
 
 
 # 练习题库
@@ -2857,4 +2890,69 @@ def get_training_stats() -> dict:
             "total_sessions": 0,
             "by_exercise": {},
             "recent_scores": [],
- 
+            "streak": 0,
+        }
+
+    total = len(log)
+    by_exercise = {}
+    for record in log:
+        et = record.get("exercise_type", "unknown")
+        if et not in by_exercise:
+            by_exercise[et] = {"count": 0, "total_score": 0, "correct": 0}
+        by_exercise[et]["count"] += 1
+        by_exercise[et]["total_score"] += record.get("score", 0)
+        if record.get("correct"):
+            by_exercise[et]["correct"] += 1
+
+    # 计算平均分
+    for et in by_exercise:
+        stats = by_exercise[et]
+        stats["avg_score"] = round(stats["total_score"] / stats["count"], 1) if stats["count"] > 0 else 0
+        stats["accuracy"] = round(stats["correct"] / stats["count"] * 100, 1) if stats["count"] > 0 else 0
+
+    # 最近10次得分
+    recent_scores = [{
+        "exercise_type": r.get("exercise_type"),
+        "score": r.get("score", 0),
+        "timestamp": r.get("timestamp"),
+    } for r in log[-10:]]
+
+    # 连续练习天数
+    from datetime import timedelta
+    dates = set()
+    for r in log:
+        ts = r.get("timestamp", "")
+        if ts:
+            dates.add(ts[:10])
+
+    streak = 0
+    today = datetime.now().date()
+    check_date = today
+    while str(check_date) in dates:
+        streak += 1
+        check_date -= timedelta(days=1)
+
+    # 推荐练习（基于最弱项）
+    weakest = None
+    lowest_score = 100
+    for et, stats in by_exercise.items():
+        if stats["avg_score"] < lowest_score:
+            lowest_score = stats["avg_score"]
+            weakest = et
+
+    recommendation = None
+    if weakest and weakest in TRAINING_EXERCISES:
+        recommendation = {
+            "exercise_type": weakest,
+            "name": TRAINING_EXERCISES[weakest]["name"],
+            "reason": f"这是你得分最低的练习（平均{lowest_score}分），建议多练习。",
+        }
+
+    return {
+        "status": "ok",
+        "total_sessions": total,
+        "by_exercise": by_exercise,
+        "recent_scores": recent_scores,
+        "streak": streak,
+        "recommendation": recommendation,
+    }

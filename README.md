@@ -106,17 +106,11 @@
 
 ## 微信公众号日报
 
-自动抓取微信读书中关注的公众号文章，生成每日 Markdown 日报。
+通过微信读书 API 自动抓取关注的公众号文章，AI 生成每日摘要日报。
 
-```bash
-cd wechat-digest
-npm install
-npm run login      # 扫码登录微信读书
-npm run sync       # 同步最近2天文章
-npm run summarize  # 生成今日日报
-```
-
-详见 [wechat-digest/README.md](wechat-digest/README.md)
+- **侧边栏入口：** 行情总览 → 公众号日报
+- **功能：** 扫码登录 → 同步文章 → AI 摘要 → 按公众号分组展示
+- **技术：** Python 后端 (httpx + BeautifulSoup) + React 前端
 
 ## 技术栈
 

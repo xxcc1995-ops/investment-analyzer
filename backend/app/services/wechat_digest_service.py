@@ -95,7 +95,7 @@ def _get_auth_headers() -> Dict[str, str]:
     if not auth or not auth.get("vid") or not auth.get("token"):
         raise ValueError("未登录，请先扫码登录微信读书")
     return {
-        "xid": auth["vid"],
+        "xid": str(auth["vid"]),
         "Authorization": f"Bearer {auth['token']}",
         "Content-Type": "application/json",
     }
@@ -166,6 +166,9 @@ def _polite_delay():
 class WechatDigestService:
     """微信公众号日报服务"""
 
+    # 临时存储 uuid → scanUrl 映射（登录流程中使用）
+    _login_urls: Dict[str, str] = {}
+
     # ---- 登录流程 ----
 
     def login_start(self) -> Dict[str, str]:
@@ -175,7 +178,10 @@ class WechatDigestService:
         uuid = data.get("uuid") if isinstance(data, dict) else None
         if not uuid:
             raise RuntimeError("获取 uuid 失败")
-        qr_url = f"https://login.weixin.qq.com/l/{uuid}"
+        # 优先使用 API 返回的 scanUrl，如果没有则用默认链接
+        qr_url = data.get("scanUrl") or f"https://login.weixin.qq.com/l/{uuid}"
+        # 保存 scanUrl 供后续生成二维码使用
+        self._login_urls[uuid] = qr_url
         return {"uuid": uuid, "qr_url": qr_url}
 
     def login_qr_image(self, uuid: str) -> str:
@@ -184,7 +190,9 @@ class WechatDigestService:
         import io
         import base64
 
-        qr_url = f"https://login.weixin.qq.com/l/{uuid}"
+        # 使用 login_start 时保存的 scanUrl
+        qr_url = self._login_urls.get(uuid) or f"https://login.weixin.qq.com/l/{uuid}"
+
         qr = qrcode.QRCode(version=1, box_size=10, border=2)
         qr.add_data(qr_url)
         qr.make(fit=True)

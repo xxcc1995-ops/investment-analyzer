@@ -1,7 +1,7 @@
 """
 组合管理服务 — 持仓管理、交易记录、收益跟踪、风险暴露
 
-数据持久化：JSON 文件（与 decision_service 一致的模式）
+数据持久化：SQLite（invest.db）
 实时价格：通过 MultiSourceQuoteService 获取
 """
 
@@ -16,14 +16,9 @@ from app.models.portfolio import (
     Transaction, Position, PortfolioSummary,
     PerformancePoint, RiskExposure,
 )
+from app.core.database import get_db
 
 logger = logging.getLogger(__name__)
-
-# ============================================================
-# 数据路径
-# ============================================================
-DATA_DIR = os.path.join(os.path.dirname(__file__), "..", "..", "data")
-PORTFOLIO_FILE = os.path.join(DATA_DIR, "portfolio.json")
 
 # ============================================================
 # 行业分类（简化版，覆盖常见行业）
@@ -76,25 +71,46 @@ def _guess_sector(name: str) -> str:
 
 
 # ============================================================
-# 数据持久化
+# 数据持久化（SQLite）
 # ============================================================
 
+def _get_cash() -> float:
+    """获取现金余额"""
+    conn = get_db()
+    try:
+        row = conn.execute(
+            "SELECT value FROM portfolio_settings WHERE key='cash'"
+        ).fetchone()
+        return row["value"] if row else 0.0
+    finally:
+        conn.close()
+
+
+def _set_cash(cash: float):
+    """设置现金余额"""
+    conn = get_db()
+    try:
+        conn.execute(
+            "INSERT OR REPLACE INTO portfolio_settings(key, value) VALUES(?, ?)",
+            ("cash", cash),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
 def _load_data() -> dict:
-    """加载组合数据"""
-    if os.path.exists(PORTFOLIO_FILE):
-        try:
-            with open(PORTFOLIO_FILE, "r", encoding="utf-8") as f:
-                return json.load(f)
-        except (json.JSONDecodeError, IOError):
-            pass
-    return {"transactions": [], "cash": 0}
-
-
-def _save_data(data: dict):
-    """保存组合数据"""
-    os.makedirs(DATA_DIR, exist_ok=True)
-    with open(PORTFOLIO_FILE, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
+    """加载组合数据（兼容旧接口）"""
+    conn = get_db()
+    try:
+        rows = conn.execute(
+            "SELECT * FROM transactions ORDER BY created_at"
+        ).fetchall()
+        txns = [dict(r) for r in rows]
+        cash = _get_cash()
+        return {"transactions": txns, "cash": cash}
+    finally:
+        conn.close()
 
 
 # ============================================================
@@ -146,61 +162,89 @@ def add_transaction(
         decision_id=decision_id,
     )
 
-    data = _load_data()
-    data["transactions"].append(txn.model_dump())
+    conn = get_db()
+    try:
+        # 插入交易记录
+        conn.execute(
+            """INSERT INTO transactions
+               (id, code, name, market, type, shares, price, amount, fee, reason, decision_id, created_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (txn.id, txn.code, txn.name, txn.market, txn.type,
+             txn.shares, txn.price, txn.amount, txn.fee,
+             txn.reason, txn.decision_id, txn.created_at),
+        )
 
-    # 更新现金余额
-    if txn_type == "buy":
-        data["cash"] -= (amount + fee)
-    elif txn_type == "sell":
-        data["cash"] += (amount - fee)
-    elif txn_type == "dividend":
-        data["cash"] += amount
+        # 更新现金余额
+        cash = _get_cash()
+        if txn_type == "buy":
+            cash -= (amount + fee)
+        elif txn_type == "sell":
+            cash += (amount - fee)
+        elif txn_type == "dividend":
+            cash += amount
+        conn.execute(
+            "INSERT OR REPLACE INTO portfolio_settings(key, value) VALUES(?, ?)",
+            ("cash", cash),
+        )
 
-    _save_data(data)
+        conn.commit()
+    finally:
+        conn.close()
+
     logger.info(f"交易记录已添加: {txn_type} {code} {name} {shares}股 @ {price}")
     return txn
 
 
 def get_transactions(code: str = None, limit: int = 100) -> list[Transaction]:
     """获取交易记录"""
-    data = _load_data()
-    txns = [Transaction(**t) for t in data.get("transactions", [])]
-
-    if code:
-        txns = [t for t in txns if t.code == code]
-
-    # 按时间倒序
-    txns.sort(key=lambda t: t.created_at, reverse=True)
-    return txns[:limit]
+    conn = get_db()
+    try:
+        if code:
+            rows = conn.execute(
+                "SELECT * FROM transactions WHERE code=? ORDER BY created_at DESC LIMIT ?",
+                (code, limit),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT * FROM transactions ORDER BY created_at DESC LIMIT ?",
+                (limit,),
+            ).fetchall()
+        return [Transaction(**dict(r)) for r in rows]
+    finally:
+        conn.close()
 
 
 def delete_transaction(txn_id: str) -> bool:
     """删除交易记录（同时回滚现金余额）"""
-    data = _load_data()
-    txns = data.get("transactions", [])
+    conn = get_db()
+    try:
+        row = conn.execute(
+            "SELECT * FROM transactions WHERE id=?", (txn_id,)
+        ).fetchone()
+        if not row:
+            return False
 
-    target = None
-    for t in txns:
-        if t["id"] == txn_id:
-            target = t
-            break
+        target = dict(row)
 
-    if not target:
-        return False
+        # 回滚现金
+        cash = _get_cash()
+        if target["type"] == "buy":
+            cash += (target["amount"] + target["fee"])
+        elif target["type"] == "sell":
+            cash -= (target["amount"] - target["fee"])
+        elif target["type"] == "dividend":
+            cash -= target["amount"]
 
-    # 回滚现金
-    if target["type"] == "buy":
-        data["cash"] += (target["amount"] + target["fee"])
-    elif target["type"] == "sell":
-        data["cash"] -= (target["amount"] - target["fee"])
-    elif target["type"] == "dividend":
-        data["cash"] -= target["amount"]
-
-    data["transactions"] = [t for t in txns if t["id"] != txn_id]
-    _save_data(data)
-    logger.info(f"交易记录已删除: {txn_id}")
-    return True
+        conn.execute("DELETE FROM transactions WHERE id=?", (txn_id,))
+        conn.execute(
+            "INSERT OR REPLACE INTO portfolio_settings(key, value) VALUES(?, ?)",
+            ("cash", cash),
+        )
+        conn.commit()
+        logger.info(f"交易记录已删除: {txn_id}")
+        return True
+    finally:
+        conn.close()
 
 
 # ============================================================

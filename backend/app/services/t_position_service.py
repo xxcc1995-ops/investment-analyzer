@@ -23,22 +23,17 @@ from collections import defaultdict
 import statistics
 
 from app.core.cache import get_cache as _base_get_cache, set_cache as _set_cached
+from app.core.database import get_db
 
 # 机构级参数
 MAX_DAILY_TRADES = 4  # 单只股票每日最大交易次数（含买卖）
 SLIPPAGE_MODEL = {"A": 0.0005, "HK": 0.001, "US": 0.0005}
 
 # ============================================================
-# 数据持久化路径
+# 数据持久化路径（仅用于兼容旧文件，数据库模式下不再直接使用）
 # ============================================================
 
 _DATA_DIR = os.path.join(os.path.dirname(__file__), "..", "..", "data")
-_POSITIONS_FILE = os.path.join(_DATA_DIR, "t_positions.json")
-_TRADES_FILE = os.path.join(_DATA_DIR, "t_trades.json")
-
-
-def _ensure_data_dir():
-    os.makedirs(_DATA_DIR, exist_ok=True)
 
 
 # ============================================================
@@ -64,39 +59,88 @@ def _default_position(code: str, name: str, market: str) -> dict:
 
 
 def _load_positions() -> dict:
-    """加载仓位数据"""
-    if os.path.exists(_POSITIONS_FILE):
-        try:
-            with open(_POSITIONS_FILE, "r", encoding="utf-8") as f:
-                return json.load(f)
-        except Exception:
-            pass
-    return {}
+    """从 SQLite 加载仓位数据"""
+    conn = get_db()
+    try:
+        rows = conn.execute("SELECT pos_key, data FROM t_positions").fetchall()
+        result = {}
+        for r in rows:
+            result[r["pos_key"]] = json.loads(r["data"])
+        return result
+    finally:
+        conn.close()
 
 
 def _save_positions(positions: dict):
-    """保存仓位数据"""
-    _ensure_data_dir()
-    with open(_POSITIONS_FILE, "w", encoding="utf-8") as f:
-        json.dump(positions, f, ensure_ascii=False, indent=2)
+    """保存仓位数据到 SQLite（全量覆盖）"""
+    conn = get_db()
+    try:
+        conn.execute("DELETE FROM t_positions")
+        for key, pos in positions.items():
+            conn.execute(
+                "INSERT INTO t_positions(pos_key, code, name, market, data) VALUES(?, ?, ?, ?, ?)",
+                (key, pos.get("code", ""), pos.get("name", ""), pos.get("market", ""),
+                 json.dumps(pos, ensure_ascii=False)),
+            )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def _save_single_position(key: str, pos: dict):
+    """保存单个仓位到 SQLite（增量更新，更高效）"""
+    conn = get_db()
+    try:
+        conn.execute(
+            "INSERT OR REPLACE INTO t_positions(pos_key, code, name, market, data) VALUES(?, ?, ?, ?, ?)",
+            (key, pos.get("code", ""), pos.get("name", ""), pos.get("market", ""),
+             json.dumps(pos, ensure_ascii=False)),
+        )
+        conn.commit()
+    finally:
+        conn.close()
 
 
 def _load_trades() -> list:
-    """加载交易记录"""
-    if os.path.exists(_TRADES_FILE):
-        try:
-            with open(_TRADES_FILE, "r", encoding="utf-8") as f:
-                return json.load(f)
-        except Exception:
-            pass
-    return []
+    """从 SQLite 加载交易记录"""
+    conn = get_db()
+    try:
+        rows = conn.execute(
+            "SELECT data FROM t_trades ORDER BY time"
+        ).fetchall()
+        return [json.loads(r["data"]) for r in rows]
+    finally:
+        conn.close()
 
 
 def _save_trades(trades: list):
-    """保存交易记录"""
-    _ensure_data_dir()
-    with open(_TRADES_FILE, "w", encoding="utf-8") as f:
-        json.dump(trades, f, ensure_ascii=False, indent=2)
+    """保存交易记录到 SQLite（全量覆盖）"""
+    conn = get_db()
+    try:
+        conn.execute("DELETE FROM t_trades")
+        for t in trades:
+            conn.execute(
+                "INSERT INTO t_trades(time, code, market, action, data) VALUES(?, ?, ?, ?, ?)",
+                (t.get("time", ""), t.get("code", ""), t.get("market", ""),
+                 t.get("action", ""), json.dumps(t, ensure_ascii=False)),
+            )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def _append_trade(trade: dict):
+    """追加单条交易记录到 SQLite（增量写入，更高效）"""
+    conn = get_db()
+    try:
+        conn.execute(
+            "INSERT INTO t_trades(time, code, market, action, data) VALUES(?, ?, ?, ?, ?)",
+            (trade.get("time", ""), trade.get("code", ""), trade.get("market", ""),
+             trade.get("action", ""), json.dumps(trade, ensure_ascii=False)),
+        )
+        conn.commit()
+    finally:
+        conn.close()
 
 
 # ============================================================
@@ -316,14 +360,10 @@ def execute_t_trade(code: str, market: str, action: str,
     pos["updated_at"] = now
     pos["t_trades"].append(trade)
 
-    # 保存
+    # 保存（增量更新单个仓位 + 追加交易记录）
     positions[key] = pos
-    _save_positions(positions)
-
-    # 同时保存到全局交易记录
-    trades = _load_trades()
-    trades.append(trade)
-    _save_trades(trades)
+    _save_single_position(key, pos)
+    _append_trade(trade)
 
     # === FIFO盈亏匹配（机构级）===
     if action == "sell_t":

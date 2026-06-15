@@ -17,6 +17,17 @@ from typing import Dict, List, Optional, Tuple, Callable
 from dataclasses import dataclass, field, asdict
 import json
 import hashlib
+import logging
+
+logger = logging.getLogger(__name__)
+
+# 指数代码映射（benchmark key -> 腾讯指数代码）
+_INDEX_CODE_MAP = {
+    'hs300': '000300',
+    'zz500': '000905',
+    'zz1000': '000852',
+    'wdqa': '399001',  # 万得全A用深证成指近似
+}
 
 # ============================================================
 # 交易成本模型
@@ -533,108 +544,129 @@ BENCHMARK_MAP = {
 
 
 # ============================================================
-# 模拟数据生成（实际应用中应接入真实数据源）
+# 真实数据获取（使用 DataProvider）
 # ============================================================
 
-def generate_mock_historical_data(start_date: str, end_date: str, seed: int = 42) -> pd.DataFrame:
-    """生成模拟历史数据（固定种子保证可复现）
-
-    包含30只覆盖各行业的蓝筹+成长股，模拟真实A股特征：
-    - 不同ROE/PE/PB/股息率/增长率/负债率/毛利率
-    - 优质股有正向漂移（模拟长期价值创造）
-    - 垃圾股有负向漂移（模拟价值毁灭）
+def _fetch_real_stock_data(start_date: str, end_date: str, max_stocks: int = 100) -> pd.DataFrame:
     """
-    np.random.seed(seed)
-    dates = pd.date_range(start=start_date, end=end_date, freq='B')
+    从腾讯API获取真实A股历史数据，合并基本面快照。
 
-    # 30只股票，覆盖不同风格
-    stock_universe = {
-        # === 价值型（低PE低PB高股息）===
-        '601398': {'name': '工商银行', 'industry': '银行', 'base_price': 5.0, 'roe': 12, 'pe': 5, 'pb': 0.6, 'div': 5.5, 'growth': 3, 'debt': 92, 'gm': 0},
-        '601939': {'name': '建设银行', 'industry': '银行', 'base_price': 7.0, 'roe': 13, 'pe': 5, 'pb': 0.6, 'div': 5.2, 'growth': 4, 'debt': 92, 'gm': 0},
-        '600036': {'name': '招商银行', 'industry': '银行', 'base_price': 35.0, 'roe': 16, 'pe': 7, 'pb': 1.0, 'div': 3.5, 'growth': 8, 'debt': 90, 'gm': 0},
-        '601318': {'name': '中国平安', 'industry': '保险', 'base_price': 50.0, 'roe': 16, 'pe': 8, 'pb': 1.1, 'div': 3.0, 'growth': 10, 'debt': 88, 'gm': 0},
-        '600900': {'name': '长江电力', 'industry': '电力', 'base_price': 22.0, 'roe': 15, 'pe': 18, 'pb': 3.0, 'div': 3.8, 'growth': 5, 'debt': 55, 'gm': 62},
-        '601088': {'name': '中国神华', 'industry': '煤炭', 'base_price': 20.0, 'roe': 15, 'pe': 8, 'pb': 1.2, 'div': 6.0, 'growth': 5, 'debt': 35, 'gm': 30},
-        '600585': {'name': '海螺水泥', 'industry': '建材', 'base_price': 30.0, 'roe': 18, 'pe': 7, 'pb': 1.3, 'div': 4.5, 'growth': 8, 'debt': 25, 'gm': 35},
+    返回 DataFrame 包含: date, code, name, close, return, roe, pe, pb,
+    dividend_yield, profit_growth, debt_ratio, gross_margin, industry
+    """
+    from app.services.quant.data_provider import (
+        build_stock_universe, get_snapshot_for_universe, get_stock_ohlcv
+    )
 
-        # === 质量型（高ROE高毛利）===
-        '600519': {'name': '贵州茅台', 'industry': '白酒', 'base_price': 1800, 'roe': 30, 'pe': 35, 'pb': 10, 'div': 1.5, 'growth': 15, 'debt': 20, 'gm': 92},
-        '000858': {'name': '五粮液', 'industry': '白酒', 'base_price': 150, 'roe': 25, 'pe': 22, 'pb': 5.5, 'div': 2.0, 'growth': 12, 'debt': 25, 'gm': 75},
-        '000568': {'name': '泸州老窖', 'industry': '白酒', 'base_price': 200, 'roe': 28, 'pe': 25, 'pb': 7.0, 'div': 1.8, 'growth': 18, 'debt': 30, 'gm': 80},
-        '603288': {'name': '海天味业', 'industry': '调味品', 'base_price': 80, 'roe': 28, 'pe': 40, 'pb': 11, 'div': 1.0, 'growth': 10, 'debt': 20, 'gm': 40},
-        '000333': {'name': '美的集团', 'industry': '家电', 'base_price': 60, 'roe': 25, 'pe': 12, 'pb': 3.0, 'div': 3.0, 'growth': 12, 'debt': 60, 'gm': 25},
-        '000651': {'name': '格力电器', 'industry': '家电', 'base_price': 35, 'roe': 22, 'pe': 8, 'pb': 1.8, 'div': 5.0, 'growth': 5, 'debt': 65, 'gm': 28},
-        '002415': {'name': '海康威视', 'industry': '安防', 'base_price': 35, 'roe': 22, 'pe': 20, 'pb': 4.5, 'div': 2.5, 'growth': 15, 'debt': 35, 'gm': 44},
+    try:
+        # 1. 构建股票池
+        codes = build_stock_universe(min_market_cap=2e9, max_stocks=max_stocks)
+        if not codes:
+            logger.warning("股票池为空，无法执行回测")
+            return pd.DataFrame()
 
-        # === 成长型（高增长）===
-        '300750': {'name': '宁德时代', 'industry': '新能源', 'base_price': 450, 'roe': 20, 'pe': 40, 'pb': 8.0, 'div': 0.3, 'growth': 30, 'debt': 65, 'gm': 22},
-        '002594': {'name': '比亚迪', 'industry': '新能源车', 'base_price': 250, 'roe': 15, 'pe': 25, 'pb': 4.0, 'div': 0.5, 'growth': 35, 'debt': 60, 'gm': 18},
-        '601012': {'name': '隆基绿能', 'industry': '光伏', 'base_price': 50, 'roe': 18, 'pe': 15, 'pb': 2.8, 'div': 1.5, 'growth': 20, 'debt': 55, 'gm': 20},
-        '300059': {'name': '东方财富', 'industry': '券商', 'base_price': 20, 'roe': 18, 'pe': 30, 'pb': 5.5, 'div': 0.5, 'growth': 25, 'debt': 70, 'gm': 0},
-        '002475': {'name': '立讯精密', 'industry': '电子', 'base_price': 30, 'roe': 20, 'pe': 25, 'pb': 5.0, 'div': 0.5, 'growth': 22, 'debt': 50, 'gm': 18},
+        # 2. 获取基本面快照（PE/PB/ROE等）
+        snapshot = get_snapshot_for_universe(codes)
+        if snapshot is None or snapshot.empty:
+            logger.warning("基本面快照获取失败")
+            return pd.DataFrame()
 
-        # === 均衡型（稳健）===
-        '600031': {'name': '三一重工', 'industry': '工程机械', 'base_price': 18, 'roe': 15, 'pe': 10, 'pb': 1.5, 'div': 3.0, 'growth': 10, 'debt': 55, 'gm': 28},
-        '600309': {'name': '万华化学', 'industry': '化工', 'base_price': 80, 'roe': 20, 'pe': 12, 'pb': 2.5, 'div': 2.5, 'growth': 15, 'debt': 45, 'gm': 25},
-        '000338': {'name': '潍柴动力', 'industry': '发动机', 'base_price': 12, 'roe': 14, 'pe': 9, 'pb': 1.3, 'div': 3.5, 'growth': 8, 'debt': 60, 'gm': 22},
-        '600690': {'name': '海尔智家', 'industry': '家电', 'base_price': 25, 'roe': 18, 'pe': 13, 'pb': 2.2, 'div': 2.8, 'growth': 10, 'debt': 60, 'gm': 30},
-        '000002': {'name': '万科A', 'industry': '地产', 'base_price': 15, 'roe': 10, 'pe': 6, 'pb': 0.6, 'div': 5.0, 'growth': -5, 'debt': 80, 'gm': 20},
-        '600048': {'name': '保利发展', 'industry': '地产', 'base_price': 12, 'roe': 12, 'pe': 5, 'pb': 0.7, 'div': 5.5, 'growth': 3, 'debt': 78, 'gm': 25},
-        '002304': {'name': '洋河股份', 'industry': '白酒', 'base_price': 130, 'roe': 20, 'pe': 18, 'pb': 3.5, 'div': 2.5, 'growth': 10, 'debt': 30, 'gm': 72},
-        '603259': {'name': '药明康德', 'industry': '医药', 'base_price': 80, 'roe': 18, 'pe': 30, 'pb': 5.5, 'div': 0.3, 'growth': 20, 'debt': 40, 'gm': 38},
-        '000725': {'name': '京东方A', 'industry': '面板', 'base_price': 4.5, 'roe': 8, 'pe': 15, 'pb': 1.2, 'div': 1.0, 'growth': 10, 'debt': 55, 'gm': 15},
-        '601888': {'name': '中国中免', 'industry': '免税', 'base_price': 180, 'roe': 20, 'pe': 25, 'pb': 5.0, 'div': 1.0, 'growth': 15, 'debt': 40, 'gm': 32},
-    }
+        # 构建 code -> 基本面 的映射
+        snap_map = {}
+        for _, row in snapshot.iterrows():
+            code = str(row.get('code', ''))
+            pe_val = row.get('pe_ttm', 20.0)
+            pb_val = row.get('pb', 2.0)
+            roe_val = row.get('roe', 15.0)
+            # ROE 修正：如果 pe_ttm <= 0 或 pb <= 0，设为合理默认值
+            if pe_val <= 0:
+                pe_val = 20.0
+            if pb_val <= 0:
+                pb_val = 2.0
+            # 从 PE/PB 推算 ROE（ROE ≈ PB/PE * 100），优先用已有值
+            if roe_val <= 0 and pe_val > 0:
+                roe_val = pb_val / pe_val * 100
 
-    data = []
-    for date in dates:
-        days_from_start = (date - dates[0]).days
-        for code, info in stock_universe.items():
-            # 优质股正向漂移，垃圾股负向漂移
-            quality_drift = (info['roe'] - 10) * 0.00005  # ROE越高漂移越大
-            noise = np.random.normal(1, 0.018)
-            price = info['base_price'] * (1 + quality_drift * days_from_start) * noise
+            snap_map[code] = {
+                'name': row.get('name', f'stock_{code}'),
+                'pe': round(pe_val, 2),
+                'pb': round(pb_val, 2),
+                'roe': round(max(roe_val, 0), 2),
+                'gross_margin': round(row.get('gross_margin', 30.0), 2),
+            }
 
-            # 财务指标加随机波动
-            roe = info['roe'] + np.random.normal(0, 1.5)
-            pe = info['pe'] + np.random.normal(0, 2)
-            pb = info['pb'] + np.random.normal(0, 0.3)
-            div_yield = info['div'] + np.random.normal(0, 0.3)
-            profit_growth = info['growth'] + np.random.normal(0, 3)
-            debt_ratio = info['debt'] + np.random.normal(0, 2)
-            gross_margin = info['gm'] + np.random.normal(0, 1.5)
+        # 3. 逐只获取 OHLCV 并合并基本面
+        all_rows = []
+        fetched_count = 0
+        for code in codes:
+            ohlcv = get_stock_ohlcv(code, start_date, end_date, adjust="qfq", use_cache=True)
+            if ohlcv is None or ohlcv.empty:
+                continue
 
-            data.append({
-                'date': date, 'code': code, 'name': info['name'],
-                'industry': info['industry'], 'close': round(max(price, 0.5), 2),
-                'return': round((noise - 1) * 100, 2),
-                'roe': round(max(roe, 0), 2),
-                'pe': round(max(pe, 3), 2),
-                'pb': round(max(pb, 0.3), 2),
-                'dividend_yield': round(max(div_yield, 0), 2),
-                'profit_growth': round(profit_growth, 2),
-                'debt_ratio': round(max(min(debt_ratio, 95), 5), 2),
-                'gross_margin': round(max(gross_margin, 0), 2),
+            info = snap_map.get(code, {
+                'name': f'stock_{code}', 'pe': 20.0, 'pb': 2.0,
+                'roe': 15.0, 'gross_margin': 30.0,
             })
-    return pd.DataFrame(data)
+
+            for _, bar in ohlcv.iterrows():
+                all_rows.append({
+                    'date': bar['date'],
+                    'code': code,
+                    'name': info['name'],
+                    'industry': '',  # 腾讯API无行业字段
+                    'close': round(bar['close'], 2),
+                    'return': round(bar.get('pct_chg', 0), 2),
+                    'roe': info['roe'],
+                    'pe': info['pe'],
+                    'pb': info['pb'],
+                    'dividend_yield': 0.0,   # 腾讯API无股息率，策略对此字段有容错
+                    'profit_growth': 0.0,    # 需财务报表数据
+                    'debt_ratio': 50.0,      # 需财务报表数据
+                    'gross_margin': info['gross_margin'],
+                })
+            fetched_count += 1
+
+        if not all_rows:
+            logger.warning(f"未获取到任何股票历史数据（尝试了 {len(codes)} 只）")
+            return pd.DataFrame()
+
+        logger.info(f"成功获取 {fetched_count} 只股票的真实历史数据")
+        return pd.DataFrame(all_rows)
+
+    except Exception as e:
+        logger.error(f"获取真实股票数据失败: {e}")
+        return pd.DataFrame()
 
 
-def generate_mock_benchmark_data(
-    start_date: str, end_date: str, benchmark: str = 'hs300', seed: int = 42
-) -> pd.DataFrame:
-    """生成基准指数数据"""
-    np.random.seed(seed + 100)  # 不同种子
-    cfg = BENCHMARK_MAP.get(benchmark, BENCHMARK_MAP['hs300'])
-    dates = pd.date_range(start=start_date, end=end_date, freq='B')
-    daily_drift = cfg['annual_return'] / 252
-    data = []
-    price = cfg['base_price']
-    for date in dates:
-        daily_return = np.random.normal(daily_drift, cfg['volatility'])
-        price = price * (1 + daily_return)
-        data.append({'date': date, 'close': round(price, 2), 'return': round(daily_return * 100, 2)})
-    return pd.DataFrame(data)
+def _fetch_real_benchmark_data(start_date: str, end_date: str, benchmark: str = 'hs300') -> pd.DataFrame:
+    """
+    从腾讯API获取真实指数日线数据。
+
+    返回 DataFrame 包含: date, close, return
+    """
+    from app.services.quant.data_provider import get_index_daily
+
+    try:
+        index_code = _INDEX_CODE_MAP.get(benchmark, '000300')
+        df = get_index_daily(index_code, start_date, end_date, use_cache=True)
+
+        if df is None or df.empty:
+            logger.warning(f"指数 {benchmark}({index_code}) 数据获取失败")
+            return pd.DataFrame()
+
+        # 计算日收益率
+        df = df.sort_values('date').reset_index(drop=True)
+        df['return'] = df['close'].pct_change() * 100
+        df['return'] = df['return'].fillna(0).round(2)
+
+        result = df[['date', 'close', 'return']].copy()
+        result['close'] = result['close'].round(2)
+        logger.info(f"成功获取 {benchmark}({index_code}) 指数数据，{len(result)} 条")
+        return result
+
+    except Exception as e:
+        logger.error(f"获取基准指数数据失败: {e}")
+        return pd.DataFrame()
 
 
 # ============================================================
@@ -1020,10 +1052,24 @@ def run_backtest(
     commission_rate: float = 0.0003,
     slippage_rate: float = 0.001,
 ) -> Dict:
-    """执行完整回测"""
+    """执行完整回测（使用真实数据）"""
     strategy = get_strategy(strategy_name)
-    stock_data = generate_mock_historical_data(start_date, end_date)
-    benchmark_data = generate_mock_benchmark_data(start_date, end_date, benchmark)
+
+    # 获取真实股票历史数据
+    stock_data = _fetch_real_stock_data(start_date, end_date)
+    if stock_data.empty:
+        raise ValueError(
+            f"无法获取 {start_date} ~ {end_date} 的股票历史数据，"
+            "请检查网络连接或缩短回测时间范围"
+        )
+
+    # 获取真实基准指数数据
+    benchmark_data = _fetch_real_benchmark_data(start_date, end_date, benchmark)
+    if benchmark_data.empty:
+        raise ValueError(
+            f"无法获取基准指数 {benchmark} 的数据，"
+            "请检查网络连接或更换基准"
+        )
 
     cost_config = TradingCostConfig(
         commission_rate=commission_rate,
@@ -1236,13 +1282,17 @@ def analyze_strategy_ineffectiveness(backtest_result: Dict) -> Dict:
 # ============================================================
 
 if __name__ == '__main__':
+    logging.basicConfig(level=logging.INFO)
     print("[TEST] Available strategies:", list(STRATEGY_REGISTRY.keys()))
-    result = run_backtest(strategy_name='export_champion')
-    print(f"  annual_return: {result['annual_return']}%")
-    print(f"  max_drawdown: {result['max_drawdown']}%")
-    print(f"  sharpe_ratio: {result['sharpe_ratio']}")
-    print(f"  excess_return: {result['excess_return']}%")
-    print(f"  total_cost: {result['total_cost']}")
-    print(f"  equity_curve points: {len(result['equity_curve'])}")
-    print(f"  drawdown_curve points: {len(result['drawdown_curve'])}")
-    print(f"  trade_log count: {len(result['trade_log'])}")
+    try:
+        result = run_backtest(strategy_name='export_champion')
+        print(f"  annual_return: {result['annual_return']}%")
+        print(f"  max_drawdown: {result['max_drawdown']}%")
+        print(f"  sharpe_ratio: {result['sharpe_ratio']}")
+        print(f"  excess_return: {result['excess_return']}%")
+        print(f"  total_cost: {result['total_cost']}")
+        print(f"  equity_curve points: {len(result['equity_curve'])}")
+        print(f"  drawdown_curve points: {len(result['drawdown_curve'])}")
+        print(f"  trade_log count: {len(result['trade_log'])}")
+    except ValueError as e:
+        print(f"  [ERROR] {e}")
