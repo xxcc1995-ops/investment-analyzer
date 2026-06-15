@@ -1,31 +1,21 @@
-/**
- * 微信公众号日报 - API 客户端
- */
 import api from './client'
-
 const B = '/wechat-digest'
 
 export const wechatDigestApi = {
-  // 登录
-  loginStart: () => api.post(`${B}/login/start`),
-  loginCheck: (uuid: string) => api.get(`${B}/login/check/${uuid}`),
   getLoginStatus: () => api.get(`${B}/status`),
+  setCookie: (cookie: string) => api.post(`${B}/cookie`, { cookie }),
+  setCookieDirect: (vid: string, skey: string) => api.post(`${B}/cookie/direct`, { vid, skey }),
+  extractCookie: () => api.post(`${B}/extract-cookie`),
   logout: () => api.post(`${B}/logout`),
 
-  // 公众号
   getAccounts: () => api.get(`${B}/accounts`),
-  addAccount: (data: { name: string; mpId: string }) => api.post(`${B}/accounts/add`, data),
-  removeAccount: (mpId: string) => api.post(`${B}/accounts/remove`, { mpId }),
+  sync: (params?: { mp_id?: string; limit?: number }) => api.post(`${B}/sync`, params || {}, { timeout: 90000 }),
 
-  // 文章
-  addArticle: (data: { url: string; mpName?: string; mpId?: string }) => api.post(`${B}/articles/add`, data),
-  addArticlesBatch: (data: { urls: string[]; mpName?: string; mpId?: string }) => api.post(`${B}/articles/batch`, data),
   getArticles: (params?: { days?: number; mp_id?: string }) => api.get(`${B}/articles`, { params }),
+  fetchContent: (url: string) => api.post(`${B}/articles/fetch-content`, { url }),
 
-  // 日报
   getDigest: (days?: number) => api.get(`${B}/digest`, { params: { days } }),
 
-  // 配置
   getConfig: () => api.get(`${B}/config`),
   updateConfig: (config: Record<string, any>) => api.post(`${B}/config`, config),
 }

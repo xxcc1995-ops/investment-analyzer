@@ -153,7 +153,7 @@ function App() {
     setGateDismissed(true)
   }, [])
 
-  const handleGateFullCheck = useCallback(() => {
+  const handleGateFullCheck = useCallback((_intention?: string, _target?: string, _thought?: string) => {
     sessionStorage.setItem('rationality_gate_passed', '1')
     setGateDismissed(true)
     navigate('/decision-guard')

@@ -4,25 +4,11 @@ import ReactECharts from 'echarts-for-react'
 import { PageSection, TabBar, StatCard, StatCardGroup, LoadingSpinner, EmptyState } from '../components/ui'
 import { useTradingInterceptor } from '../hooks/useTradingInterceptor'
 
-/** 鼠标悬停提示组件 */
+/** 鼠标悬停提示 — 用原生 title，不重叠 */
 function Tip({ text, children }: { text: string; children: React.ReactNode }) {
-  const [show, setShow] = useState(false)
   return (
-    <span style={{ position: 'relative', cursor: 'help', borderBottom: '1px dotted #666' }}
-      onMouseEnter={() => setShow(true)} onMouseLeave={() => setShow(false)}>
+    <span title={text} style={{ cursor: 'help', borderBottom: '1px dotted #666' }}>
       {children}
-      {show && (
-        <span style={{
-          position: 'absolute', bottom: '100%', left: '50%', transform: 'translateX(-50%)',
-          background: '#1a1a2e', color: '#e0e0e0', border: '1px solid #d4a76a',
-          borderRadius: 6, padding: '8px 12px', fontSize: 12, lineHeight: 1.6,
-          whiteSpace: 'pre-wrap', minWidth: 180, maxWidth: 320, zIndex: 1000,
-          boxShadow: '0 4px 16px rgba(0,0,0,0.5)', pointerEvents: 'none',
-          marginBottom: 6,
-        }}>
-          {text}
-        </span>
-      )}
     </span>
   )
 }
@@ -704,18 +690,18 @@ export default function FutuOptionChain() {
                     <thead>
                       <tr>
                         <th>类型</th><th>行权价</th><th>到期</th>
-                        <th><Tip text="DTE (Days To Expiration)\n距离到期日的自然天数\n越接近到期，时间价值衰减越快">天数</Tip></th>
-                        <th><Tip text="Bid 买价\n市场上有人愿意出这个价买你的期权">买入</Tip></th>
-                        <th><Tip text="Ask 卖价\n市场上有人愿意以这个价卖给你期权\n买卖价差越小，流动性越好">卖出</Tip></th>
+                        <th><Tip text="DTE：距到期日的自然天数，越近时间衰减越快">天数</Tip></th>
+                        <th><Tip text="Bid 买价：市场上有人愿意出这个价买你的期权">买入</Tip></th>
+                        <th><Tip text="Ask 卖价：有人愿以此价卖给你，买卖价差越小流动性越好">卖出</Tip></th>
                         <th>最新</th>
-                        <th><Tip text="Volume 成交量\n今日成交的合约数量\n成交量越高，流动性越好，越容易成交">成交量</Tip></th>
-                        <th><Tip text="IV 隐含波动率 (Implied Volatility)\n市场对未来波动幅度的预期\nIV越高，期权越贵\n适合卖期权：IV高时收更多权利金">IV%</Tip></th>
-                        <th><Tip text="Delta 方向性敞口\n股价变动1元，期权价格变动多少\nCall Delta: 0~1，Put Delta: -1~0\n|Delta|越小，越虚值（OTM）\n也近似表示到期盈利概率">Delta</Tip></th>
-                        <th><Tip text="OTM 虚值百分比 (Out of The Money)\n行权价距现价的距离百分比\nCall: (行权价-现价)/现价\nPut: (现价-行权价)/现价\nOTM≥5%较安全，被行权概率低">OTM%</Tip></th>
-                        <th><Tip text="胜率 Pop (Probability of Profit)\n基于Delta估算的到期盈利概率\n= 1 - |Delta|\n胜率>70%比较稳妥">胜率</Tip></th>
-                        <th><Tip text="年化收益率\n假设持有到期并按当前价格计算\n卖Put: 权利金/保证金 × 365/天数\n卖Call: 收益/正股成本 × 365/天数\n注意：未扣除手续费">年化%</Tip></th>
-                        <th><Tip text="Bid-Ask Spread 买卖价差\n= (卖价-买价)/中间价 × 100%\n价差越小，流动性越好\n<10%适合交易，>20%谨慎">价差%</Tip></th>
-                        <th><Tip text="综合评分 (0-100分)\n7个维度加权：\nIV/HV溢价、IV百分位、年化收益、\nOTM缓冲、Theta效率、胜率、流动性\n分数越高越值得交易">评分</Tip></th>
+                        <th><Tip text="今日成交量，越高流动性越好，越容易成交">成交量</Tip></th>
+                        <th><Tip text="IV 隐含波动率：市场对波动的预期，越高期权越贵，适合卖期权收更多权利金">IV%</Tip></th>
+                        <th><Tip text="Delta：股价变动1元→期权价变动量。Call 0~1，Put -1~0，|Delta|越小越虚值，也近似到期盈利概率">Delta</Tip></th>
+                        <th><Tip text="OTM 虚值百分比：行权价距现价的距离。Call=(行权价-现价)/现价，Put=(现价-行权价)/现价，≥5%较安全">OTM%</Tip></th>
+                        <th><Tip text="胜率 Pop=1-|Delta|，到期盈利概率，>70%比较稳妥">胜率</Tip></th>
+                        <th><Tip text="年化收益率（未扣手续费）。卖Put=权利金/保证金×365/天数，卖Call=收益/成本×365/天数">年化%</Tip></th>
+                        <th><Tip text="Bid-Ask Spread 买卖价差=(卖价-买价)/中间价，<10%流动性好，>20%谨慎">价差%</Tip></th>
+                        <th><Tip text="综合评分0-100，7维度加权：IV溢价、IV百分位、年化收益、OTM缓冲、Theta效率、胜率、流动性">评分</Tip></th>
                       </tr>
                     </thead>
                     <tbody>
