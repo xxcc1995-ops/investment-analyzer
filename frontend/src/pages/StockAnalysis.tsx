@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect, lazy, Suspense, useMemo } from 'react'
+import { useState, useCallback, useEffect, lazy, Suspense, useMemo, useRef } from 'react'
 import ReactECharts from 'echarts-for-react'
 import { stockApi } from '../services/api'
 import type { StockBasic, FinancialReport, ValuationHistory, DividendHistory, FragilityResult, DerivedMetrics, CrossAnalysisResult } from '../services/api'
@@ -382,7 +382,11 @@ export default function StockAnalysis({ code }: StockAnalysisProps) {
   const [latestReport, setLatestReport] = useState('')
   const [sectionView, setSectionView] = useState<'overview' | 'cross' | 'ai' | 'f12'>('overview')
 
+  // 竞态条件保护：请求计数器
+  const requestCounter = useRef(0)
+
   const loadStock = useCallback(async (stockCode: string) => {
+    const requestId = ++requestCounter.current
     setLoading(true)
     setValuationHistory(null)
     setValuationError(null)
@@ -398,26 +402,30 @@ export default function StockAnalysis({ code }: StockAnalysisProps) {
       setFetchTime(basicRes.data.fetch_time || new Date().toLocaleString())
       setLatestReport(finRes.data.latest_report_date || '')
 
-      // 异步加载估值历史
+      // 异步加载估值历史（带竞态保护）
       stockApi.getValuationHistory(stockCode)
-        .then(res => setValuationHistory(res.data))
-        .catch(() => setValuationHistory(null))
+        .then(res => { if (requestId === requestCounter.current) setValuationHistory(res.data) })
+        .catch(() => { if (requestId === requestCounter.current) setValuationHistory(null) })
 
-      stockApi.getDividendHistory(stockCode).then(res => setDividendHistory(res.data)).catch(() => setDividendHistory(null))
+      stockApi.getDividendHistory(stockCode)
+        .then(res => { if (requestId === requestCounter.current) setDividendHistory(res.data) })
+        .catch(() => { if (requestId === requestCounter.current) setDividendHistory(null) })
       setFragility(null)
-      stockApi.getFragility(stockCode).then(res => setFragility(res.data)).catch(() => setFragility(null))
+      stockApi.getFragility(stockCode)
+        .then(res => { if (requestId === requestCounter.current) setFragility(res.data) })
+        .catch(() => { if (requestId === requestCounter.current) setFragility(null) })
 
       // 异步加载派生指标
       stockApi.getDerivedMetrics(stockCode)
-        .then(res => setDerivedMetrics(res.data))
-        .catch(() => setDerivedMetrics(null))
+        .then(res => { if (requestId === requestCounter.current) setDerivedMetrics(res.data) })
+        .catch(() => { if (requestId === requestCounter.current) setDerivedMetrics(null) })
 
       // 异步加载交叉分析
-      setCrossLoading(true)
+      if (requestId === requestCounter.current) setCrossLoading(true)
       stockApi.getCrossAnalysis(stockCode)
-        .then(res => setCrossAnalysis(res.data))
-        .catch(() => setCrossAnalysis(null))
-        .finally(() => setCrossLoading(false))
+        .then(res => { if (requestId === requestCounter.current) setCrossAnalysis(res.data) })
+        .catch(() => { if (requestId === requestCounter.current) setCrossAnalysis(null) })
+        .finally(() => { if (requestId === requestCounter.current) setCrossLoading(false) })
     } catch (err) {
       console.error('加载失败:', err)
     } finally {

@@ -1,8 +1,16 @@
 """
 空投机会扫描器 - 核心服务层
-整合 DefiLlama/交易所活动/链上打新/RSS资讯，提供系统化空投机会发现与评分
+整合 DefiLlama/交易所活动/链上打新/测试网/RSS资讯，提供系统化空投机会发现与评分
 
 方法论来源：火山哥空投教程 — 多交易所覆盖 + 链上项目跟踪 + 多号规模化执行
+
+数据源覆盖：
+- DefiLlama API: 未发币协议扫描 + 已公布空投协议
+- 交易所公告: Binance/OKX/Bybit/Gate 官方RSS
+- 链上打新: Virtuals/Kaito/MegaETH/buidlpad/Echo/Polymarket
+- 测试网: zksync/Starknet/Linea/Scroll/Base等活跃测试网
+- RSS聚合: 12个源（英文4 + 中文4 + 空投专用2 + 交易所公告2）
+- 中文加密媒体: 金色财经/PANews/Foresight News/Odaily
 """
 import logging
 import os
@@ -272,6 +280,270 @@ LAUNCHPAD_PROJECTS = [
         "participation_link": "https://polymarket.com",
         "notes": "预测市场平台，交易可能积累未来空投资格",
     },
+    {
+        "id": "stable_finance",
+        "project_name": "Stable Finance 打新",
+        "platform": "Stable",
+        "platform_url": "https://stable.money",
+        "chain": "Ethereum",
+        "status": "active",
+        "estimated_allocation": "按存款分配",
+        "participation_link": "https://stable.money",
+        "notes": "稳定币收益协议，存款+交互可能获得空投",
+    },
+    {
+        "id": "backpack_exchange",
+        "project_name": "Backpack 交易所",
+        "platform": "Backpack",
+        "platform_url": "https://backpack.exchange",
+        "chain": "Solana",
+        "status": "active",
+        "estimated_allocation": "按交易量分配",
+        "participation_link": "https://backpack.exchange",
+        "notes": "Solana生态交易所，交易积累积分，疑似有空投",
+    },
+    {
+        "id": "lighter_xyz",
+        "project_name": "Lighter DEX",
+        "platform": "Lighter",
+        "platform_url": "https://lighter.xyz",
+        "chain": "Ethereum",
+        "status": "active",
+        "estimated_allocation": "按交易量分配",
+        "participation_link": "https://lighter.xyz",
+        "notes": "链上合约交易平台，交易可能积累空投资格",
+    },
+    {
+        "id": "aster_perp",
+        "project_name": "Aster 永续合约",
+        "platform": "Aster",
+        "platform_url": "https://asterdex.com",
+        "chain": "Multi",
+        "status": "active",
+        "estimated_allocation": "按交易量+积分分配",
+        "participation_link": "https://asterdex.com",
+        "notes": "永续合约赛道，第二季积分活动进行中",
+    },
+    {
+        "id": "edgex_perp",
+        "project_name": "Edgex 合约交易所",
+        "platform": "Edgex",
+        "platform_url": "https://edgex.exchange",
+        "chain": "Multi",
+        "status": "active",
+        "estimated_allocation": "按交易量分配",
+        "participation_link": "https://edgex.exchange",
+        "notes": "链上合约交易所黑马，空投教程已发布",
+    },
+]
+
+# ==================== 测试网/激励测试网 ====================
+
+TESTNET_PROJECTS = [
+    {
+        "id": "zksync_testnet",
+        "project_name": "zkSync Era 交互",
+        "chain": "zkSync Era",
+        "status": "active",
+        "url": "https://zksync.io",
+        "type": "L2",
+        "funding": "$458M",
+        "notes": "已发币但仍有生态项目空投机会，多交互新协议",
+        "actions": ["跨链", "DEX交易", "NFT铸造", "借贷协议交互"],
+    },
+    {
+        "id": "starknet_ecosystem",
+        "project_name": "Starknet 生态交互",
+        "chain": "Starknet",
+        "status": "active",
+        "url": "https://starknet.io",
+        "type": "L2",
+        "funding": "$282M",
+        "notes": "已发币但生态项目仍在发空投（Ekubo, Nostra等）",
+        "actions": ["DEX交易", "借贷", "跨链桥", "NFT"],
+    },
+    {
+        "id": "linea_testnet",
+        "project_name": "Linea L2 交互",
+        "chain": "Linea",
+        "status": "active",
+        "url": "https://linea.build",
+        "type": "L2",
+        "funding": "Consensys",
+        "notes": "Consensys旗下L2，尚未发币，LXP积分活动",
+        "actions": ["跨链", "DeFi交互", "NFT铸造", "LXP-LP活动"],
+    },
+    {
+        "id": "scroll_testnet",
+        "project_name": "Scroll L2 交互",
+        "chain": "Scroll",
+        "status": "active",
+        "url": "https://scroll.io",
+        "type": "L2",
+        "funding": "$80M",
+        "notes": "zkEVM L2，尚未发币，忠诚度积分计划",
+        "actions": ["跨链", "DEX交易", "借贷", "NFT"],
+    },
+    {
+        "id": "base_ecosystem",
+        "project_name": "Base 生态交互",
+        "chain": "Base",
+        "status": "active",
+        "url": "https://base.org",
+        "type": "L2",
+        "funding": "Coinbase",
+        "notes": "Coinbase旗下L2，生态项目空投机会多",
+        "actions": ["Aerodrome交易", "跨链", "SocialFi", "GameFi"],
+    },
+    {
+        "id": "monad_testnet",
+        "project_name": "Monad 测试网",
+        "chain": "Monad",
+        "status": "upcoming",
+        "url": "https://monad.xyz",
+        "type": "L1",
+        "funding": "$225M",
+        "notes": "高性能L1，融资巨大，测试网即将上线",
+        "actions": ["等待测试网上线", "Discord角色", "社区参与"],
+    },
+    {
+        "id": "berachain_testnet",
+        "project_name": "Berachain 测试网",
+        "chain": "Berachain",
+        "status": "active",
+        "url": "https://berachain.com",
+        "type": "L1",
+        "funding": "$142M",
+        "notes": "PoL共识L1，测试网活跃，Bartio测试网",
+        "actions": ["测试网交易", "NFT铸造", "Discord角色", "生态项目交互"],
+    },
+    {
+        "id": "abstract_testnet",
+        "project_name": "Abstract L2",
+        "chain": "Abstract",
+        "status": "upcoming",
+        "url": "https://abs.xyz",
+        "type": "L2",
+        "funding": "Pudgy Penguins",
+        "notes": "Pudgy Penguins团队L2，消费级链",
+        "actions": ["等待测试网", "关注Pudgy生态"],
+    },
+]
+
+# ==================== Twitter 空投大V ====================
+# 通过 RSSHub /twitter/user/{handle} 获取推文
+
+RSSHUB_INSTANCES = [
+    "https://rsshub.app",
+    "https://rsshub.rssforever.com",
+    "https://rsshub.moeyy.cn",
+]
+
+AIRDROP_TWITTER_ACCOUNTS = [
+    # ---- 英文空投大V ----
+    {
+        "handle": "airdropalertcom",
+        "name": "Airdrop Alert",
+        "tier": "T1",
+        "focus": "综合性空投信息，覆盖面最广",
+        "followers": "500K+",
+    },
+    {
+        "handle": "DeFi_Airdrops",
+        "name": "DeFi Airdrops",
+        "tier": "T1",
+        "focus": "DeFi空投专精，经常首发消息",
+        "followers": "200K+",
+    },
+    {
+        "handle": "airdropinsider",
+        "name": "Airdrop Insider",
+        "tier": "T1",
+        "focus": "空投内幕消息，深度分析",
+        "followers": "150K+",
+    },
+    {
+        "handle": "scupytrooples",
+        "name": "Scupy Trooples",
+        "tier": "T1",
+        "focus": "知名空投猎人，实战经验丰富",
+        "followers": "100K+",
+    },
+    {
+        "handle": "LayerHub_xyz",
+        "name": "LayerHub",
+        "tier": "T1",
+        "focus": "L2空投专精，测试网追踪",
+        "followers": "80K+",
+    },
+    {
+        "handle": "AlphaDrop_ADT",
+        "name": "Alpha Drop",
+        "tier": "T2",
+        "focus": "Alpha机会，早期项目",
+        "followers": "50K+",
+    },
+    {
+        "handle": "defiprime",
+        "name": "DeFi Prime",
+        "tier": "T2",
+        "focus": "DeFi新闻，项目动态",
+        "followers": "100K+",
+    },
+    {
+        "handle": "YourCryptoChick",
+        "name": "CryptoChick",
+        "tier": "T2",
+        "focus": "空投教程，新手友好",
+        "followers": "80K+",
+    },
+    # ---- 中文加密KOL ----
+    {
+        "handle": "BitcoinBallerCN",
+        "name": "比特币大空翼",
+        "tier": "T2",
+        "focus": "中文空投教程，大陆视角",
+        "followers": "50K+",
+    },
+    {
+        "handle": "BTCOldDriver",
+        "name": "BTC老司机",
+        "tier": "T2",
+        "focus": "中文加密资讯，空投分享",
+        "followers": "30K+",
+    },
+    # ---- 项目官方账号（高优先级） ----
+    {
+        "handle": "zaborowski",
+        "name": "zkSync 生态追踪",
+        "tier": "T1",
+        "focus": "zkSync生态项目空投信号",
+        "followers": "20K+",
+    },
+    {
+        "handle": "StarknetFndn",
+        "name": "Starknet Foundation",
+        "tier": "T1",
+        "focus": "Starknet官方，空投/生态公告",
+        "followers": "200K+",
+    },
+]
+
+# Twitter空投信号关键词（比通用新闻更精准）
+TWITTER_AIRDROP_SIGNALS = [
+    # 高信号 — 几乎确认空投
+    "airdrop confirmed", "claim your", "check eligibility",
+    "snapshot taken", "snapshot date", "claim now",
+    "token launch", "TGE date", "airdrop claim",
+    "season 2 airdrop", "season 3", "retroactive airdrop",
+    # 中信号 — 可能有空投
+    "points program", "points season", "earn points",
+    "incentivized", "testnet live", "beta launch",
+    "community rewards", "early users", "OG role",
+    "galxe quest", "zealy quest", "layer3 quest",
+    # 行动信号 — 需要立即操作
+    "last chance", "ending soon", "dont miss",
+    "limited time", "hurry", "deadline",
 ]
 
 # ==================== 空投关键词 ====================
@@ -525,11 +797,223 @@ class AirdropScannerService:
         return result
 
     # ==================================================================
-    # 4. 空投资讯 (RSS聚合)
+    # 3.5 测试网/激励测试网
+    # ==================================================================
+
+    def get_testnet_projects(self) -> Dict[str, Any]:
+        """获取测试网/激励测试网项目列表"""
+        cached = _get_cached("testnet_projects")
+        if cached:
+            return cached
+
+        projects = TESTNET_PROJECTS.copy()
+
+        # 按链类型分组
+        by_type: Dict[str, List] = {}
+        for p in projects:
+            t = p.get("type", "Other")
+            if t not in by_type:
+                by_type[t] = []
+            by_type[t].append(p)
+
+        result = {
+            "projects": projects,
+            "by_type": by_type,
+            "total_count": len(projects),
+            "active_count": sum(1 for p in projects if p["status"] == "active"),
+            "update_time": datetime.now().isoformat(),
+        }
+        _set_cached("testnet_projects", result)
+        return result
+
+    # ==================================================================
+    # 3.6 DeFiLlama 已公布空投协议
+    # ==================================================================
+
+    def get_defillama_airdrops(self) -> Dict[str, Any]:
+        """从DefiLlama获取已公布空投/待领取的协议"""
+        cached = _get_cached("defillama_airdrops", CACHE_TTL_MEDIUM)
+        if cached:
+            return cached
+
+        # DefiLlama空投页面数据
+        data = _fetch_json("https://airdrops.llama.fi/airdrops", timeout=15)
+        airdrops = []
+        if data and isinstance(data, list):
+            for item in data[:50]:
+                airdrops.append({
+                    "name": item.get("name", ""),
+                    "chain": item.get("chain", "Multi"),
+                    "tvl": item.get("tvl", 0),
+                    "status": item.get("status", "unknown"),
+                    "url": item.get("url", ""),
+                    "description": item.get("description", "")[:200],
+                })
+
+        # 补充：从主协议列表筛选高概率空投的
+        protocols = self._fetch_defillama_protocols()
+        high_prob = []
+        for p in protocols:
+            name = p.get("name", "")
+            tvl = p.get("tvl") or 0
+            symbol = p.get("symbol", "")
+            gecko_id = p.get("gecko_id")
+            category = p.get("category", "")
+
+            # 未发币 + 高TVL + 高概率赛道
+            is_no_token = (symbol in ("-", "", "N/A")) and not gecko_id
+            high_prob_cats = ["L2", "Rollup", "Bridge", "Restaking", "Lending"]
+            is_high_prob = any(c.lower() in (category or "").lower() for c in high_prob_cats)
+
+            if is_no_token and tvl > 200_000_000 and is_high_prob:
+                high_prob.append({
+                    "name": name,
+                    "chain": p.get("chain", "Multi"),
+                    "tvl": round(tvl / 1e6, 2),
+                    "category": category,
+                    "url": p.get("url", ""),
+                    "reason": f"未发币 + 高TVL(${tvl/1e6:.0f}M) + {category}赛道",
+                })
+
+        high_prob.sort(key=lambda x: x["tvl"], reverse=True)
+
+        result = {
+            "llama_airdrops": airdrops,
+            "high_probability": high_prob[:20],
+            "update_time": datetime.now().isoformat(),
+        }
+        _set_cached("defillama_airdrops", result)
+        return result
+
+    # ==================================================================
+    # 4. Twitter 空投大V监控 (via RSSHub)
+    # ==================================================================
+
+    def get_twitter_kol_feed(self) -> Dict[str, Any]:
+        """获取Twitter空投大V的推文，通过RSSHub转换为RSS"""
+        cached = _get_cached("twitter_kol_feed", CACHE_TTL_MEDIUM)
+        if cached:
+            return cached
+
+        all_tweets = []
+        kol_status = []
+
+        for account in AIRDROP_TWITTER_ACCOUNTS:
+            handle = account["handle"]
+            tweets = self._fetch_twitter_rss(handle)
+            kol_status.append({
+                "handle": handle,
+                "name": account["name"],
+                "tier": account["tier"],
+                "focus": account["focus"],
+                "tweet_count": len(tweets),
+                "status": "ok" if tweets else "failed",
+            })
+
+            for tweet in tweets:
+                # 分析推文信号强度
+                text = tweet.get("title", "") + " " + tweet.get("summary", "")
+                signal = self._analyze_tweet_signal(text)
+
+                if signal["has_signal"]:
+                    all_tweets.append({
+                        "handle": handle,
+                        "kol_name": account["name"],
+                        "tier": account["tier"],
+                        "focus": account["focus"],
+                        "text": tweet.get("title", "")[:200],
+                        "summary": tweet.get("summary", "")[:300],
+                        "link": tweet.get("link", ""),
+                        "published": tweet.get("published", ""),
+                        "signal_level": signal["level"],  # high / medium / low
+                        "signal_keywords": signal["keywords"],
+                        "action_needed": signal["action_needed"],
+                    })
+
+        # 按信号强度排序
+        signal_order = {"high": 0, "medium": 1, "low": 2}
+        all_tweets.sort(key=lambda x: (signal_order.get(x["signal_level"], 9),))
+
+        ok_count = sum(1 for s in kol_status if s["status"] == "ok")
+        result = {
+            "tweets": all_tweets[:50],
+            "total_kols": len(AIRDROP_TWITTER_ACCOUNTS),
+            "kol_ok": ok_count,
+            "kol_failed": len(AIRDROP_TWITTER_ACCOUNTS) - ok_count,
+            "total_signal_tweets": len(all_tweets),
+            "high_signal": sum(1 for t in all_tweets if t["signal_level"] == "high"),
+            "medium_signal": sum(1 for t in all_tweets if t["signal_level"] == "medium"),
+            "kol_status": kol_status,
+            "update_time": datetime.now().isoformat(),
+        }
+        _set_cached("twitter_kol_feed", result)
+        return result
+
+    def _fetch_twitter_rss(self, handle: str) -> List[Dict[str, str]]:
+        """通过RSSHub获取Twitter用户推文"""
+        for instance in RSSHUB_INSTANCES:
+            url = f"{instance}/twitter/user/{handle}"
+            try:
+                items = self._fetch_rss(url, f"@{handle}")
+                if items:
+                    return items[:15]  # 最近15条
+            except Exception as e:
+                logger.debug(f"RSSHub {instance} failed for @{handle}: {e}")
+                continue
+        return []
+
+    def _analyze_tweet_signal(self, text: str) -> Dict[str, Any]:
+        """分析推文是否包含空投信号"""
+        text_lower = text.lower()
+
+        found_keywords = []
+        for kw in TWITTER_AIRDROP_SIGNALS:
+            if kw in text_lower:
+                found_keywords.append(kw)
+
+        if not found_keywords:
+            return {"has_signal": False, "level": "low", "keywords": [], "action_needed": ""}
+
+        # 判断信号级别
+        high_kws = [
+            "airdrop confirmed", "claim your", "check eligibility",
+            "snapshot taken", "snapshot date", "claim now",
+            "token launch", "TGE date", "airdrop claim",
+            "last chance", "ending soon", "deadline",
+        ]
+        medium_kws = [
+            "points program", "points season", "earn points",
+            "incentivized", "testnet live", "beta launch",
+            "community rewards", "early users", "OG role",
+            "season 2 airdrop", "season 3", "retroactive",
+        ]
+
+        has_high = any(kw in text_lower for kw in high_kws)
+        has_medium = any(kw in text_lower for kw in medium_kws)
+
+        if has_high:
+            level = "high"
+            action = "⚡ 立即行动 — 可能需要领取/检查资格/快照"
+        elif has_medium:
+            level = "medium"
+            action = "🔔 关注 — 可能需要交互/积累积分"
+        else:
+            level = "low"
+            action = ""
+
+        return {
+            "has_signal": True,
+            "level": level,
+            "keywords": found_keywords[:5],
+            "action_needed": action,
+        }
+
+    # ==================================================================
+    # 5. 空投资讯 (RSS聚合)
     # ==================================================================
 
     def get_airdrop_news(self) -> Dict[str, Any]:
-        """获取空投相关RSS资讯"""
+        """获取空投相关RSS资讯 — 12源聚合"""
         cached = _get_cached("airdrop_news", CACHE_TTL_MEDIUM)
         if cached:
             return cached
@@ -538,12 +1022,24 @@ class AirdropScannerService:
         sources_ok = []
         sources_failed = []
 
-        # RSS源列表
+        # RSS源列表 — 12个源，覆盖英文/中文/空投专用/交易所公告
         rss_sources = [
+            # 英文主流加密媒体 (T1)
             ("CoinDesk", "https://www.coindesk.com/arc/outboundfeeds/rss/"),
             ("CoinTelegraph", "https://cointelegraph.com/rss"),
             ("The Block", "https://www.theblock.co/rss.xml"),
             ("Decrypt", "https://decrypt.co/feed"),
+            # 中文加密媒体
+            ("金色财经", "https://www.jinse.cn/rss"),
+            ("PANews", "https://www.panewscdn.com/rss/all"),
+            ("Odaily", "https://www.odaily.news/rss"),
+            ("ForesightNews", "https://www.foresightnews.pro/rss"),
+            # 空投专用聚合
+            ("Airdrops.io", "https://airdrops.io/feed/"),
+            ("DeFi Airdrops", "https://defillama.com/airdrops/rss"),
+            # 交易所官方公告
+            ("Binance公告", "https://www.binance.com/bapi/composite/v1/public/cms/article/list/query?type=1&catalogId=48&pageNo=1&pageSize=10"),
+            ("OKX公告", "https://www.okx.com/help/rss"),
         ]
 
         for source_name, rss_url in rss_sources:
@@ -698,8 +1194,36 @@ class AirdropScannerService:
         protocols_data = self.get_untokenized_protocols()
         exchange_data = self.get_exchange_activities()
         launchpad_data = self.get_launchpad_projects()
+        testnet_data = self.get_testnet_projects()
+        twitter_data = self.get_twitter_kol_feed()
 
         scored = []
+
+        # 评分Twitter高信号推文（作为独立机会）
+        for tweet in twitter_data.get("tweets", []):
+            if tweet.get("signal_level") != "high":
+                continue
+            certainty = 6 if tweet.get("tier") == "T1" else 4
+            expected_return = 5
+            difficulty = 3  # 查看推文很简单
+            time_window = 9  # Twitter信号时效性极强
+            capital = 2
+
+            composite = self._weighted_score(certainty, expected_return, difficulty, time_window, capital)
+            scored.append({
+                "name": f"@{tweet['handle']}: {tweet['text'][:40]}...",
+                "source": "twitter",
+                "source_label": "Twitter大V",
+                "detail": tweet.get("action_needed", ""),
+                "url": tweet.get("link", ""),
+                "certainty": round(certainty, 1),
+                "expected_return": round(expected_return, 1),
+                "difficulty": round(difficulty, 1),
+                "time_window": round(time_window, 1),
+                "capital_required": round(capital, 1),
+                "composite_score": round(composite, 1),
+                "risk_tier": self._assign_tier(composite),
+            })
 
         # 评分未发币协议
         for p in protocols_data.get("protocols", []):
@@ -771,6 +1295,49 @@ class AirdropScannerService:
                 "source_label": lp["platform"],
                 "detail": f"{lp['chain']} | {lp.get('estimated_allocation', 'N/A')}",
                 "url": lp.get("participation_link", ""),
+                "certainty": round(certainty, 1),
+                "expected_return": round(expected_return, 1),
+                "difficulty": round(difficulty, 1),
+                "time_window": round(time_window, 1),
+                "capital_required": round(capital, 1),
+                "composite_score": round(composite, 1),
+                "risk_tier": self._assign_tier(composite),
+            })
+
+        # 评分测试网项目
+        for tn in testnet_data.get("projects", []):
+            funding = tn.get("funding", "")
+            certainty = 4  # 测试网不确定性较高
+            if tn.get("status") == "active":
+                certainty = 6
+            elif tn.get("status") == "upcoming":
+                certainty = 3
+
+            # 根据融资额估算预期收益
+            expected_return = 5
+            if funding:
+                import re
+                nums = re.findall(r'\d+', funding.replace(',', ''))
+                if nums:
+                    max_fund = max(int(n) for n in nums)
+                    if max_fund >= 200:
+                        expected_return = 8
+                    elif max_fund >= 100:
+                        expected_return = 7
+                    elif max_fund >= 50:
+                        expected_return = 6
+
+            difficulty = 4  # 测试网交互通常不难
+            time_window = 6 if tn.get("status") == "active" else 3
+            capital = 2  # 测试网通常不需要资金
+
+            composite = self._weighted_score(certainty, expected_return, difficulty, time_window, capital)
+            scored.append({
+                "name": tn["project_name"],
+                "source": "testnet",
+                "source_label": f"{tn.get('type', 'L2')}测试网",
+                "detail": f"{tn['chain']} | 融资: {funding}",
+                "url": tn.get("url", ""),
                 "certainty": round(certainty, 1),
                 "expected_return": round(expected_return, 1),
                 "difficulty": round(difficulty, 1),

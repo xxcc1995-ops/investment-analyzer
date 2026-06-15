@@ -21,7 +21,7 @@ from app.services.backtest_service import (
 router = APIRouter()
 
 
-@router.get("/backtest/strategies")
+@router.get("/strategies")
 async def get_strategies():
     """获取可用策略列表"""
     return {
@@ -33,7 +33,7 @@ async def get_strategies():
     }
 
 
-@router.get("/backtest")
+@router.get("")
 async def get_backtest_results(
     strategy: str = Query('export_champion', description='策略名称'),
     start_date: str = Query('2020-01-01', description='开始日期'),
@@ -71,7 +71,7 @@ async def get_backtest_results(
         raise HTTPException(status_code=500, detail=f'回测失败: {str(e)}')
 
 
-@router.get("/backtest/compare")
+@router.get("/compare")
 async def compare_strategies(
     strategies: str = Query('export_champion,high_dividend,value', description='策略列表，逗号分隔'),
     start_date: str = Query('2020-01-01', description='开始日期'),
@@ -144,7 +144,7 @@ async def compare_strategies(
         raise HTTPException(status_code=500, detail=f'策略比较失败: {str(e)}')
 
 
-@router.get("/backtest/sensitivity")
+@router.get("/sensitivity")
 async def sensitivity_analysis(
     strategy: str = Query('export_champion', description='策略名称'),
     parameter: str = Query('top_n', description='参数: top_n / rebalance_frequency / commission_rate'),
@@ -212,7 +212,7 @@ async def sensitivity_analysis(
         raise HTTPException(status_code=500, detail=f'敏感性分析失败: {str(e)}')
 
 
-@router.get("/backtest/scenarios")
+@router.get("/scenarios")
 async def scenario_analysis(
     strategy: str = Query('export_champion', description='策略名称'),
     start_date: str = Query('2020-01-01', description='开始日期'),

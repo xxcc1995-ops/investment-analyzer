@@ -1,5 +1,40 @@
 """富途期权链服务 - 机构级期权分析引擎
 
+============================== 期权入门速成 ==============================
+
+【什么是期权？】
+期权就像一份"保险合同"或"预购券"：
+- Call（看涨期权）= 你付一笔"保险费"（权利金），获得在未来以约定价格买入股票的权利
+- Put（看跌期权）= 你付一笔"保险费"，获得在未来以约定价格卖出股票的权利
+
+【两个角色】
+- 买方：付权利金，获得权利（最大亏损就是权利金，像买保险）
+- 卖方：收权利金，承担义务（赚的是保险费，但可能要赔大钱，像开保险公司）
+
+【关键术语】
+- 行权价(K)：约定的买卖价格
+- 权利金(Premium)：期权的价格，买方付给卖方的钱
+- 到期日(DTE)：期权还剩多少天到期
+- 虚值(OTM)：当前股价离行权价还有距离，暂时不值钱
+- 实值(ITM)：当前股价已经超过行权价，已经有内在价值
+- 平值(ATM)：行权价≈当前股价
+
+【Greeks是什么？】
+Greeks是期权价格对各种因素的敏感度，帮你理解风险：
+- Delta：股价涨1块钱，期权价格变多少（方向风险）
+- Gamma：Delta的变化速度（加速度）
+- Theta：每过一天，期权贬值多少（时间是卖方的朋友）
+- Vega：波动率变1%，期权价格变多少（恐慌/贪婪指标）
+- Rho：利率变1%，期权价格变多少（通常可忽略）
+
+【本模块能帮你做什么？】
+1. 查看完整期权链 + 自动计算Greeks和评分
+2. 评估单个期权合约是否值得交易
+3. 构建经典策略（备兑看涨、现金担保、价差、跨式等）
+4. 生成盈亏图，直观看到"在什么价格赚钱/亏钱"
+5. 计算Max Pain（期权到期时股价最可能停在哪）
+6. 轮动建议（什么时候该平仓/展期/继续持有）
+
 功能清单:
 - BSM定价 + 全Greeks (Delta/Gamma/Theta/Vega/Rho) + 股息率支持
 - Newton-Raphson + Bisection 双重IV求解器
@@ -43,29 +78,56 @@ def _get_cached(key: str):
 # ============================================================
 # BSM Model - 机构级定价引擎 (含Rho + 股息率)
 # ============================================================
+# 【小白必读】什么是BSM模型？
+# BSM (Black-Scholes-Merton) 是全世界最经典的期权定价公式。
+# 它告诉你：给定5个条件，一个期权"应该"值多少钱。
+#
+# 5个输入参数：
+#   S = 股票现价（比如腾讯现在300块）
+#   K = 行权价（比如你约定320块买）
+#   T = 还剩多少年到期（30天 = 30/365 ≈ 0.082年）
+#   r = 无风险利率（一般用4%，即银行理财收益）
+#   sigma = 波动率（股票一年内波动多剧烈，越高期权越贵）
+#
+# 输出：期权的理论价格 + 5个Greeks指标
+# ============================================================
 
 def _norm_cdf(x: float) -> float:
+    """标准正态分布的累积概率函数 - BSM公式的核心数学工具"""
     return 0.5 * (1.0 + math.erf(x / sqrt(2.0)))
 
 def _norm_pdf(x: float) -> float:
+    """标准正态分布的概率密度函数 - 用于计算Greeks"""
     return exp(-0.5 * x * x) / sqrt(2.0 * math.pi)
 
 def bsm_price(S: float, K: float, T: float, r: float, sigma: float,
               option_type: str = 'put', q: float = 0.0) -> dict:
     """
-    Black-Scholes-Merton pricing with continuous dividend yield.
+    BSM期权定价 - 计算期权理论价格和所有Greeks指标
+
+    【通俗理解】
+    这个函数回答一个问题："这个期权到底值多少钱？"
+    同时告诉你：如果股价涨1块(delta)、时间过1天(theta)、
+    波动率变1%(vega)，期权价格会怎么变。
 
     Args:
-        S: Underlying price
-        K: Strike price
-        T: Time to expiry in years
-        r: Risk-free rate (annualized)
-        sigma: Volatility (annualized)
-        option_type: 'put' or 'call'
-        q: Continuous dividend yield (default 0)
+        S: 股票现价（比如300）
+        K: 行权价（比如320）
+        T: 剩余时间（年），30天 = 30/365
+        r: 无风险利率，一般0.04（4%）
+        sigma: 年化波动率，一般0.2~0.5
+        option_type: 'put'(看跌) 或 'call'(看涨)
+        q: 股息率，港股一般0.02~0.04
 
     Returns:
-        dict with price, delta, gamma, theta, vega, rho, d1, d2
+        dict: {
+            price: 期权理论价格,
+            delta: 股价涨1块，期权变多少（-1到1之间）,
+            gamma: delta的变化速度（越大越敏感）,
+            theta: 每天贬值多少（负数=你在亏钱）,
+            vega: 波动率变1%，价格变多少,
+            rho: 利率变1%，价格变多少,
+        }
     """
     if T <= 0 or sigma <= 0 or S <= 0 or K <= 0:
         return {'price': 0, 'delta': 0, 'gamma': 0, 'theta': 0, 'vega': 0, 'rho': 0, 'd1': 0, 'd2': 0}
@@ -115,10 +177,17 @@ def bsm_price(S: float, K: float, T: float, r: float, sigma: float,
 def solve_iv(market_price: float, S: float, K: float, T: float, r: float,
              option_type: str = 'put', q: float = 0.0) -> float:
     """
-    Implied volatility solver: Newton-Raphson with bisection fallback.
+    隐含波动率(IV)求解器 - 从市场价格反推波动率
 
-    Newton-Raphson converges fast near ATM; bisection handles edge cases
-    (deep OTM, very low/high IV) where Newton can overshoot or fail.
+    【通俗理解】
+    BSM公式是"已知波动率→算价格"，但实际交易中我们反过来：
+    "已知市场价格→反推市场认为的波动率是多少"。
+
+    为什么IV重要？
+    - IV高 = 市场恐慌，期权贵（适合卖期权赚钱）
+    - IV低 = 市场平静，期权便宜（适合买期权博波动）
+
+    实现方式：先用牛顿法快速逼近，如果失败再用二分法兜底。
     """
     if market_price <= 0 or T <= 0 or S <= 0 or K <= 0:
         return 0.0
@@ -159,11 +228,17 @@ def solve_iv(market_price: float, S: float, K: float, T: float, r: float,
 
 
 # ============================================================
-# Historical Volatility
+# Historical Volatility（历史波动率）
+# ============================================================
+# 【小白必读】历史波动率(HV) vs 隐含波动率(IV)
+# - HV = 股票过去实际波动了多少（看后视镜）
+# - IV = 市场预期未来会波动多少（看前方）
+# - 当IV > HV：期权"贵"了，卖期权有利可图
+# - 当IV < HV：期权"便宜"了，买期权有利可图
 # ============================================================
 
 def _fetch_hk_historical(code: str = '00700', days: int = 60) -> list:
-    """Fetch HK stock historical close prices via Tencent Finance API."""
+    """获取港股历史收盘价（通过腾讯财经API）"""
     try:
         clean_code = code.replace('HK.', '')
         end_date = datetime.now().strftime('%Y-%m-%d')
@@ -181,7 +256,14 @@ def _fetch_hk_historical(code: str = '00700', days: int = 60) -> list:
     return []
 
 def calculate_hv(prices: list, window: int = 20) -> float:
-    """Annualized historical volatility from close prices."""
+    """
+    计算历史波动率(HV) - 用过去20天的股价变动来衡量波动
+
+    【通俗理解】
+    历史波动率就是"这只股票最近有多颠簸"。
+    HV=30%意味着这只股票一年内大概涨跌30%。
+    数字越大=越颠簸=期权越贵。
+    """
     if len(prices) < window + 1:
         return 0.3
     recent = prices[-(window + 1):]
@@ -199,10 +281,17 @@ def calculate_hv(prices: list, window: int = 20) -> float:
 
 def calculate_iv_percentile(current_iv: float, historical_ivs: list) -> dict:
     """
-    计算 IV Percentile 和 IV Rank
+    计算 IV 百分位和 IV 排名 - 判断当前IV在历史中处于什么位置
 
-    IV Percentile: 过去 N 天中，有多少天的 IV 低于当前 IV
-    IV Rank: (当前IV - 最低IV) / (最高IV - 最低IV)
+    【通俗理解】
+    想象IV是一只股票的"恐慌温度计"：
+    - IV百分位 = 80%：历史上80%的时候都没现在这么恐慌 → 期权很贵，适合卖
+    - IV百分位 = 20%：历史上80%的时候都比现在恐慌 → 期权便宜，适合买
+
+    【交易决策】
+    - IV百分位 > 70%：卖期权收权利金（开保险公司）
+    - IV百分位 < 30%：买期权博波动（买保险等出事）
+    - IV百分位 30-70%：中性，按其他指标决策
     """
     if not historical_ivs or len(historical_ivs) < 10:
         return {
@@ -276,7 +365,17 @@ def fetch_historical_iv(stock_code: str, days: int = 252) -> list:
 
 def analyze_spread(bid: float, ask: float, mid: float, last: float) -> dict:
     """
-    分析买卖价差，评估流动性和交易成本
+    分析买卖价差 - 评估这个期权好不好交易
+
+    【通俗理解】
+    买价(Bid)是你能立刻卖出的价格，卖价(Ask)是你能立刻买入的价格。
+    价差越小=流动性越好=买卖越容易=交易成本越低。
+
+    【怎么看？】
+    - 价差 < 1%：优秀，随时可以买卖
+    - 价差 1-5%：良好，正常交易
+    - 价差 5-10%：一般，建议用限价单
+    - 价差 > 10%：差，谨慎交易（可能卖不掉）
     """
     if bid <= 0 or ask <= 0 or mid <= 0:
         return {
@@ -321,12 +420,43 @@ def analyze_spread(bid: float, ask: float, mid: float, last: float) -> dict:
 
 
 # ============================================================
-# 组合策略分析
+# 组合策略分析 - 6种经典期权策略
+# ============================================================
+# 【小白必读】什么是组合策略？
+# 单独买/卖一个期权风险很大。组合策略是把多个期权搭配起来，
+# 就像配药一样，不同的组合有不同的"疗效"和"副作用"。
+#
+# 6种策略速查表：
+# ┌─────────────────┬──────────┬──────────┬──────────────────┐
+# │ 策略            │ 方向     │ 风险     │ 适合场景         │
+# ├─────────────────┼──────────┼──────────┼──────────────────┤
+# │ Covered Call    │ 温和看涨 │ 有限     │ 持股想赚额外收入 │
+# │ Cash Secured Put│ 温和看涨 │ 较大     │ 想低价买入股票   │
+# │ Credit Spread   │ 横盘     │ 有限     │ 稳健收权利金     │
+# │ Straddle        │ 大波动   │ 有限/无限│ 预期大行情       │
+# │ Strangle        │ 大波动   │ 有限/无限│ 搏大行情成本更低 │
+# │ Iron Condor     │ 横盘     │ 有限     │ 预期窄幅震荡     │
+# └─────────────────┴──────────┴──────────┴──────────────────┘
 # ============================================================
 
 def analyze_covered_call(spot: float, call_contracts: list, stock_qty: int = 100) -> dict:
     """
-    Covered Call 策略分析：持有正股 + 卖 Call
+    Covered Call（备兑看涨）策略分析
+
+    【通俗理解】
+    你已经持有100股腾讯（300块/股），觉得短期不会大涨。
+    那就卖出一个Call（行权价320），收一笔权利金（比如5块/股=500块）。
+
+    结果：
+    - 如果到期股价 < 320：你白赚500块权利金，股票还在手
+    - 如果到期股价 > 320：你的股票被以320卖掉，但你还是赚了（320-300+5）*100
+
+    【适合谁？】
+    长期持股的人，想在不卖股票的情况下赚点"租金"。
+    就像把房子出租，收租金但放弃了涨价的全部收益。
+
+    【风险】
+    股价大跌时你还是会亏（但比纯持股少亏一个权利金）。
     """
     if not call_contracts:
         return {'error': '无可用 Call 合约'}
@@ -375,7 +505,22 @@ def analyze_covered_call(spot: float, call_contracts: list, stock_qty: int = 100
 
 def analyze_cash_secured_put(spot: float, put_contracts: list, cash_available: float = None) -> dict:
     """
-    Cash Secured Put 策略分析：卖 Put + 准备现金接盘
+    Cash Secured Put（现金担保看跌）策略分析
+
+    【通俗理解】
+    你觉得腾讯300块太贵了，想在280块买入。
+    那就卖出一个Put（行权价280），收一笔权利金（比如4块/股=400块）。
+
+    结果：
+    - 如果到期股价 > 280：你白赚400块，不用买股票
+    - 如果到期股价 < 280：你必须以280块买入，但你的实际成本是280-4=276
+
+    【适合谁？】
+    想买某只股票但觉得现在太贵，愿意等跌到某个价位再买。
+    就像在二手市场挂个"求购价"，等卖家来找你。
+
+    【风险】
+    股价暴跌到100块，你还得按280块买（但这种情况很少见）。
     """
     if not put_contracts:
         return {'error': '无可用 Put 合约'}
@@ -432,7 +577,27 @@ def analyze_cash_secured_put(spot: float, put_contracts: list, cash_available: f
 
 def analyze_credit_spread(spot: float, chain: list, spread_type: str = 'put') -> dict:
     """
-    Credit Spread 策略分析：卖近价 + 买远价（限制风险）
+    Credit Spread（信用价差）策略分析
+
+    【通俗理解】
+    卖期权很赚钱但风险大，Credit Spread就是"给自己买个保险"。
+
+    Put Credit Spread举例：
+    1. 卖一个行权价280的Put（收权利金6块）
+    2. 同时买一个行权价260的Put（付权利金2块）
+    3. 净收权利金 = 6-2 = 4块
+
+    结果：
+    - 股价 > 280：你白赚4块
+    - 股价在260-280：你赚的部分减少
+    - 股价 < 260：你最多亏（280-260-4）*100 = 1600块（有上限！）
+
+    【适合谁？】
+    想卖期权收权利金，但又怕风险的人。
+    就像开保险公司但给自己也买了再保险。
+
+    【优势】
+    风险有限（最多亏宽度-权利金），不像裸卖期权可能亏到破产。
     """
     if spread_type == 'put':
         # Put Credit Spread：卖高行权价 Put + 买低行权价 Put
@@ -544,15 +709,35 @@ def analyze_credit_spread(spot: float, chain: list, spread_type: str = 'put') ->
 
 
 # ============================================================
-# Theta 衰减曲线
+# Theta 衰减曲线 - 期权的"保质期"
+# ============================================================
+# 【小白必读】Theta衰减是什么？
+# 期权就像牛奶，有"保质期"。离到期越近，时间价值流失越快。
+# 这就是为什么卖期权的人喜欢"时间流逝"——每过一天他们就赚一点。
+#
+# 重要规律：
+# - 前30天：时间价值慢慢流失
+# - 最后7天：时间价值加速流失（就像牛奶快过期时变质更快）
+# - 到期日：时间价值归零，只剩内在价值
+#
+# 【交易启示】
+# 卖期权：选30-45天到期的，Theta收益最佳
+# 买期权：避免买快到期的（Theta会吃掉你的利润）
 # ============================================================
 
 def calculate_theta_decay(spot: float, strike: float, premium: float,
                           dte: int, option_type: str, iv: float,
                           risk_free_rate: float = 0.04) -> dict:
     """
-    计算 Theta 随时间衰减的曲线数据
-    返回不同剩余天数下的期权价值
+    计算Theta衰减曲线 - 看看你的期权每天贬值多少
+
+    【通俗理解】
+    这个函数画了一张图：X轴是剩余天数，Y轴是期权价值。
+    你会看到一条"越来越陡"的曲线——越接近到期，跌得越快。
+
+    返回值包含：
+    - decay_curve: 每天的期权价值（用来画图）
+    - best_roll_dte: 建议在还剩几天时展期（Theta最快衰减点）
     """
     if dte <= 0 or premium <= 0:
         return {'error': '无效参数'}
@@ -617,12 +802,38 @@ def calculate_theta_decay(spot: float, strike: float, premium: float,
 
 
 # ============================================================
-# IV 曲面 / 偏斜 / 期限结构
+# IV 曲面 / 偏斜 / 期限结构 - 波动率的"地形图"
+# ============================================================
+# 【小白必读】IV曲面是什么？
+# 想象一张3D地图：
+# - X轴 = 行权价（从左到右）
+# - Y轴 = 到期日（从近到远）
+# - Z轴（高度） = IV（波动率）
+#
+# 这张图告诉你：
+# 1. IV偏斜(Skew)：同一到期日，不同行权价的IV差异
+#    - 通常Put的IV > Call的IV（因为大家更怕跌）
+# 2. 期限结构(Term Structure)：同一行权价，不同到期日的IV差异
+#    - 通常远期IV > 近期IV（远期不确定性更大）
+#
+# 【交易启示】
+# - 左高右低的Skew → 市场恐慌下跌，Put贵
+# - 远高近低的Term → 市场预期长期波动
 # ============================================================
 
 def build_iv_surface(chain: list) -> dict:
     """
-    从期权链数据构建 IV 曲面 (strike x expiry)。
+    构建IV曲面 - 把所有期权的波动率画成一张"地形图"
+
+    【通俗理解】
+    这个函数把所有期权的IV数据整理成一个表格：
+    - 横轴是行权价（260, 280, 300, 320, 340...）
+    - 纵轴是到期日（7天后, 14天后, 30天后...）
+    - 每个格子里是对应的IV值
+
+    通过这张表你可以看出：
+    1. 哪个方向的期权更贵（Skew）
+    2. 近期还是远期的期权更贵（Term Structure）
 
     Returns:
         {
@@ -689,7 +900,7 @@ def build_iv_surface(chain: list) -> dict:
     skew = []
     if expiries:
         nearest_exp = min(expiries, key=lambda e: abs(
-            (datetime.strptime(e, '%Y-%m-%d') - datetime.now()).days
+            (datetime.strptime(e, '%Y-%m-%d').date() - datetime.now().date()).days
         ))
         nearest_contracts = [c for c in chain if c['expiry'] == nearest_exp and c.get('iv', 0) > 0]
         strike_ivs: Dict[float, dict] = {}
@@ -714,13 +925,37 @@ def build_iv_surface(chain: list) -> dict:
 
 
 # ============================================================
-# Max Pain 计算
+# Max Pain（最大痛苦点）- 期权到期时股价最可能停在哪
+# ============================================================
+# 【小白必读】什么是Max Pain？
+# Max Pain是一个神奇的指标：期权到期时，股价往往会停在
+# 让最多期权买家亏钱的价格——也就是让期权卖家赚最多的位置。
+#
+# 为什么？因为：
+# - 期权卖方（大机构）有能力影响股价
+# - 他们会让股价停在对自己最有利的位置
+# - 这个位置就是"最大痛苦点"——让买方最痛苦的价格
+#
+# 【怎么用？】
+# - 如果Max Pain = 300，现价 = 310 → 到期前股价可能跌向300
+# - 如果Max Pain = 300，现价 = 290 → 到期前股价可能涨向300
+# - 越接近到期日，Max Pain的预测越准确
 # ============================================================
 
 def calculate_max_pain(chain: list, spot: float = 0) -> dict:
     """
-    Max Pain: 使所有未平仓期权总内在价值最小化的行权价。
-    这是期权到期时标的"最痛苦"的价格点。
+    计算Max Pain（最大痛苦点）
+
+    【通俗理解】
+    这个函数回答："期权到期时，股价最可能停在哪个价位？"
+
+    算法：对每个可能的到期价格，计算所有期权买家总共亏多少钱。
+    亏最多的价格就是Max Pain——因为这是让买家最"痛苦"的价格。
+
+    返回值：
+    - max_pain_strike: 最大痛苦点的价格
+    - distance_pct: 离现价有多远（百分比）
+    - curve: 每个价格对应的"痛苦值"（画图用）
     """
     if not chain:
         return {'error': '无数据'}
@@ -771,12 +1006,23 @@ def calculate_max_pain(chain: list, spot: float = 0) -> dict:
 
 def analyze_straddle(spot: float, chain: list, direction: str = 'long') -> dict:
     """
-    Straddle 策略分析: 同时买入/卖出相同行权价的 Call + Put。
+    Straddle（跨式）策略分析
 
-    Args:
-        spot: 标的现价
-        chain: 期权链数据
-        direction: 'long'(买入跨式) 或 'short'(卖出跨式)
+    【通俗理解】
+    你觉得腾讯要出大事（财报/政策），但不知道是涨还是跌。
+    Long Straddle = 同时买一个Call + 买一个Put（都是300行权价）。
+
+    结果：
+    - 股价暴涨到350：Call大赚，Put归零，总体赚钱
+    - 股价暴跌到250：Put大赚，Call归零，总体赚钱
+    - 股价不动（还在300附近）：两个都归零，你亏了全部权利金
+
+    【适合谁？】
+    预期有大行情但不确定方向的人（比如财报前、重大事件前）。
+
+    【风险】
+    最大亏损 = 付出的全部权利金。股价不动你就全亏了。
+    就像买彩票，中了赚很多，不中就全没了。
     """
     if not chain:
         return {'error': '无期权链数据'}
@@ -857,8 +1103,22 @@ def analyze_straddle(spot: float, chain: list, direction: str = 'long') -> dict:
 
 def analyze_strangle(spot: float, chain: list, direction: str = 'long') -> dict:
     """
-    Strangle 策略分析: 买入/卖出不同行权价的 OTM Call + OTM Put。
-    比 Straddle 成本更低，但需要更大波动才能盈利。
+    Strangle（宽跨式）策略分析
+
+    【通俗理解】
+    Strangle是Straddle的"便宜版"：
+    买一个OTM Call（行权价320）+ 买一个OTM Put（行权价280）。
+
+    和Straddle的区别：
+    - Straddle买的是300+300（贵，但容易触发）
+    - Strangle买的是320+280（便宜，但需要更大波动才赚钱）
+
+    【适合谁？】
+    同样是赌大行情，但预算有限的人。
+    成本更低，但需要股价波动更大才能回本。
+
+    【风险】
+    和Straddle一样，最大亏损=全部权利金。
     """
     if not chain:
         return {'error': '无期权链数据'}
@@ -934,8 +1194,29 @@ def analyze_strangle(spot: float, chain: list, direction: str = 'long') -> dict:
 
 def analyze_iron_condor(spot: float, chain: list) -> dict:
     """
-    Iron Condor: 卖出 OTM Put + 买入更低 OTM Put + 卖出 OTM Call + 买入更高 OTM Call。
-    收取净权利金，标的在区间内时盈利。
+    Iron Condor（铁鹰式）策略分析
+
+    【通俗理解】
+    Iron Condor = Put Credit Spread + Call Credit Spread 的组合。
+    同时卖一个OTM Put和一个OTM Call，两边都收权利金。
+
+    举例（腾讯300块）：
+    1. 卖280 Put + 买260 Put（下方保护）
+    2. 卖320 Call + 买340 Call（上方保护）
+    3. 净收权利金 = 两边权利金之和
+
+    结果：
+    - 股价在280-320之间：你白赚全部权利金（最大利润）
+    - 股价跌破260或涨破340：你开始亏钱（但有上限）
+
+    【适合谁？】
+    觉得股价会在某个区间内震荡的人。
+    就像开赌场，赌股价不会大涨大跌。
+
+    【优势】
+    胜率高（股价大部分时间在震荡），风险有限。
+    【劣势】
+    收益有限，一次大行情可能吃掉多次小利润。
     """
     if not chain:
         return {'error': '无期权链数据'}
@@ -1010,20 +1291,33 @@ def analyze_iron_condor(spot: float, chain: list) -> dict:
 
 
 # ============================================================
-# P&L 盈亏图数据生成
+# P&L 盈亏图 - 一眼看懂"在什么价格赚钱/亏钱"
+# ============================================================
+# 【小白必读】什么是P&L图？
+# P&L(Profit & Loss)图是一张"盈亏地图"：
+# - X轴 = 到期时的股价
+# - Y轴 = 你的盈亏金额
+# - 零线以上 = 赚钱（绿色区域）
+# - 零线以下 = 亏钱（红色区域）
+#
+# 看懂P&L图你就能知道：
+# 1. 最多能赚多少？（最高点）
+# 2. 最多能亏多少？（最低点）
+# 3. 在什么价格开始赚钱？（盈亏平衡点）
+# 4. 在什么价格开始亏钱？
 # ============================================================
 
 def generate_pnl_diagram(strategy_data: dict, spot: float, spot_range_pct: float = 30) -> dict:
     """
-    为策略生成到期日 P&L 盈亏图数据。
+    生成策略的P&L盈亏图数据 - 用来看"在什么价格赚钱/亏钱"
 
-    Args:
-        strategy_data: 策略分析结果 (必须包含 legs 信息)
-        spot: 当前标的价格
-        spot_range_pct: 价格范围百分比 (±%)
+    【通俗理解】
+    这个函数帮你画一张图：
+    - 横轴是到期时股价可能的范围（比如210-390）
+    - 纵轴是对应的盈亏金额
+    - 你会看到一条曲线，穿过零线的地方就是"盈亏平衡点"
 
-    Returns:
-        {'prices': [...], 'pnl': [...], 'breakevens': [...], 'max_profit': ..., 'max_loss': ...}
+    用法：把返回的prices和pnl数据传给前端画图即可。
     """
     if not strategy_data or 'error' in strategy_data:
         return {'error': '无效策略数据'}
@@ -1130,7 +1424,29 @@ def generate_pnl_diagram(strategy_data: dict, spot: float, spot_range_pct: float
 
 
 # ============================================================
-# 改进的期权评分系统（满分100）
+# 期权评分系统（满分100）- 帮你快速找到最佳合约
+# ============================================================
+# 【小白必读】为什么需要评分？
+# 一个到期日可能有几十个行权价的期权，怎么选？
+# 评分系统从7个维度给每个期权打分，帮你快速筛选。
+#
+# 7个维度及权重：
+# ┌────┬──────────────┬──────┬────────────────────────────┐
+# │ #  │ 维度         │ 权重 │ 什么含义                   │
+# ├────┼──────────────┼──────┼────────────────────────────┤
+# │ 1  │ IV/HV溢价    │ 15分 │ 期权比实际波动贵多少       │
+# │ 2  │ IV百分位      │ 15分 │ 当前IV在历史中的位置       │
+# │ 3  │ 年化收益率    │ 20分 │ 卖这个期权能赚多少（最重要）│
+# │ 4  │ OTM缓冲      │ 15分 │ 离行权价有多远（安全垫）   │
+# │ 5  │ Theta效率    │ 15分 │ 每天能赚多少时间价值       │
+# │ 6  │ 盈利概率      │ 10分 │ 到期时赚钱的可能性         │
+# │ 7  │ 流动性        │ 10分 │ 容不容易买卖               │
+# └────┴──────────────┴──────┴────────────────────────────┘
+#
+# 怎么用？
+# - 80分以上：优秀，可以考虑交易
+# - 60-80分：良好，可以关注
+# - 60分以下：一般，谨慎考虑
 # ============================================================
 
 def score_option(spot: float, strike: float, premium: float, dte: int,
@@ -1139,16 +1455,15 @@ def score_option(spot: float, strike: float, premium: float, dte: int,
                  iv_percentile: float = 50,
                  risk_free_rate: float = 0.04) -> tuple:
     """
-    改进的期权评分系统（满分100）
+    期权评分系统 - 从7个维度给期权打分（满分100）
 
-    评分维度：
-    1. IV/HV 溢价 (15分) - 隐含波动率相对历史波动率的溢价
-    2. IV Percentile (15分) - IV 在历史中的位置
-    3. 年化收益率 (20分) - 权利金收益率
-    4. OTM 缓冲 (15分) - 虚值程度
-    5. Theta 效率 (15分) - 每日时间衰减效率
-    6. 盈利概率 (10分) - 基于 Delta
-    7. 流动性 (10分) - 基于 Bid-Ask Spread
+    【通俗理解】
+    这个函数就像一个"期权选美比赛"的评委，从7个角度给每个期权打分。
+    分数越高，说明这个期权越值得交易。
+
+    返回值：
+    - score: 总分（0-100）
+    - details: 每个维度的得分明细（用来了解为什么得这个分）
     """
     score = 0
     details = []
@@ -1249,7 +1564,24 @@ def score_option(spot: float, strike: float, premium: float, dte: int,
 
 
 # ============================================================
-# Rolling Recommendation - 轮动建议
+# 轮动建议 - 什么时候该平仓/展期/继续持有？
+# ============================================================
+# 【小白必读】什么是轮动(Rolling)？
+# 期权有到期日，你不能永远持有。轮动就是"换一个新合约继续做"。
+#
+# 三种操作：
+# ┌──────────┬──────────────────────────────────────────────────┐
+# │ 操作     │ 什么情况                                         │
+# ├──────────┼──────────────────────────────────────────────────┤
+# │ 平仓     │ 赚够了（50%+利润）或 风险太大了（OTM太小）       │
+# │ 展期     │ 快到期了但还想继续做，换一个更远到期日的合约      │
+# │ 持有     │ 还安全，继续收时间价值                           │
+# └──────────┴──────────────────────────────────────────────────┘
+#
+# 经验法则：
+# - 赚了50%就平仓（不要贪心）
+# - 剩7天就展期（Theta衰减太快）
+# - OTM < 5%就平仓（风险太高）
 # ============================================================
 
 def get_rolling_recommendation(spot: float, strike: float, premium: float,
@@ -1258,7 +1590,19 @@ def get_rolling_recommendation(spot: float, strike: float, premium: float,
                                current_iv: float = None,
                                risk_free_rate: float = 0.04) -> dict:
     """
-    改进的轮动建议：使用真实 IV 而不是估算值
+    轮动建议 - 告诉你该平仓、展期还是继续持有
+
+    【通俗理解】
+    你卖了一个Put，现在过了20天，还剩10天到期。
+    这个函数会告诉你：
+    - "已经赚了60%利润，建议平仓" 或
+    - "还剩7天，Theta收益下降，建议展期到下个月" 或
+    - "OTM缓冲15%安全，继续持有"
+
+    返回值：
+    - action: 'close'(平仓) / 'roll'(展期) / 'hold'(持有)
+    - reason: 为什么建议这么做
+    - profit_pct: 当前赚了百分之多少
     """
     T = dte_left / 365 if dte_left > 0 else 0.001
     # 优先使用传入的真实 IV，否则用 HV 估算
@@ -1348,7 +1692,19 @@ def get_rolling_recommendation(spot: float, strike: float, premium: float,
 
 
 # ============================================================
-# Futu OpenD Connection
+# Futu OpenD 连接管理
+# ============================================================
+# 【小白必读】什么是OpenD？
+# OpenD是富途的行情数据网关。你需要：
+# 1. 下载并安装 OpenD（https://www.futunn.com/download/OpenAPI）
+# 2. 用富途账号登录 OpenD
+# 3. OpenD会在本地 127.0.0.1:11111 开一个服务
+# 4. 本程序通过这个服务获取实时期权数据
+#
+# 如果连接失败，检查：
+# - OpenD是否已启动并登录？
+# - 是否同意了API使用协议？
+# - 防火墙是否阻止了11111端口？
 # ============================================================
 
 OPEND_HOST = '127.0.0.1'
@@ -1356,7 +1712,14 @@ OPEND_PORT = 11111
 
 
 def check_connection() -> dict:
-    """检查 Futu OpenD 连接状态"""
+    """
+    检查 Futu OpenD 连接状态
+
+    【通俗理解】
+    这个函数测试"能不能和OpenD说上话"。
+    返回 connected=true 就是连上了，可以获取数据了。
+    返回 connected=false 就是没连上，看看错误信息是什么原因。
+    """
     if not FUTU_AVAILABLE:
         return {
             'connected': False,
@@ -1429,13 +1792,31 @@ def get_option_chain_from_futu(
     risk_free_rate: float = 0.04,
 ) -> dict:
     """
-    从 Futu OpenD 获取真实期权链数据 + BSM Greeks + 改进评分
+    获取完整期权链数据 - 这是整个模块的核心函数
+
+    【通俗理解】
+    这个函数做了一件大事：把富途的所有期权数据"加工"成你需要的格式。
+
+    它的工作流程：
+    1. 连接OpenD，获取腾讯的所有期权合约
+    2. 获取每个合约的实时报价（买价、卖价、成交量等）
+    3. 用BSM公式计算每个合约的Greeks（Delta/Gamma/Theta/Vega）
+    4. 用7维度评分系统给每个合约打分
+    5. 分析流动性（买卖价差）
+    6. 找出最佳Put、最佳Call、最高收益、最安全的合约
+
+    返回值包含：
+    - spot_price: 股票现价
+    - chain: 所有期权合约（已评分+已计算Greeks）
+    - best_put: 评分最高的Put
+    - best_call: 评分最高的Call
+    - iv_analysis: 波动率分析（IV百分位等）
 
     改进点：
-    1. 用 bid/ask 中间价求 IV（而不是 last_price）
-    2. 添加 IV Percentile
-    3. 添加 Bid-Ask Spread 分析
-    4. 改进评分系统（7维度）
+    1. 用 bid/ask 中间价求 IV（而不是 last_price，更准确）
+    2. 添加 IV Percentile（判断IV在历史中的位置）
+    3. 添加 Bid-Ask Spread 分析（判断流动性）
+    4. 改进评分系统（7维度，满分100）
     """
     cache_key = f"futu_opt_{stock_code}_{option_type}"
     cached = _get_cached(cache_key)
@@ -1526,7 +1907,7 @@ def get_option_chain_from_futu(
                     all_strikes.add(strike)
 
                     try:
-                        dte = (datetime.strptime(expiry_date, '%Y-%m-%d') - datetime.now()).days
+                        dte = (datetime.strptime(expiry_date, '%Y-%m-%d').date() - datetime.now().date()).days
                     except:
                         dte = 30
 
@@ -1663,7 +2044,17 @@ def get_option_chain_from_futu(
 # ============================================================
 
 def get_option_quote(option_code: str) -> dict:
-    """获取单个期权合约的详细报价"""
+    """
+    获取单个期权合约的详细报价
+
+    【通俗理解】
+    当你对某个具体的期权合约感兴趣时，用这个函数查看它的详细信息：
+    - 最新价、买价、卖价
+    - 今天成交了多少手
+    - 还有多少未平仓合约
+
+    用法：传入期权代码（如 HK.00700@240628P00280000），返回报价详情。
+    """
     conn_status = check_connection()
     if not conn_status.get('connected'):
         return {'error': conn_status.get('error', '无法连接')}

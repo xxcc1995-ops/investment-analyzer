@@ -3,9 +3,9 @@ import api from './client'
 // ============ 每日信息API ============
 
 export const dailyInfoApi = {
-  /** 获取每日投资简报（首次加载较慢，超时设为120秒） */
+  /** 获取每日投资简报（首次加载较慢，超时设为45秒） */
   getBriefing: () =>
-    api.get<Record<string, unknown>>('/daily-info/briefing', { timeout: 120000 }),
+    api.get<Record<string, unknown>>('/daily-info/briefing', { timeout: 45000 }),
 
   /** 获取中国市场摘要 */
   getChinaMarket: () =>

@@ -694,14 +694,6 @@ class DataService:
 
             latest_date = reports[0]["date"] if reports else None
 
-            return {
-                "code": stock_code,
-                "reports": reports,
-                "latest_report_date": latest_date,
-                "latest_bps": latest_bps,
-                "latest_bps_date": latest_bps_date,
-                "fetch_time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-            }
             # 用现金流量表补充FCF数据
             try:
                 cashflow = DataService._fetch_cashflow_statement(stock_code)
@@ -712,12 +704,21 @@ class DataService:
                     if cf_date and fcf is not None:
                         cf_by_date[cf_date] = fcf
                 # 将FCF补充到对应的report中
-                for report in all_reports:
+                for report in reports:
                     rdate = report.get("date", "")
                     if rdate in cf_by_date:
                         report["fcf"] = round(cf_by_date[rdate] / 1e8, 2)  # 转为亿
             except Exception as e2:
                 logger.debug(f"补充FCF数据失败: {e2}")
+
+            return {
+                "code": stock_code,
+                "reports": reports,
+                "latest_report_date": latest_date,
+                "latest_bps": latest_bps,
+                "latest_bps_date": latest_bps_date,
+                "fetch_time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            }
 
         except Exception as e:
             logger.error(f"get_financial_indicators failed for {stock_code}: {e}")

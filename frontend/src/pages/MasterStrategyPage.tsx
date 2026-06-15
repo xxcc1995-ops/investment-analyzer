@@ -1,5 +1,5 @@
 import { LoadingSpinner } from '../components/ui'
-import { useState, useEffect, useCallback, useMemo } from 'react'
+import React, { useState, useEffect, useCallback, useMemo } from 'react'
 import ReactECharts from 'echarts-for-react'
 import { cbApi, type ConvertibleBond } from '../services/api'
 
@@ -553,8 +553,8 @@ export default function MasterStrategyPage() {
                 </thead>
                 <tbody>
                   {filteredAndSortedBonds.map((b, i) => (
-                    <>
-                      <tr key={b.bond_id} onClick={() => setExpandedRow(expandedRow === b.bond_id ? null : b.bond_id)}
+                    <React.Fragment key={b.bond_id}>
+                      <tr onClick={() => setExpandedRow(expandedRow === b.bond_id ? null : b.bond_id)}
                         style={{ cursor: 'pointer', background: expandedRow === b.bond_id ? 'var(--bg-secondary)' : undefined }}>
                         <td>{i + 1}</td>
                         <td style={{ fontFamily: 'monospace', fontSize: '12px' }}>{b.bond_id}</td>
@@ -647,7 +647,7 @@ export default function MasterStrategyPage() {
                           </td>
                         </tr>
                       )}
-                    </>
+                    </React.Fragment>
                   ))}
                   {filteredAndSortedBonds.length === 0 && (
                     <tr>

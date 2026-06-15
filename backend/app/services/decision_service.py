@@ -2033,29 +2033,29 @@ TRAINING_EXERCISES = {
             },
             {
                 "id": "dd_02",
-                "scenario": "你持有的股票今天涨了5%：",
-                "option_a": "今天卖出，确定赚 ¥8,000",
-                "option_b": "继续持有，一年后预期收益 ¥15,000（但可能亏损）",
-                "correct": "depends",
-                "explanation": "这取决于你的投资逻辑是否还成立。如果基本面没变，选B；如果只是反弹，选A。关键是：你的决定基于分析还是恐惧？",
+                "scenario": "你持有的股票今天涨了5%，你分析后认为基本面良好，预期一年后收益¥15,000。现在卖出确定赚¥8,000。正确做法是：",
+                "option_a": "今天卖出，确定赚 ¥8,000（落袋为安）",
+                "option_b": "继续持有，等待更高收益（基于分析）",
+                "correct": "B",
+                "explanation": "正确答案是B。如果你的分析表明基本面良好，就应该继续持有。落袋为安是损失厌恶的表现——用确定的小收益，换取不确定的大收益。",
                 "difficulty": 2,
             },
             {
                 "id": "dd_03",
-                "scenario": "你发现了一个投资机会：",
-                "option_a": "现在买入，但可能错过更好的价格",
-                "option_b": "等一个月，可能价格更低也可能更高",
-                "correct": "depends",
-                "explanation": "没有标准答案。但问自己：如果这个机会一周后还在，你还会这么着急吗？时间压力是最大的噪声来源。",
+                "scenario": "你发现了一个投资机会，分析后认为现在价格合理。但你担心明天价格会更低。正确做法是：",
+                "option_a": "现在买入，基于你的分析",
+                "option_b": "等一个月，希望价格更低",
+                "correct": "A",
+                "explanation": "正确答案是A。如果你的分析表明现在价格合理，就应该买入。等待更低价格是贪婪的表现——你永远无法预测底部。",
                 "difficulty": 2,
             },
             {
                 "id": "dd_04",
-                "scenario": "你的投资组合本月亏损了8%：",
+                "scenario": "你的投资组合本月亏损了8%。你检查后发现持仓逻辑没变，市场只是短期波动。正确做法是：",
                 "option_a": "现在止损，锁定亏损",
-                "option_b": "持有不动，等待反弹",
-                "correct": "depends",
-                "explanation": "取决于你的投资逻辑是否还成立。问自己：如果今天第一次看到这只股票，没有任何持仓，你会建仓吗？",
+                "option_b": "持有不动，基于你的分析",
+                "correct": "B",
+                "explanation": "正确答案是B。如果持仓逻辑没变，短期波动不应该影响你的决策。止损应该基于逻辑变化，不是基于亏损。",
                 "difficulty": 3,
             },
             {
@@ -2351,61 +2351,67 @@ TRAINING_EXERCISES = {
     },
 
     # ============================================================
-    # 新增4个练习：针对最致命的人性弱点
+    # 新增4个练习：基于经典心理学实验
+    # 来源：Kahneman & Tversky, Tetlock, Asch, Arkes 等
     # ============================================================
 
     "loss_aversion": {
         "name": "损失厌恶",
         "icon": "💔",
         "color": "#ef4444",
-        "desc": "亏损的痛苦是盈利快乐的2倍。训练你理性面对损失。",
-        "investment_tip": "损失厌恶是投资最大的敌人。它让你：持有亏损股太久，卖出盈利股太早。",
+        "desc": "基于Kahneman前景理论。亏损的痛苦是盈利快乐的2倍。",
+        "investment_tip": "来源：Kahneman & Tversky (1979) 前景理论。损失厌恶是投资最大的敌人。",
         "duration": "3分钟",
         "questions": [
             {
                 "id": "la_01",
-                "scenario": "你持有两只股票：A亏了30%，B赚了30%。你需要卖出一只。你会：",
-                "option_a": "卖出A（亏的），锁定亏损",
-                "option_b": "卖出B（赚的），锁定盈利",
-                "correct": "depends",
-                "explanation": "正确答案：看未来的预期，不看过去的盈亏。问自己：如果今天第一次看到这两只股票，没有任何持仓，你会买哪只？卖出你不看好的那只。",
+                "scenario": "【Kahneman经典实验】你面临两个选择：\n选项A：确定获得 ¥3,000\n选项B：80%概率获得 ¥4,000，20%概率什么都得不到",
+                "option_a": "选A，确定拿走¥3,000",
+                "option_b": "选B，期望值¥3,200更高",
+                "correct": "B",
+                "explanation": "正确答案是B。B的期望值 = 80% × ¥4,000 = ¥3,200 > ¥3,000。但大多数人选A，这是确定性效应——人们高估确定性结果的价值。在投资中，这表现为过早卖出盈利股票（落袋为安）。",
                 "difficulty": 2,
+                "source": "Kahneman & Tversky (1979) Prospect Theory",
             },
             {
                 "id": "la_02",
-                "scenario": "你投资了¥100,000，现在价值¥70,000（亏了30%）。你有两个选择：",
-                "option_a": "卖出，确定亏损¥30,000",
-                "option_b": "继续持有，有50%概率回本，50%概率继续亏到¥50,000",
+                "scenario": "【前景理论镜像实验】你面临两个选择：\n选项A：确定损失 ¥3,000\n选项B：80%概率损失 ¥4,000，20%概率不用赔",
+                "option_a": "选A，确定亏损¥3,000",
+                "option_b": "选B，赌一把可能不用赔",
                 "correct": "A",
-                "explanation": "期望值计算：B的期望值 = 50%×¥100,000 + 50%×¥50,000 = ¥75,000。看起来B更好？但这是错误的。确定的¥70,000 > 不确定的¥75,000，因为你的风险承受能力有限。而且，如果基本面变了，继续持有只是在赌博。",
-                "difficulty": 3,
+                "explanation": "正确答案是A。A的期望损失 = ¥3,000，B的期望损失 = 80% × ¥4,000 = ¥3,200。大多数人选B（风险偏好），这导致持有亏损股票太久、不止损。",
+                "difficulty": 2,
+                "source": "Kahneman & Tversky (1979) Prospect Theory",
             },
             {
                 "id": "la_03",
-                "scenario": "你卖出一只股票后，它涨了20%。你的反应是：",
-                "option_a": "后悔，下次要持有更久",
-                "option_b": "接受，我的决策基于当时的信息",
+                "scenario": "【Arkes沉没成本实验】你花¥100买了张滑雪票，到了雪场发现天气很差，滑雪会很不舒服。你会：",
+                "option_a": "去滑雪，毕竟花了¥100",
+                "option_b": "待在酒店休息，¥100已经花了，不应该影响决定",
                 "correct": "B",
-                "explanation": "卖飞是正常的。如果你的决策过程是正确的，结果不好只是运气。不要因为一次卖飞就改变你的策略。",
-                "difficulty": 2,
+                "explanation": "正确答案是B。¥100是沉没成本，无论你是否去滑雪都不会回来。理性决策只看未来：滑雪的快乐是否大于不舒服？大多数人选A，这是沉没成本谬误。",
+                "difficulty": 1,
+                "source": "Arkes & Blumer (1985) Sunk Cost Experiments",
             },
             {
                 "id": "la_04",
-                "scenario": "你的投资组合本月跌了10%。你会：",
-                "option_a": "检查持仓逻辑是否还成立，不成立就卖出",
-                "option_b": "不看账户，等涨回来再说",
-                "correct": "A",
-                "explanation": "不看账户是逃避，不是理性。正确的做法：检查每只股票的买入逻辑是否还成立。如果逻辑变了，就应该卖出，不管盈亏。",
+                "scenario": "【Thaler心理账户实验】你买了两张票：\n票A：花¥1,000买的演唱会票，到了现场发现票丢了\n票B：花¥100买的电影票，到了现场发现票丢了\n你更可能重新买哪张？",
+                "option_a": "重新买演唱会票（¥1,000）",
+                "option_b": "重新买电影票（¥100）",
+                "correct": "B",
+                "explanation": "正确答案是B。理性决策：看这场演出/电影是否值得再花一次钱，与之前花了多少无关。但大多数人不愿意为演唱会再花¥1,000（心理账户效应）。在投资中，这表现为不愿意为亏损股票再投入。",
                 "difficulty": 2,
+                "source": "Thaler (1999) Mental Accounting",
             },
             {
                 "id": "la_05",
-                "scenario": "你有两只股票：A是你研究了很久才买的，B是朋友推荐你随便买的。现在A亏了，B赚了。你需要钱，卖一只：",
-                "option_a": "卖出A（亏的），因为亏了所以不想卖",
-                "option_b": "分析两只股票的未来预期，卖出不看好的那只",
-                "correct": "B",
-                "explanation": "你对A的感情（研究了很久）和对A的亏损（不想认输）都在影响你的判断。正确做法：忽略过去，只看未来。",
+                "scenario": "【Samuelson午餐实验】你的同事每天和你打赌：50%概率赢¥200，50%概率输¥100。你拒绝了。但他说：\"我们连玩100次，你接受吗？\" 你应该：",
+                "option_a": "接受，100次下来期望收益¥5,000",
+                "option_b": "拒绝，每次赌博都有风险",
+                "correct": "A",
+                "explanation": "正确答案是A。每次赌博的期望值 = 50%×200 - 50%×100 = ¥50。100次的期望收益 = ¥5,000。大多数人拒绝单次赌博（损失厌恶），但如果能承受波动，多次重复是理性的。",
                 "difficulty": 3,
+                "source": "Samuelson (1963) St. Petersburg Paradox",
             },
         ],
     },
@@ -2414,54 +2420,59 @@ TRAINING_EXERCISES = {
         "name": "从众抵抗",
         "icon": "🐑",
         "color": "#f59e0b",
-        "desc": "从众让我们活下来，但让我们亏钱。训练你独立思考。",
-        "investment_tip": "当所有人都在买的时候，正是最危险的时候。巴菲特：别人贪婪时恐惧。",
+        "desc": "基于Asch从众实验。从众让我们活下来，但让我们亏钱。",
+        "investment_tip": "来源：Asch (1951) 从众实验。当所有人都在买的时候，正是最危险的时候。",
         "duration": "3分钟",
         "questions": [
             {
                 "id": "hr_01",
-                "scenario": "群里所有人都在讨论一只股票，说\"这次不一样\"。你的反应是：",
-                "option_a": "研究一下，如果确实好就买",
-                "option_b": "先问自己：如果没有人讨论这只股票，我会关注它吗？",
+                "scenario": "【Asch从众实验改编】房间里有7个人，其中6个是托。他们都说一条短线比另一条长，但明显更短。你会：",
+                "option_a": "跟随大家的判断",
+                "option_b": "坚持自己的判断，说短线更短",
                 "correct": "B",
-                "explanation": "从众是最大的投资陷阱。当所有人都在讨论时，往往已经到了顶部。先独立思考，再看别人的观点。",
-                "difficulty": 2,
+                "explanation": "正确答案是B。Asch实验发现，75%的人至少有一次跟随错误的群体判断。在投资中，当所有人都说\"涨\"时，你是否能坚持自己的分析？",
+                "difficulty": 1,
+                "source": "Asch (1951) Conformity Experiments",
             },
             {
                 "id": "hr_02",
-                "scenario": "市场暴跌，朋友圈都在晒亏损。你会：",
-                "option_a": "也卖出，避免更大的亏损",
-                "option_b": "检查自己的持仓逻辑，如果没变就持有",
+                "scenario": "【Galton群众智慧实验】一头牛的重量，787个人猜的中位数是1207磅，实际重量是1198磅。这说明：",
+                "option_a": "群众的判断总是对的，应该跟随",
+                "option_b": "群众智慧在特定条件下有效，但不等于应该盲从",
                 "correct": "B",
-                "explanation": "恐慌是会传染的。别人的恐惧不应该影响你的判断。如果基本面没变，暴跌反而是买入机会。",
+                "explanation": "正确答案是B。群众智慧要求：独立判断、多样性、分散性。如果所有人都互相影响（如股票论坛），群众就不再是智慧，而是疯狂。",
                 "difficulty": 2,
+                "source": "Galton (1907) Vox Populi / Surowiecki (2004) Wisdom of Crowds",
             },
             {
                 "id": "hr_03",
-                "scenario": "一个投资大V推荐了一只股票，粉丝都在跟买。你会：",
-                "option_a": "跟买，大V肯定比我懂",
-                "option_b": "独立分析，大V也会错，而且他的资金量和风险承受力和我不同",
+                "scenario": "【Shiller泡沫研究】2000年互联网泡沫时，所有人都说\"这次不一样\"。纳斯达克从5000点跌到1100点。这说明：",
+                "option_a": "那次是特殊情况，现在不同了",
+                "option_b": "\"这次不一样\"是泡沫的典型信号",
                 "correct": "B",
-                "explanation": "诉诸权威是常见的逻辑谬误。大V的推荐可能基于不同的投资期限、风险承受力和资金量。你需要独立判断。",
-                "difficulty": 2,
+                "explanation": "正确答案是B。每次泡沫都有人说\"这次不一样\"：1637年郁金香、2000年互联网、2008年房地产。历史不断重复，因为人性不变。",
+                "difficulty": 1,
+                "source": "Shiller (2000) Irrational Exuberance",
             },
             {
                 "id": "hr_04",
-                "scenario": "你发现一个投资机会，但身边的人都不看好。你会：",
-                "option_a": "放弃，大家都说不好肯定有问题",
-                "option_b": "坚持自己的分析，但认真听取反对意见",
+                "scenario": "【Milgram服从实验改编】一个\"权威分析师\"告诉你买入某股票，你分析后认为不值得买。你会：",
+                "option_a": "听权威的，他比我懂",
+                "option_b": "坚持自己的分析，权威也会错",
                 "correct": "B",
-                "explanation": "独立思考不等于固执己见。你应该认真听取反对意见，但最终决策基于自己的分析，而不是别人的看法。",
-                "difficulty": 3,
+                "explanation": "正确答案是B。Milgram实验发现，65%的人会因为权威的命令而伤害他人。在投资中，不要因为\"权威\"就放弃独立思考。",
+                "difficulty": 2,
+                "source": "Milgram (1963) Obedience to Authority",
             },
             {
                 "id": "hr_05",
-                "scenario": "论坛上有人说\"这次不一样，永远涨\"。你的反应是：",
-                "option_a": "相信，因为这次确实有新因素",
-                "option_b": "警惕，\"这次不一样\"是投资中最贵的五个字",
+                "scenario": "【Keynes选美理论】你不是在选最好的股票，而是在猜别人会选哪只股票。这导致：",
+                "option_a": "跟随大众，买大家都在买的",
+                "option_b": "独立分析，买真正有价值的",
                 "correct": "B",
-                "explanation": "\"这次不一样\"是泡沫的典型特征。历史上每次泡沫都有人说这句话。保持警惕，回归基本面。",
-                "difficulty": 1,
+                "explanation": "正确答案是B。Keynes说：投资就像选美比赛，你不是选最美的，而是猜别人会选谁。但这导致泡沫。理性投资者应该基于价值，不是基于猜测别人。",
+                "difficulty": 2,
+                "source": "Keynes (1936) General Theory, Chapter 12",
             },
         ],
     },
@@ -2470,54 +2481,59 @@ TRAINING_EXERCISES = {
         "name": "叙事谬误",
         "icon": "📖",
         "color": "#8b5cf6",
-        "desc": "我们用故事理解世界，但故事会骗人。训练你区分叙事和证据。",
-        "investment_tip": "好故事≠好投资。最危险的投资，往往有最动人的故事。",
+        "desc": "基于Kahneman叙事谬误研究。好故事≠好投资。",
+        "investment_tip": "来源：Kahneman (2011) Thinking, Fast and Slow。最危险的投资往往有最动人的故事。",
         "duration": "3分钟",
         "questions": [
             {
                 "id": "nd_01",
-                "scenario": "一家公司说\"我们要改变世界，让每个人都能...\"。你会：",
-                "option_a": "被愿景打动，买入股票",
-                "option_b": "忽略故事，看财务数据",
-                "correct": "B",
-                "explanation": "改变世界的故事很动人，但不等于能赚钱。很多改变世界的公司（如早期互联网公司）让投资者亏了很多钱。看数据，不看故事。",
+                "scenario": "【Linda问题·Tversky & Kahneman】Linda 31岁，单身，坦率直言，主修哲学。学生时代关注社会正义，参加反核游行。以下哪个更可能？\nA. Linda是银行柜员\nB. Linda是银行柜员，且是女权主义者",
+                "option_a": "A更可能",
+                "option_b": "B更可能",
+                "correct": "A",
+                "explanation": "正确答案是A。这是著名的合取谬误：P(A且B) ≤ P(A)，永远成立。但85%的人选B，因为B更符合Linda的\"故事\"。在投资中，好故事会让我们高估概率。",
                 "difficulty": 2,
+                "source": "Tversky & Kahneman (1983) Extensional Versus Intuitive Reasoning",
             },
             {
                 "id": "nd_02",
-                "scenario": "分析师写了一份50页的研报，逻辑清晰，故事动人。你会：",
-                "option_a": "被说服，买入",
-                "option_b": "检查数据是否支持结论，有没有反面证据",
+                "scenario": "【出租车问题·Kahneman & Tversky】一辆出租车肇事逃逸。城市有蓝色和绿色出租车，比例85:15。目击者说是蓝色。测试显示目击者在类似条件下正确率80%。蓝色出租车是肇事者的概率是多少？",
+                "option_a": "约80%（目击者正确率）",
+                "option_b": "约41%（需要用贝叶斯定理计算）",
                 "correct": "B",
-                "explanation": "研报的目的是让你买入（分析师靠这个赚钱）。再动人的故事，如果数据不支持，就是空话。永远检查数据。",
-                "difficulty": 2,
+                "explanation": "正确答案是B。用贝叶斯定理：P(蓝|说是蓝) = (0.8×0.85) / (0.8×0.85 + 0.2×0.15) ≈ 41%。大多数人忽略基础比率（85%绿车），只看目击者证据。这就是基础比率忽视。",
+                "difficulty": 3,
+                "source": "Kahneman & Tversky (1973) On the Psychology of Prediction",
             },
             {
                 "id": "nd_03",
-                "scenario": "你看到一个\"普通人靠投资逆袭人生\"的故事。你的反应是：",
-                "option_a": "受到激励，也想尝试同样的策略",
-                "option_b": "意识到这是幸存者偏差，亏光的人你看不到",
+                "scenario": "【可得性启发】以下哪种死法更常见？\nA. 被飞机失事砸死\nB. 被掉落的椰子砸死",
+                "option_a": "A更常见（新闻常报道）",
+                "option_b": "B更常见（实际统计数据）",
                 "correct": "B",
-                "explanation": "幸存者偏差：你只看到成功的人，看不到失败的人。100个人用同样的策略，1个人成功了被报道，99个人失败了没人知道。",
+                "explanation": "正确答案是B。被椰子砸死的概率是飞机失事的10倍以上。但我们觉得飞机失事更常见，因为它更\"可得\"（新闻常报道）。在投资中，我们高估热门股票的成功概率，低估冷门股票。",
                 "difficulty": 2,
+                "source": "Tversky & Kahneman (1973) Availability Heuristic",
             },
             {
                 "id": "nd_04",
-                "scenario": "一家公司的CEO在发布会上激情演讲，股价大涨。你会：",
-                "option_a": "买入，CEO这么有激情公司肯定好",
-                "option_b": "冷静分析，演讲能力≠经营能力",
-                "correct": "B",
-                "explanation": "CEO的演讲能力与公司价值无关。很多会讲故事的CEO（如马斯克）确实很成功，但也有很多会讲故事的CEO（如安然的CEO）让投资者血本无归。",
+                "scenario": "【框架效应·亚洲疾病问题】600人面临致命疾病。方案A：确定救活200人。方案B：1/3概率救活全部600人，2/3概率无人生还。你选：",
+                "option_a": "A，确定救活200人",
+                "option_b": "B，赌一把可能全救活",
+                "correct": "A",
+                "explanation": "正确答案是A。A的期望值 = 200人，B的期望值 = 200人，相等。但大多数人选A（确定性效应）。在投资中，这导致过早卖出盈利股票（落袋为安）。",
                 "difficulty": 2,
+                "source": "Tversky & Kahneman (1981) The Framing of Decisions",
             },
             {
                 "id": "nd_05",
-                "scenario": "你看到一条新闻：\"某行业将迎来爆发式增长\"。你会：",
-                "option_a": "买入该行业的股票",
-                "option_b": "问自己：这个\"爆发\"已经在价格里了吗？",
+                "scenario": "【后见之明偏差】一只股票涨了100%，有人说\"我早就知道会涨\"。实际上：",
+                "option_a": "他确实有先见之明",
+                "option_b": "这是后见之明偏差，事后看都觉得\"早就知道\"",
                 "correct": "B",
-                "explanation": "如果新闻已经报道了，市场大概率已经反映了。\"买入消息，卖出事实\"。看估值，不看新闻。",
-                "difficulty": 2,
+                "explanation": "正确答案是B。后见之明偏差：事后看，一切都觉得\"早就知道\"。这让我们高估自己的预测能力，过度自信。",
+                "difficulty": 1,
+                "source": "Fischhoff (1975) Hindsight ≠ Foresight",
             },
         ],
     },
@@ -2526,54 +2542,59 @@ TRAINING_EXERCISES = {
         "name": "控制错觉",
         "icon": "🎮",
         "color": "#10b981",
-        "desc": "我们以为能控制市场，其实大部分是运气。训练你区分技能和运气。",
-        "investment_tip": "赚钱时觉得自己是天才，亏钱时觉得是运气差——这是最危险的错觉。",
+        "desc": "基于Langer控制错觉研究。我们以为能控制市场，其实大部分是运气。",
+        "investment_tip": "来源：Langer (1975) Illusion of Control。赚钱时觉得自己是天才，亏钱时觉得是运气差。",
         "duration": "3分钟",
         "questions": [
             {
                 "id": "ci_01",
-                "scenario": "你连续3次选股都赚钱了。你的想法是：",
-                "option_a": "我选股能力很强，可以加大仓位",
-                "option_b": "可能是运气，需要更多样本才能判断",
+                "scenario": "【Langer控制错觉实验】你掷骰子，以下哪种情况你觉得更能控制结果？",
+                "option_a": "自己掷",
+                "option_b": "别人掷",
                 "correct": "B",
-                "explanation": "3次样本太小。1000个人抛硬币，总有人连续3次正面。你需要至少30-50次交易才能判断是技能还是运气。",
-                "difficulty": 2,
+                "explanation": "正确答案是B（一样）。骰子是随机的，谁掷都一样。但Langer实验发现，人们觉得自己掷时更能控制结果。在投资中，这表现为觉得自己能\"控制\"市场走势。",
+                "difficulty": 1,
+                "source": "Langer (1975) The Illusion of Control",
             },
             {
                 "id": "ci_02",
-                "scenario": "你用技术指标分析后买入，股票涨了。你会：",
-                "option_a": "技术指标真准，继续用",
-                "option_b": "一次成功不能证明指标有效，需要回测",
+                "scenario": "【Dunning-Kruger效应】投资新手在牛市赚了50%，他认为自己是投资天才。实际上：",
+                "option_a": "他确实有天赋",
+                "option_b": "牛市中几乎所有人都赚钱，这是环境而非能力",
                 "correct": "B",
-                "explanation": "确认偏差：你只记得成功的案例，忘记了失败的案例。技术指标的有效性需要用大量数据回测，不能靠个案判断。",
+                "explanation": "正确答案是B。Dunning-Kruger效应：能力低的人高估自己。在牛市中，连猴子扔飞镖选股都能赚钱。区分技能和运气，需要看长期表现。",
                 "difficulty": 2,
+                "source": "Kruger & Dunning (1999) Unskilled and Unaware",
             },
             {
                 "id": "ci_03",
-                "scenario": "你每天花4小时研究市场。你认为：",
-                "option_a": "花的时间越多，收益应该越好",
-                "option_b": "研究时间与收益没有必然关系",
+                "scenario": "【Tetlock超级预测者研究】超级预测者的共同特征是：",
+                "option_a": "极度自信，从不改变观点",
+                "option_b": "保持谦逊，随时根据新信息更新判断",
                 "correct": "B",
-                "explanation": "过度交易是散户亏损的主要原因之一。花更多时间不等于赚更多钱。有时候，什么都不做才是最好的策略。",
-                "difficulty": 3,
+                "explanation": "正确答案是B。Tetlock发现，最好的预测者不是最自信的，而是最愿意更新判断的。他们用贝叶斯思维：新证据→更新概率。",
+                "difficulty": 2,
+                "source": "Tetlock & Gardner (2015) Superforecasting",
             },
             {
                 "id": "ci_04",
-                "scenario": "你制定了一套复杂的交易规则。你会：",
-                "option_a": "严格执行，规则能保证盈利",
-                "option_b": "定期评估规则是否有效，市场会变",
+                "scenario": "【有效市场假说·Fama】一只股票的历史价格信息，能帮助你预测未来价格吗？",
+                "option_a": "能，技术分析有效",
+                "option_b": "弱式有效市场假说认为，历史价格已经反映在当前价格中",
                 "correct": "B",
-                "explanation": "没有永远有效的规则。市场在变，你的规则也需要变。过度相信规则是控制错觉的一种形式。",
+                "explanation": "正确答案是B。Fama的弱式有效市场假说：历史价格信息已经反映在当前价格中，技术分析无法持续跑赢市场。大多数技术分析师长期跑输指数。",
                 "difficulty": 3,
+                "source": "Fama (1970) Efficient Market Hypothesis",
             },
             {
                 "id": "ci_05",
-                "scenario": "你看到一个量化策略，回测收益很高。你会：",
-                "option_a": "马上用真金白银实盘",
-                "option_b": "先用小资金测试，回测不等于实盘",
+                "scenario": "【Barber & Odean交易研究】研究发现，交易越频繁的散户，收益越差。原因是：",
+                "option_a": "他们研究不够深入",
+                "option_b": "过度交易源于过度自信，自信自己能预测市场",
                 "correct": "B",
-                "explanation": "回测有很多陷阱：过拟合、未来函数、幸存者偏差。回测收益高不等于实盘收益高。先小资金测试。",
+                "explanation": "正确答案是B。Barber & Odean (2000)研究发现，交易最频繁的散户年收益比最不活跃的低7%。过度交易的根源是过度自信——以为自己能预测市场。",
                 "difficulty": 2,
+                "source": "Barber & Odean (2000) Trading Is Hazardous to Your Wealth",
             },
         ],
     },
@@ -2836,69 +2857,4 @@ def get_training_stats() -> dict:
             "total_sessions": 0,
             "by_exercise": {},
             "recent_scores": [],
-            "streak": 0,
-        }
-
-    total = len(log)
-    by_exercise = {}
-    for record in log:
-        et = record.get("exercise_type", "unknown")
-        if et not in by_exercise:
-            by_exercise[et] = {"count": 0, "total_score": 0, "correct": 0}
-        by_exercise[et]["count"] += 1
-        by_exercise[et]["total_score"] += record.get("score", 0)
-        if record.get("correct"):
-            by_exercise[et]["correct"] += 1
-
-    # 计算平均分
-    for et in by_exercise:
-        stats = by_exercise[et]
-        stats["avg_score"] = round(stats["total_score"] / stats["count"], 1) if stats["count"] > 0 else 0
-        stats["accuracy"] = round(stats["correct"] / stats["count"] * 100, 1) if stats["count"] > 0 else 0
-
-    # 最近10次得分
-    recent_scores = [{
-        "exercise_type": r.get("exercise_type"),
-        "score": r.get("score", 0),
-        "timestamp": r.get("timestamp"),
-    } for r in log[-10:]]
-
-    # 连续练习天数
-    from datetime import timedelta
-    dates = set()
-    for r in log:
-        ts = r.get("timestamp", "")
-        if ts:
-            dates.add(ts[:10])
-
-    streak = 0
-    today = datetime.now().date()
-    check_date = today
-    while str(check_date) in dates:
-        streak += 1
-        check_date -= timedelta(days=1)
-
-    # 推荐练习（基于最弱项）
-    weakest = None
-    lowest_score = 100
-    for et, stats in by_exercise.items():
-        if stats["avg_score"] < lowest_score:
-            lowest_score = stats["avg_score"]
-            weakest = et
-
-    recommendation = None
-    if weakest and weakest in TRAINING_EXERCISES:
-        recommendation = {
-            "exercise_type": weakest,
-            "name": TRAINING_EXERCISES[weakest]["name"],
-            "reason": f"这是你得分最低的练习（平均{lowest_score}分），建议多练习。",
-        }
-
-    return {
-        "status": "ok",
-        "total_sessions": total,
-        "by_exercise": by_exercise,
-        "recent_scores": recent_scores,
-        "streak": streak,
-        "recommendation": recommendation,
-    }
+ 

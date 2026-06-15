@@ -104,7 +104,7 @@ interface SearchResult {
 }
 
 export default function FutuOptionChain() {
-  const [activeTab, setActiveTab] = useState<'chain' | 'philosophy' | 'calculator' | 'rolling' | 'strategy' | 'iv_surface' | 'pnl'>('chain')
+  const [activeTab, setActiveTab] = useState<'chain' | 'philosophy' | 'calculator' | 'rolling' | 'strategy' | 'iv_surface' | 'pnl' | 'screening'>('chain')
   const [chain, setChain] = useState<OptionChain | null>(null)
   const [loading, setLoading] = useState(false)
   const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus | null>(null)
@@ -151,6 +151,14 @@ export default function FutuOptionChain() {
   const [maxPain, setMaxPain] = useState<any>(null)
   const [ivSurface, setIvSurface] = useState<any>(null)
   const [ivSurfaceLoading, setIvSurfaceLoading] = useState(false)
+
+  // Screening state
+  const [screenTradeFee, setScreenTradeFee] = useState('16')
+  const [screenExerciseFee, setScreenExerciseFee] = useState('100')
+  const [screenMinYield, setScreenMinYield] = useState('15')
+  const [screenMinOtm, setScreenMinOtm] = useState('3')
+  const [screenResult, setScreenResult] = useState<any>(null)
+  const [screenLoading, setScreenLoading] = useState(false)
 
   // Stock search
   const handleSearch = useCallback(async (keyword: string) => {
@@ -342,6 +350,27 @@ export default function FutuOptionChain() {
     setIvSurfaceLoading(false)
   }, [stockCode])
 
+  // 策略筛选
+  const runScreening = useCallback(async () => {
+    setScreenLoading(true)
+    setScreenResult(null)
+    try {
+      const res = await axios.get(`${API_BASE}/futu-options/screen`, {
+        params: {
+          stock_code: `HK.${stockCode}`,
+          trade_fee: parseFloat(screenTradeFee) || 16,
+          exercise_fee: parseFloat(screenExerciseFee) || 100,
+          min_yield: parseFloat(screenMinYield) || 15,
+          min_otm: parseFloat(screenMinOtm) || 3,
+        },
+      })
+      setScreenResult(res.data)
+    } catch (e: any) {
+      setScreenResult({ error: e.response?.data?.detail || e.message || '请求失败' })
+    }
+    setScreenLoading(false)
+  }, [stockCode, screenTradeFee, screenExerciseFee, screenMinYield, screenMinOtm])
+
   // Filter chain by expiry
   const filteredChain = chain?.chain?.filter(c => {
     if (selectedExpiry !== 'all' && c.expiry !== selectedExpiry) return false
@@ -485,6 +514,7 @@ export default function FutuOptionChain() {
         {([
           { key: 'chain', label: '期权链' },
           { key: 'strategy', label: '组合策略' },
+          { key: 'screening', label: '🔍 策略筛选' },
           { key: 'pnl', label: 'P&L盈亏图' },
           { key: 'iv_surface', label: 'IV曲面' },
           { key: 'philosophy', label: '卖期权理念' },
@@ -1458,6 +1488,153 @@ export default function FutuOptionChain() {
         </div>
       )}
 
+      {/* ====== SCREENING TAB ====== */}
+      {activeTab === 'screening' && (
+        <div>
+          <h3 style={{ color: '#d4a76a', marginBottom: 16 }}>🔍 策略筛选 — Covered Call & Cash Secured Put</h3>
+          <p style={{ color: '#999', marginBottom: 16, fontSize: 13 }}>
+            扫描全部期权链，扣除手续费后筛选年化收益达标的机会。默认按被行权的保守情况计算。
+          </p>
+
+          {/* 参数设置 */}
+          <div style={{ background: '#1a1a2e', padding: 16, borderRadius: 8, border: '1px solid #333', marginBottom: 16 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 12 }}>
+              <label style={{ color: '#ccc', fontSize: 13 }}>交易手续费 (HK$)
+                <input type="number" value={screenTradeFee} onChange={e => setScreenTradeFee(e.target.value)} min="0" step="1"
+                  style={{ width: '100%', padding: '6px', background: '#0d0d1a', color: '#fff', border: '1px solid #444', borderRadius: 4, marginTop: 4 }} />
+              </label>
+              <label style={{ color: '#ccc', fontSize: 13 }}>行权手续费 (HK$)
+                <input type="number" value={screenExerciseFee} onChange={e => setScreenExerciseFee(e.target.value)} min="0" step="1"
+                  style={{ width: '100%', padding: '6px', background: '#0d0d1a', color: '#fff', border: '1px solid #444', borderRadius: 4, marginTop: 4 }} />
+              </label>
+              <label style={{ color: '#ccc', fontSize: 13 }}>最低年化 (%)
+                <input type="number" value={screenMinYield} onChange={e => setScreenMinYield(e.target.value)} min="0" step="1"
+                  style={{ width: '100%', padding: '6px', background: '#0d0d1a', color: '#fff', border: '1px solid #444', borderRadius: 4, marginTop: 4 }} />
+              </label>
+              <label style={{ color: '#ccc', fontSize: 13 }}>最低OTM距离 (%)
+                <input type="number" value={screenMinOtm} onChange={e => setScreenMinOtm(e.target.value)} min="0" step="1"
+                  style={{ width: '100%', padding: '6px', background: '#0d0d1a', color: '#fff', border: '1px solid #444', borderRadius: 4, marginTop: 4 }} />
+              </label>
+            </div>
+            <button onClick={runScreening} disabled={screenLoading}
+              style={{ marginTop: 12, padding: '10px 28px', background: '#d4a76a', color: '#000', border: 'none', borderRadius: 4, cursor: 'pointer', fontWeight: 700, fontSize: 14 }}>
+              {screenLoading ? '扫描中...' : `🔍 扫描 HK.${stockCode} 期权链`}
+            </button>
+          </div>
+
+          {screenLoading && <LoadingSpinner text="正在扫描全部期权链，计算扣费后年化收益..." />}
+
+          {/* 筛选结果 */}
+          {screenResult && !screenResult.error && (
+            <div>
+              {/* 概览 */}
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 12, marginBottom: 16 }}>
+                <div style={{ background: '#1a1a2e', padding: 12, borderRadius: 8, border: '1px solid #333' }}>
+                  <div style={{ color: '#999', fontSize: 11 }}>标的现价</div>
+                  <div style={{ color: '#d4a76a', fontSize: 20, fontWeight: 700 }}>{screenResult.spot_price}</div>
+                </div>
+                <div style={{ background: '#1a1a2e', padding: 12, borderRadius: 8, border: '1px solid #333' }}>
+                  <div style={{ color: '#999', fontSize: 11 }}>扫描合约数</div>
+                  <div style={{ color: '#fff', fontSize: 20, fontWeight: 700 }}>{screenResult.total_scanned}</div>
+                </div>
+                <div style={{ background: '#1a1a2e', padding: 12, borderRadius: 8, border: '1px solid #52c41a' }}>
+                  <div style={{ color: '#999', fontSize: 11 }}>通过筛选</div>
+                  <div style={{ color: '#52c41a', fontSize: 20, fontWeight: 700 }}>{screenResult.passed_count}</div>
+                </div>
+                <div style={{ background: '#1a1a2e', padding: 12, borderRadius: 8, border: '1px solid #333' }}>
+                  <div style={{ color: '#999', fontSize: 11 }}>手续费</div>
+                  <div style={{ color: '#ff7875', fontSize: 14, fontWeight: 600 }}>交易${screenResult.trade_fee} + 行权${screenResult.exercise_fee}</div>
+                </div>
+              </div>
+
+              {screenResult.results.length === 0 ? (
+                <div style={{ padding: 32, textAlign: 'center', background: '#1a1a2e', borderRadius: 8, border: '1px solid #333' }}>
+                  <div style={{ fontSize: 16, color: '#999' }}>没有找到年化 ≥ {screenResult.min_yield}% 的策略</div>
+                  <div style={{ fontSize: 13, color: '#666', marginTop: 8 }}>尝试降低年化要求或OTM距离</div>
+                </div>
+              ) : (
+                <div style={{ overflowX: 'auto' }}>
+                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+                    <thead>
+                      <tr style={{ borderBottom: '2px solid #d4a76a' }}>
+                        <th style={futuThStyle}>策略</th>
+                        <th style={futuThStyle}>行权价</th>
+                        <th style={futuThStyle}>权利金</th>
+                        <th style={futuThStyle}>天数</th>
+                        <th style={futuThStyle}>OTM%</th>
+                        <th style={{ ...futuThStyle, color: '#52c41a' }}>扣费后年化</th>
+                        <th style={futuThStyle}>扣费前年化</th>
+                        <th style={futuThStyle}>净利润</th>
+                        <th style={futuThStyle}>盈利概率</th>
+                        <th style={futuThStyle}>IV</th>
+                        <th style={futuThStyle}>Delta</th>
+                        <th style={futuThStyle}>成交量</th>
+                        <th style={futuThStyle}>价差%</th>
+                        <th style={futuThStyle}>评分</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {screenResult.results.map((r: any, i: number) => (
+                        <tr key={i} style={{ borderBottom: '1px solid #333', background: i % 2 === 0 ? '#0d0d1a' : '#1a1a2e' }}>
+                          <td style={futuTdStyle}>
+                            <span style={{
+                              display: 'inline-block', padding: '2px 8px', borderRadius: 10, fontSize: 11, fontWeight: 700,
+                              background: r.strategy === 'cc' ? 'rgba(82,196,26,0.2)' : 'rgba(24,144,255,0.2)',
+                              color: r.strategy === 'cc' ? '#52c41a' : '#1890ff',
+                            }}>
+                              {r.strategy === 'cc' ? 'CC' : 'CSP'}
+                            </span>
+                          </td>
+                          <td style={{ ...futuTdStyle, fontWeight: 600 }}>{r.strike}</td>
+                          <td style={futuTdStyle}>{r.premium}</td>
+                          <td style={futuTdStyle}>{r.dte}</td>
+                          <td style={{ ...futuTdStyle, color: r.otm_pct >= 5 ? '#52c41a' : '#faad14' }}>
+                            {r.otm_pct > 0 ? '+' : ''}{r.otm_pct}%
+                          </td>
+                          <td style={{ ...futuTdStyle, color: '#52c41a', fontWeight: 700, fontSize: 15 }}>
+                            {r.net_yield}%
+                          </td>
+                          <td style={{ ...futuTdStyle, color: '#666' }}>{r.gross_yield}%</td>
+                          <td style={{ ...futuTdStyle, color: r.net_profit >= 0 ? '#52c41a' : '#ff4d4f' }}>
+                            ${r.net_profit}
+                          </td>
+                          <td style={{ ...futuTdStyle, color: r.pop >= 70 ? '#52c41a' : r.pop >= 50 ? '#faad14' : '#ff4d4f' }}>
+                            {r.pop}%
+                          </td>
+                          <td style={futuTdStyle}>{r.iv}%</td>
+                          <td style={futuTdStyle}>{r.delta}</td>
+                          <td style={{ ...futuTdStyle, color: r.volume > 100 ? '#52c41a' : '#999' }}>{r.volume}</td>
+                          <td style={{ ...futuTdStyle, color: (r.spread_pct || 0) < 10 ? '#52c41a' : '#ff4d4f' }}>
+                            {r.spread_pct?.toFixed(1) || '-'}%
+                          </td>
+                          <td style={{ ...futuTdStyle, color: '#d4a76a', fontWeight: 600 }}>{r.score}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+
+              {/* 说明 */}
+              <div style={{ marginTop: 16, padding: 12, background: '#1a1a2e', borderRadius: 8, border: '1px solid #333' }}>
+                <p style={{ color: '#999', fontSize: 12, margin: 0 }}>
+                  💡 <strong style={{ color: '#d4a76a' }}>CC</strong> = Covered Call（持有正股 + 卖Call），
+                  <strong style={{ color: '#1890ff' }}>CSP</strong> = Cash Secured Put（卖Put + 准备现金）。
+                  扣费后年化按<strong style={{ color: '#ff7875' }}>被行权</strong>的保守情况计算。
+                  OTM ≥ 5% 为佳，成交量100+流动性较好，价差10%以内交易成本低。
+                </p>
+              </div>
+            </div>
+          )}
+
+          {screenResult?.error && (
+            <div style={{ padding: 12, background: '#2e1a1a', borderRadius: 8, border: '1px solid #ff4d4f' }}>
+              <p style={{ color: '#ff4d4f', margin: 0 }}>{screenResult.error}</p>
+            </div>
+          )}
+        </div>
+      )}
+
       {/* 理性检查点 */}
       <RationalCheckpoint
         open={checkpointOpen}
@@ -1468,4 +1645,11 @@ export default function FutuOptionChain() {
       />
     </div>
   )
+}
+
+const futuThStyle: React.CSSProperties = {
+  padding: '8px 10px', textAlign: 'left', fontWeight: 600, fontSize: 12, color: '#999', whiteSpace: 'nowrap',
+}
+const futuTdStyle: React.CSSProperties = {
+  padding: '6px 10px', verticalAlign: 'middle', color: '#ccc',
 }

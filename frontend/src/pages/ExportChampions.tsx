@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import React, { useState, useEffect, useCallback } from 'react'
 import axios from 'axios'
 import { PageSection, TabBar, DataTable, LoadingSpinner, EmptyState, StatCard, StatCardGroup, Tag } from '../components/ui'
 import type { Column } from '../components/ui'
@@ -810,8 +810,8 @@ export default function ExportChampions() {
                   const mkt = getMarketTag(stock.market)
                   const isExpanded = expandedStock === stock.code
                   return (
-                    <>
-                      <tr key={stock.code}
+                    <React.Fragment key={stock.code}>
+                      <tr
                         onClick={() => setExpandedStock(isExpanded ? null : stock.code)}
                         style={{ cursor: 'pointer' }}>
                         <td style={{ fontFamily: 'monospace' }}>{stock.code}</td>
@@ -1076,7 +1076,7 @@ export default function ExportChampions() {
                           </td>
                         </tr>
                       )}
-                    </>
+                    </React.Fragment>
                   )
                 })}
                 {stocks.length === 0 && !loading && (

@@ -114,7 +114,9 @@ export function usePageData<T>({
       paramsRef.current = merged
       return merged
     })
-  }, [])
+    // 参数更新后自动重新加载
+    refresh()
+  }, [refresh])
 
   return { data, loading, error, refresh, setData, updateParams }
 }
@@ -190,7 +192,7 @@ export function useMultiPageData<T extends Record<string, any>>(
     setError(null)
     try {
       const currentSources = sourcesRef.current
-      const results = await Promise.all(
+      const results = await Promise.allSettled(
         currentSources.map(s =>
           axios.get(`${API_BASE}/${s.endpoint}`, {
             params: s.params,
@@ -200,10 +202,18 @@ export function useMultiPageData<T extends Record<string, any>>(
       )
       if (requestId === requestCounter.current) {
         const newData = { ...initialDataRef.current }
+        let hasError = false
         results.forEach(r => {
-          (newData as any)[r.key] = r.data
+          if (r.status === 'fulfilled') {
+            (newData as any)[r.value.key] = r.value.data
+          } else {
+            hasError = true
+          }
         })
         setData(newData)
+        if (hasError) {
+          setError('部分数据加载失败')
+        }
       }
     } catch (e: any) {
       if (requestId === requestCounter.current) {

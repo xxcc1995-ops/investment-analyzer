@@ -1,14 +1,29 @@
 from dotenv import load_dotenv
 load_dotenv()
 
+import asyncio
 import logging
 from contextlib import asynccontextmanager
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from app.api import stocks, cb, scraper, bonds, index_valuation, dividend, cigar_butt, cross_analysis, value_investing, reit, macro, futures, jc_screener, polymarket, export_champions, grid, national_team, right_side, fund_holdings, decision, t_trading, backtest, fund_arb, futu_options, drawdown_control, daily_info, tractor, cb_backtest, valuation, quantdinger, portfolio, sector_valuation, crypto_master, quant_backtest, airdrop_scanner, crypto_crawler
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.responses import JSONResponse
+from app.api import stocks, cb, scraper, bonds, index_valuation, dividend, cigar_butt, cross_analysis, value_investing, reit, macro, futures, jc_screener, polymarket, export_champions, grid, national_team, right_side, fund_holdings, decision, t_trading, backtest, fund_arb, futu_options, drawdown_control, daily_info, tractor, cb_backtest, valuation, quantdinger, portfolio, sector_valuation, crypto_master, quant_backtest, airdrop_scanner, crypto_crawler, wechat_digest
 from app.core.exceptions import register_exception_handlers
 
 logger = logging.getLogger(__name__)
+
+# 请求超时中间件 - 防止单个请求阻塞服务器过久
+class RequestTimeoutMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        try:
+            return await asyncio.wait_for(call_next(request), timeout=60)
+        except asyncio.TimeoutError:
+            logger.warning(f"请求超时: {request.method} {request.url.path}")
+            return JSONResponse(
+                status_code=504,
+                content={"error": "请求处理超时，请稍后重试", "type": "RequestTimeout"}
+            )
 
 
 @asynccontextmanager
@@ -74,6 +89,9 @@ app = FastAPI(title="新源的Invest工具", version="1.0.0", lifespan=lifespan)
 # 注册全局异常处理器
 register_exception_handlers(app)
 
+# 请求超时中间件（60秒）
+app.add_middleware(RequestTimeoutMiddleware)
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -121,6 +139,7 @@ app.include_router(crypto_master.router, prefix="/api/crypto-master", tags=["币
 app.include_router(quant_backtest.router, prefix="/api/quant", tags=["量化回测"])
 app.include_router(airdrop_scanner.router, prefix="/api/airdrop-scanner", tags=["空投扫描器"])
 app.include_router(crypto_crawler.router, prefix="/api/crypto-crawler", tags=["币圈情报搜集"])
+app.include_router(wechat_digest.router, prefix="/api/wechat-digest", tags=["微信公众号日报"])
 
 
 @app.get("/")

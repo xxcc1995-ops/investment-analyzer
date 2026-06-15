@@ -20,7 +20,7 @@ from datetime import datetime
 logger = logging.getLogger(__name__)
 
 from app.core.cache import get_cache as _get_cache, set_cache as _set_cache, clear_cache as _clear_cache, get_realtime_ttl as _get_realtime_ttl
-from app.core.utils import safe_float as _safe_float
+from app.core.utils import safe_float as _safe_float, safe_float_or_zero as _safe_float_or_zero
 
 # ==================== 多源容错健康追踪 ====================
 _source_health_lock = threading.Lock()
@@ -106,38 +106,25 @@ class CBService:
             if df is None or df.empty:
                 return []
 
-            # AKShare返回的列名（中文），需要映射到集思录格式
-            # 列名可能随版本变化，使用防御性映射
-            col_map = {}
+            # AKShare bond_zh_cov() 返回 19 列，按固定位置映射
+            # 0:债券代码 1:债券简称 2:申购日期 3:申购代码 4:面值
+            # 5:正股代码 6:正股名称 7:正股价 8:转股价 9:转股价值
+            # 10:债现价 11:转股溢价率 12:原股东配售-股权登记日 13:原股东配售-每股配售额
+            # 14:现规模 15:中签缴款日 16:中签号 17:上市时间 18:信用评级
             cols = list(df.columns)
-
-            # 按位置和关键字双重匹配
-            for i, col in enumerate(cols):
-                col_str = str(col)
-                if '代码' in col_str and '正股' not in col_str:
-                    col_map['bond_id'] = i
-                elif '名称' in col_str and '正股' not in col_str:
-                    col_map['bond_nm'] = i
-                elif '正股代码' in col_str:
-                    col_map['stock_id'] = i
-                elif '正股名称' in col_str:
-                    col_map['stock_nm'] = i
-                elif col_str == '正股价' or (i == 7 and '价' in col_str):
-                    col_map['sprice'] = i
-                elif '转股价' in col_str and '值' not in col_str:
-                    col_map['convert_price'] = i
-                elif '转股价值' in col_str:
-                    col_map['convert_value'] = i
-                elif '溢价率' in col_str:
-                    col_map['premium_rt'] = i
-                elif '信用评级' in col_str or '评级' in col_str:
-                    col_map['rating_cd'] = i
-                elif '剩余规模' in col_str or '现价' == col_str:
-                    pass  # handled separately
-                elif '面值' in col_str:
-                    col_map['price'] = i
-                elif '申购日期' in col_str or '上市时间' in col_str:
-                    pass  # skip dates
+            col_map = {
+                'bond_id': 0,
+                'bond_nm': 1,
+                'stock_id': 5,
+                'stock_nm': 6,
+                'sprice': 7,
+                'convert_price': 8,
+                'convert_value': 9,
+                'price': 10,       # 债现价（不是面值！）
+                'premium_rt': 11,
+                'curr_iss_amt': 14,
+                'rating_cd': 18,
+            }
 
             rows = []
             for _, row in df.iterrows():
@@ -165,6 +152,7 @@ class CBService:
                         'premium_rt': safe_get('premium_rt'),
                         'rating_cd': str(safe_get('rating_cd')),
                         'sprice': safe_get('sprice'),
+                        'curr_iss_amt': safe_get('curr_iss_amt'),
                         # AKShare不提供的字段，设为空/默认值
                         'ytm_rt': '',
                         'put_ytm_rt': '',
@@ -174,7 +162,6 @@ class CBService:
                         'redeem_price': '',
                         'dividend_yield': '',
                         'market_cap': '',
-                        'curr_iss_amt': '',
                         'volume': '',
                         'amount': '',
                         'year_left': '',
@@ -234,20 +221,20 @@ class CBService:
             stock_id = cell.get('stock_id', '')
             stock_nm = cell.get('stock_nm', '')
 
-            price = _safe_float(cell.get('price', 0))
+            price = _safe_float_or_zero(cell.get('price', 0))
             if price <= 0:
                 return None
 
             # 转股价和转股价值
-            convert_price = _safe_float(cell.get('convert_price', 0))
-            convert_value = _safe_float(cell.get('convert_value', 0))
+            convert_price = _safe_float_or_zero(cell.get('convert_price', 0))
+            convert_value = _safe_float_or_zero(cell.get('convert_value', 0))
             if convert_value <= 0 and convert_price > 0:
-                stock_price = _safe_float(cell.get('sprice', 0))
+                stock_price = _safe_float_or_zero(cell.get('sprice', 0))
                 if stock_price > 0:
                     convert_value = round(stock_price / convert_price * 100, 2)
 
             # 转股溢价率
-            premium_rt = _safe_float(cell.get('premium_rt', 0))
+            premium_rt = _safe_float_or_zero(cell.get('premium_rt', 0))
             if premium_rt == 0 and convert_value > 0:
                 premium_rt = round((price - convert_value) / convert_value * 100, 2)
 
@@ -256,25 +243,25 @@ class CBService:
 
             # 到期时间
             maturity_dt = cell.get('maturity_dt', '')
-            year_left = _safe_float(cell.get('year_left', 0))
+            year_left = _safe_float_or_zero(cell.get('year_left', 0))
 
             # 信用评级
             rating_cd = cell.get('rating_cd', '')
 
             # 剩余规模(亿)
-            curr_iss_amt = _safe_float(cell.get('curr_iss_amt', 0))
+            curr_iss_amt = _safe_float_or_zero(cell.get('curr_iss_amt', 0))
 
             # 成交额(万)
-            volume = _safe_float(cell.get('volume', 0))
-            amount = _safe_float(cell.get('amount', 0))
+            volume = _safe_float_or_zero(cell.get('volume', 0))
+            amount = _safe_float_or_zero(cell.get('amount', 0))
             turnover = amount if amount > 0 else volume * price / 10
 
             # 正股价
-            stock_price = _safe_float(cell.get('sprice', 0))
+            stock_price = _safe_float_or_zero(cell.get('sprice', 0))
             # 正股涨跌幅
-            stock_change = _safe_float(cell.get('sincrease_rt', 0))
+            stock_change = _safe_float_or_zero(cell.get('sincrease_rt', 0))
             # 转债涨跌幅
-            bond_change = _safe_float(cell.get('increase_rt', 0))
+            bond_change = _safe_float_or_zero(cell.get('increase_rt', 0))
 
             # 是否强赎
             force_redeem = cell.get('force_redeem', '')
@@ -284,27 +271,27 @@ class CBService:
             # ===== 新增字段 =====
 
             # 到期收益率（税前，%）
-            ytm_rt = _safe_float(cell.get('ytm_rt', 0))
+            ytm_rt = _safe_float_or_zero(cell.get('ytm_rt', 0))
             # 回售收益率（税前，%）
-            put_ytm_rt = _safe_float(cell.get('put_ytm_rt', 0))
+            put_ytm_rt = _safe_float_or_zero(cell.get('put_ytm_rt', 0))
             # 下次回售日
             next_put_dt = cell.get('next_put_dt', '')
             # 转股起始日
             convert_dt = cell.get('convert_dt', '')
             # 发行规模(亿)
-            orig_iss_amt = _safe_float(cell.get('orig_iss_amt', 0))
+            orig_iss_amt = _safe_float_or_zero(cell.get('orig_iss_amt', 0))
             # 正股PE
-            stock_pe = _safe_float(cell.get('stock_pe', 0))
+            stock_pe = _safe_float_or_zero(cell.get('stock_pe', 0))
             # 正股PB
-            stock_pb = _safe_float(cell.get('stock_pb', 0))
+            stock_pb = _safe_float_or_zero(cell.get('stock_pb', 0))
             # 是否进入转股期
             convert_flag = cell.get('convert_flag', '')
             # 强赎触发价
-            redeem_price = _safe_float(cell.get('redeem_price', 0))
+            redeem_price = _safe_float_or_zero(cell.get('redeem_price', 0))
             # 正股股息率
-            dividend_yield = _safe_float(cell.get('dividend_yield', 0))
+            dividend_yield = _safe_float_or_zero(cell.get('dividend_yield', 0))
             # 正股市值(亿)
-            market_cap = _safe_float(cell.get('market_cap', 0))
+            market_cap = _safe_float_or_zero(cell.get('market_cap', 0))
 
             # 计算：距强赎触发距离（%）— 正股还需涨多少才触发强赎
             redeem_distance = 0
@@ -1052,12 +1039,14 @@ class CBService:
         if exclude_force_redeem:
             bonds = [b for b in bonds if not b['force_redeem']]
 
-        # 筛选: 剩余年限
-        if min_year_left > 0:
+        # 筛选: 剩余年限（AKShare数据无此字段，跳过过滤）
+        has_year_left = any(b.get('year_left', 0) > 0 for b in bonds)
+        if min_year_left > 0 and has_year_left:
             bonds = [b for b in bonds if b['year_left'] >= min_year_left]
 
-        # 筛选: 成交额
-        if min_turnover > 0:
+        # 筛选: 成交额（AKShare数据无此字段，跳过过滤）
+        has_turnover = any(b.get('turnover', 0) > 0 for b in bonds)
+        if min_turnover > 0 and has_turnover:
             bonds = [b for b in bonds if b['turnover'] >= min_turnover]
 
         # 筛选: 双低值上限

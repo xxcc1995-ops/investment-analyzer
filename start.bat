@@ -32,10 +32,10 @@ if not errorlevel 1 (
 )
 
 :: Start backend (minimized)
-start "Invest-Backend" /min cmd /c "cd /d "%ROOT%backend" && venv\Scripts\python.exe -m uvicorn app.main:app --reload --port 8002"
+start "Invest-Backend" /min cmd /c "cd /d ""%ROOT%backend"" && venv\Scripts\python.exe -m uvicorn app.main:app --reload --port 8002"
 
 :: Start frontend (minimized)
-start "Invest-Frontend" /min cmd /c "cd /d "%ROOT%frontend" && npx vite --port 5173"
+start "Invest-Frontend" /min cmd /c "cd /d ""%ROOT%frontend"" && npx vite --port 5173"
 
 :: Poll for backend readiness (max 30s)
 echo Waiting for services...

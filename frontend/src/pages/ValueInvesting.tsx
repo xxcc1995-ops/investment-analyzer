@@ -138,7 +138,7 @@ const MASTER_LABELS: Record<string, string> = {
 }
 
 export default function ValueInvesting() {
-  const [activeTab, setActiveTab] = useState<'philosophy' | 'screener' | 'dcf' | 'graham'>('philosophy')
+  const [activeTab, setActiveTab] = useState<'philosophy' | 'screener' | 'dcf' | 'graham' | 'ddm' | 'montecarlo'>('philosophy')
   const [stocks, setStocks] = useState<VIStock[]>([])
   const [loading, setLoading] = useState(false)
   const [updateTime, setUpdateTime] = useState('')
@@ -568,6 +568,8 @@ export default function ValueInvesting() {
           { key: 'philosophy', label: '投资理念' },
           { key: 'screener', label: '价投筛选' },
           { key: 'dcf', label: 'DCF估值' },
+          { key: 'ddm', label: 'DDM股息估值' },
+          { key: 'montecarlo', label: '蒙特卡洛DCF' },
           { key: 'graham', label: '格雷厄姆' },
         ]}
         activeKey={activeTab}
@@ -1158,6 +1160,12 @@ export default function ValueInvesting() {
         </div>
       )}
 
+      {/* ===== DDM Tab ===== */}
+      {activeTab === 'ddm' && <DDMCalculator />}
+
+      {/* ===== Monte Carlo Tab ===== */}
+      {activeTab === 'montecarlo' && <MonteCarloDCF />}
+
       {/* ===== Graham Number Tab ===== */}
       {activeTab === 'graham' && (
         <div style={{ padding: '16px 20px' }}>
@@ -1299,6 +1307,243 @@ export default function ValueInvesting() {
       )}
 
       </PageSection>
+    </div>
+  )
+}
+
+
+// ============ DDM 股息贴现计算器 ============
+
+function DDMCalculator() {
+  const [form, setForm] = useState({ dps: '', growthRate: '', discountRate: '10', currentPrice: '', highGrowthRate: '', highGrowthYears: '5', stableGrowthRate: '3' })
+  const [mode, setMode] = useState<'gordon' | 'twostage'>('gordon')
+  const [result, setResult] = useState<any>(null)
+  const [sensitivity, setSensitivity] = useState<any>(null)
+  const [loading, setLoading] = useState(false)
+
+  const handleCalc = async () => {
+    const dps = parseFloat(form.dps)
+    const growthRate = parseFloat(form.growthRate) / 100
+    const discountRate = parseFloat(form.discountRate) / 100
+    const currentPrice = parseFloat(form.currentPrice) || 0
+
+    if (!dps || dps <= 0) { alert('请输入每股股息'); return }
+    if (isNaN(growthRate)) { alert('请输入增长率'); return }
+    if (discountRate <= growthRate) { alert('折现率必须大于增长率'); return }
+
+    setLoading(true)
+    try {
+      const endpoint = mode === 'gordon' ? '/value-investing/ddm' : '/value-investing/ddm-two-stage'
+      const body = mode === 'gordon'
+        ? { dps, dividend_growth_rate: growthRate, discount_rate: discountRate, current_price: currentPrice }
+        : { dps, high_growth_rate: parseFloat(form.highGrowthRate) / 100, high_growth_years: parseInt(form.highGrowthYears), stable_growth_rate: parseFloat(form.stableGrowthRate) / 100, discount_rate: discountRate, current_price: currentPrice }
+
+      const [res, sensRes] = await Promise.all([
+        fetch(`/api${endpoint}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then(r => r.json()),
+        fetch('/api/value-investing/ddm-sensitivity', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ dps, dividend_growth_rate: growthRate, discount_rate: discountRate, current_price: currentPrice }) }).then(r => r.json()),
+      ])
+      setResult(res)
+      setSensitivity(sensRes)
+    } catch (e: any) {
+      alert('计算失败: ' + e.message)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const inputStyle: React.CSSProperties = { width: '100%', padding: '8px 12px', background: '#0d1117', border: '1px solid #30363d', borderRadius: 6, color: '#e6edf3', fontSize: 14 }
+  const labelStyle: React.CSSProperties = { display: 'block', marginBottom: 4, color: '#8b949e', fontSize: 13 }
+
+  return (
+    <div style={{ padding: '16px 20px' }}>
+      <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
+        <button onClick={() => setMode('gordon')} style={{ padding: '6px 16px', borderRadius: 6, cursor: 'pointer', background: mode === 'gordon' ? '#58a6ff' : '#161b22', border: `1px solid ${mode === 'gordon' ? '#58a6ff' : '#30363d'}`, color: mode === 'gordon' ? '#fff' : '#8b949e' }}>Gordon DDM</button>
+        <button onClick={() => setMode('twostage')} style={{ padding: '6px 16px', borderRadius: 6, cursor: 'pointer', background: mode === 'twostage' ? '#58a6ff' : '#161b22', border: `1px solid ${mode === 'twostage' ? '#58a6ff' : '#30363d'}`, color: mode === 'twostage' ? '#fff' : '#8b949e' }}>两阶段DDM</button>
+      </div>
+
+      <div style={{ display: 'flex', gap: 20 }}>
+        <div style={{ minWidth: 300, padding: 20, background: '#161b22', borderRadius: 8, border: '1px solid #30363d' }}>
+          <div style={{ display: 'grid', gap: 12 }}>
+            <div><label style={labelStyle}>每股股息 (元)</label><input style={inputStyle} type="number" step="0.01" value={form.dps} onChange={e => setForm({ ...form, dps: e.target.value })} placeholder="2.00" /></div>
+            {mode === 'gordon' ? (
+              <div><label style={labelStyle}>股息增长率 (%)</label><input style={inputStyle} type="number" step="0.1" value={form.growthRate} onChange={e => setForm({ ...form, growthRate: e.target.value })} placeholder="5" /></div>
+            ) : (
+              <>
+                <div><label style={labelStyle}>高增长率 (%)</label><input style={inputStyle} type="number" step="0.1" value={form.highGrowthRate} onChange={e => setForm({ ...form, highGrowthRate: e.target.value })} placeholder="10" /></div>
+                <div><label style={labelStyle}>高增长年数</label><input style={inputStyle} type="number" value={form.highGrowthYears} onChange={e => setForm({ ...form, highGrowthYears: e.target.value })} placeholder="5" /></div>
+                <div><label style={labelStyle}>永续增长率 (%)</label><input style={inputStyle} type="number" step="0.1" value={form.stableGrowthRate} onChange={e => setForm({ ...form, stableGrowthRate: e.target.value })} placeholder="3" /></div>
+              </>
+            )}
+            <div><label style={labelStyle}>折现率 (%)</label><input style={inputStyle} type="number" step="0.1" value={form.discountRate} onChange={e => setForm({ ...form, discountRate: e.target.value })} placeholder="10" /></div>
+            <div><label style={labelStyle}>当前股价 (元)</label><input style={inputStyle} type="number" step="0.01" value={form.currentPrice} onChange={e => setForm({ ...form, currentPrice: e.target.value })} placeholder="50" /></div>
+            <button onClick={handleCalc} disabled={loading} style={{ padding: '10px 0', borderRadius: 6, cursor: 'pointer', background: '#58a6ff', border: 'none', color: '#fff', fontWeight: 600, marginTop: 8 }}>{loading ? '计算中...' : '计算DDM估值'}</button>
+          </div>
+        </div>
+
+        <div style={{ flex: 1 }}>
+          {!result && <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: 400, color: '#8b949e' }}>输入参数后计算DDM内在价值（适用于银行/公用事业/高分红股）</div>}
+          {result && !result.error && (
+            <div>
+              <StatCardGroup columns={4}>
+                <StatCard label="内在价值" value={result.intrinsic_value?.toFixed(2) + '元'} color={result.intrinsic_value > (parseFloat(form.currentPrice) || 0) ? '#3fb950' : '#f85149'} />
+                <StatCard label="买点价格" value={result.buy_price?.toFixed(2) + '元'} />
+                <StatCard label="安全边际" value={result.safety_margin?.toFixed(1) + '%'} color={result.safety_margin > 0 ? '#3fb950' : '#f85149'} />
+                <StatCard label="上行空间" value={result.upside?.toFixed(1) + '%'} color={result.upside > 0 ? '#3fb950' : '#f85149'} />
+              </StatCardGroup>
+
+              {/* 敏感性分析矩阵 */}
+              {sensitivity && (
+                <div style={{ marginTop: 16, background: '#161b22', borderRadius: 8, border: '1px solid #30363d', padding: 16 }}>
+                  <div style={{ fontWeight: 600, marginBottom: 8 }}>敏感性分析（股息增长率 × 折现率）</div>
+                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+                    <thead>
+                      <tr>
+                        <th style={{ padding: '6px 8px', color: '#8b949e', textAlign: 'left' }}>增长率↓ / 折现率→</th>
+                        {sensitivity.discount_rates?.map((d: string) => <th key={d} style={{ padding: '6px 8px', color: '#8b949e' }}>{d}</th>)}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {sensitivity.matrix?.map((row: (number|null)[], i: number) => (
+                        <tr key={i}>
+                          <td style={{ padding: '6px 8px', color: '#8b949e' }}>{sensitivity.growth_rates?.[i]}</td>
+                          {row.map((val: number|null, j: number) => {
+                            const currentP = parseFloat(form.currentPrice) || 0
+                            const bgColor = val && currentP ? (val > currentP ? 'rgba(34,197,94,0.15)' : 'rgba(239,68,68,0.15)') : 'transparent'
+                            return <td key={j} style={{ padding: '6px 8px', textAlign: 'center', background: bgColor, color: val ? '#e6edf3' : '#484f58' }}>{val?.toFixed(1) || '-'}</td>
+                          })}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+
+// ============ 蒙特卡洛 DCF ============
+
+function MonteCarloDCF() {
+  const [form, setForm] = useState({ fcf: '', shares: '', netDebt: '', currentPrice: '', growthMean: '10', growthStd: '5', discountMean: '10', discountStd: '2', terminalMean: '3', terminalStd: '1' })
+  const [result, setResult] = useState<any>(null)
+  const [loading, setLoading] = useState(false)
+
+  const handleCalc = async () => {
+    const fcf = parseFloat(form.fcf)
+    const shares = parseFloat(form.shares)
+    if (!fcf || !shares) { alert('请输入FCF和总股本'); return }
+
+    setLoading(true)
+    try {
+      const body = {
+        current_fcf: fcf, shares, net_debt: parseFloat(form.netDebt) || 0, current_price: parseFloat(form.currentPrice) || 0,
+        growth_mean: parseFloat(form.growthMean) / 100, growth_std: parseFloat(form.growthStd) / 100,
+        discount_mean: parseFloat(form.discountMean) / 100, discount_std: parseFloat(form.discountStd) / 100,
+        terminal_mean: parseFloat(form.terminalMean) / 100, terminal_std: parseFloat(form.terminalStd) / 100,
+        n_simulations: 1000,
+      }
+      const res = await fetch('/api/value-investing/monte-carlo', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then(r => r.json())
+      setResult(res)
+    } catch (e: any) {
+      alert('计算失败: ' + e.message)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  // 分布直方图
+  const getHistogramOption = () => {
+    if (!result?.histogram) return {}
+    const h = result.histogram
+    const currentPrice = parseFloat(form.currentPrice) || 0
+    return {
+      tooltip: { trigger: 'axis', backgroundColor: '#1c2333', borderColor: '#30363d', textStyle: { color: '#e6edf3' } },
+      grid: { top: 30, right: 20, bottom: 40, left: 50 },
+      xAxis: { type: 'category', data: h.map((b: any) => b.mid.toFixed(0)), axisLabel: { color: '#8b949e', fontSize: 10, rotate: 45 }, axisLine: { lineStyle: { color: '#30363d' } } },
+      yAxis: { type: 'value', axisLabel: { color: '#8b949e' }, splitLine: { lineStyle: { color: '#21262d' } } },
+      series: [{
+        type: 'bar', data: h.map((b: any) => ({
+          value: b.count,
+          itemStyle: { color: currentPrice > 0 && b.mid > currentPrice ? '#3fb950' : '#ef4444', borderRadius: [2, 2, 0, 0] },
+        })),
+        barWidth: '90%',
+      }],
+      markLine: currentPrice > 0 ? {
+        data: [{ xAxis: h.findIndex((b: any) => b.mid >= currentPrice), label: { formatter: '当前价格', color: '#f59e0b' }, lineStyle: { color: '#f59e0b', type: 'dashed' } }],
+      } : undefined,
+    }
+  }
+
+  const inputStyle: React.CSSProperties = { width: '100%', padding: '8px 12px', background: '#0d1117', border: '1px solid #30363d', borderRadius: 6, color: '#e6edf3', fontSize: 14 }
+  const labelStyle: React.CSSProperties = { display: 'block', marginBottom: 4, color: '#8b949e', fontSize: 13 }
+
+  return (
+    <div style={{ padding: '16px 20px' }}>
+      <div style={{ display: 'flex', gap: 20 }}>
+        <div style={{ minWidth: 280, padding: 20, background: '#161b22', borderRadius: 8, border: '1px solid #30363d' }}>
+          <div style={{ fontWeight: 600, marginBottom: 12 }}>基础参数</div>
+          <div style={{ display: 'grid', gap: 10 }}>
+            <div><label style={labelStyle}>FCF (亿元)</label><input style={inputStyle} type="number" value={form.fcf} onChange={e => setForm({ ...form, fcf: e.target.value })} placeholder="10" /></div>
+            <div><label style={labelStyle}>总股本 (亿股)</label><input style={inputStyle} type="number" value={form.shares} onChange={e => setForm({ ...form, shares: e.target.value })} placeholder="10" /></div>
+            <div><label style={labelStyle}>净负债 (亿元)</label><input style={inputStyle} type="number" value={form.netDebt} onChange={e => setForm({ ...form, netDebt: e.target.value })} placeholder="0" /></div>
+            <div><label style={labelStyle}>当前股价 (元)</label><input style={inputStyle} type="number" value={form.currentPrice} onChange={e => setForm({ ...form, currentPrice: e.target.value })} placeholder="50" /></div>
+          </div>
+          <div style={{ fontWeight: 600, marginTop: 16, marginBottom: 12 }}>概率分布参数</div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+            <div><label style={labelStyle}>增长率均值%</label><input style={inputStyle} type="number" value={form.growthMean} onChange={e => setForm({ ...form, growthMean: e.target.value })} /></div>
+            <div><label style={labelStyle}>增长率标准差%</label><input style={inputStyle} type="number" value={form.growthStd} onChange={e => setForm({ ...form, growthStd: e.target.value })} /></div>
+            <div><label style={labelStyle}>折现率均值%</label><input style={inputStyle} type="number" value={form.discountMean} onChange={e => setForm({ ...form, discountMean: e.target.value })} /></div>
+            <div><label style={labelStyle}>折现率标准差%</label><input style={inputStyle} type="number" value={form.discountStd} onChange={e => setForm({ ...form, discountStd: e.target.value })} /></div>
+            <div><label style={labelStyle}>永续增长率均值%</label><input style={inputStyle} type="number" value={form.terminalMean} onChange={e => setForm({ ...form, terminalMean: e.target.value })} /></div>
+            <div><label style={labelStyle}>永续增长率标准差%</label><input style={inputStyle} type="number" value={form.terminalStd} onChange={e => setForm({ ...form, terminalStd: e.target.value })} /></div>
+          </div>
+          <button onClick={handleCalc} disabled={loading} style={{ width: '100%', padding: '10px 0', borderRadius: 6, cursor: 'pointer', background: '#58a6ff', border: 'none', color: '#fff', fontWeight: 600, marginTop: 12 }}>{loading ? '模拟中...' : '运行1000次蒙特卡洛模拟'}</button>
+        </div>
+
+        <div style={{ flex: 1 }}>
+          {!result && <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: 500, color: '#8b949e' }}>输入参数运行蒙特卡洛模拟，得到内在价值的概率分布</div>}
+          {result && !result.error && (
+            <div>
+              <StatCardGroup columns={5}>
+                <StatCard label="中位数估值" value={result.statistics?.median?.toFixed(2) + '元'} color="#58a6ff" />
+                <StatCard label="P25-P75区间" value={`${result.statistics?.p25?.toFixed(0)}-${result.statistics?.p95?.toFixed(0)}元`} />
+                <StatCard label="超越当前价概率" value={result.probabilities?.above_current_price?.toFixed(1) + '%'} color={result.probabilities?.above_current_price > 50 ? '#3fb950' : '#f85149'} />
+                <StatCard label="买点价格" value={result.buy_price?.toFixed(2) + '元'} />
+                <StatCard label="模拟次数" value={result.n_simulations} />
+              </StatCardGroup>
+
+              <div style={{ marginTop: 16 }}>
+                <ReactECharts option={getHistogramOption()} style={{ height: 300 }} />
+              </div>
+
+              <div style={{ marginTop: 16, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+                <div style={{ background: '#161b22', borderRadius: 8, border: '1px solid #30363d', padding: 16 }}>
+                  <div style={{ fontWeight: 600, marginBottom: 8 }}>价值分布</div>
+                  {['p5', 'p10', 'p25', 'p50', 'p75', 'p90', 'p95'].map(p => (
+                    <div key={p} style={{ display: 'flex', justifyContent: 'space-between', padding: '4px 0', borderBottom: '1px solid #21262d' }}>
+                      <span style={{ color: '#8b949e' }}>{p.toUpperCase()}</span>
+                      <span>{result.statistics?.[p]?.toFixed(2)}元</span>
+                    </div>
+                  ))}
+                </div>
+                <div style={{ background: '#161b22', borderRadius: 8, border: '1px solid #30363d', padding: 16 }}>
+                  <div style={{ fontWeight: 600, marginBottom: 8 }}>概率分析</div>
+                  <div style={{ padding: '4px 0', borderBottom: '1px solid #21262d' }}><span style={{ color: '#8b949e' }}>正值概率 </span><span style={{ color: '#3fb950' }}>{result.probabilities?.positive_value}%</span></div>
+                  {result.probabilities?.above_current_price != null && <div style={{ padding: '4px 0', borderBottom: '1px solid #21262d' }}><span style={{ color: '#8b949e' }}>超越当前价 </span><span style={{ color: result.probabilities.above_current_price > 50 ? '#3fb950' : '#f85149' }}>{result.probabilities.above_current_price}%</span></div>}
+                  <div style={{ padding: '4px 0', borderBottom: '1px solid #21262d' }}><span style={{ color: '#8b949e' }}>均值 </span><span>{result.statistics?.mean?.toFixed(2)}元</span></div>
+                  <div style={{ padding: '4px 0' }}><span style={{ color: '#8b949e' }}>标准差 </span><span>{result.statistics?.std?.toFixed(2)}元</span></div>
+                </div>
+              </div>
+            </div>
+          )}
+          {result?.error && <div style={{ color: '#f85149', padding: 20 }}>{result.error}</div>}
+        </div>
+      </div>
     </div>
   )
 }

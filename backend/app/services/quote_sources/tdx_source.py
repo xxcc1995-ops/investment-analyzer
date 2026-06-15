@@ -1,5 +1,6 @@
 """通达信行情数据源"""
 
+import socket
 import logging
 from typing import Optional
 from datetime import datetime
@@ -7,6 +8,11 @@ from pytdx.hq import TdxHq_API
 from .base import BaseQuoteSource, QuoteData
 
 logger = logging.getLogger(__name__)
+
+# 每个TDX服务器的连接超时（秒）- 原来无超时可导致单次连接挂起2分钟
+TDX_CONNECT_TIMEOUT = 5
+# 每次API调用的超时（秒）
+TDX_REQUEST_TIMEOUT = 8
 
 # 通达信公共行情服务器列表
 TDX_SERVERS = [
@@ -47,7 +53,7 @@ class TDXSource(BaseQuoteSource):
         return "通达信"
 
     def connect(self) -> bool:
-        """连接通达信行情服务器"""
+        """连接通达信行情服务器（带超时保护）"""
         for i in range(len(TDX_SERVERS)):
             server_idx = (self._server_index + i) % len(TDX_SERVERS)
             host, port = TDX_SERVERS[server_idx]
@@ -55,11 +61,18 @@ class TDXSource(BaseQuoteSource):
                 if self._api:
                     try:
                         self._api.disconnect()
-                    except:
+                    except Exception:
                         pass
 
                 self._api = TdxHq_API()
-                self._api.connect(host, port)
+                # pytdx的connect底层用socket，设置全局socket超时防止挂起
+                old_timeout = socket.getdefaulttimeout()
+                socket.setdefaulttimeout(TDX_CONNECT_TIMEOUT)
+                try:
+                    self._api.connect(host, port)
+                finally:
+                    socket.setdefaulttimeout(old_timeout)
+
                 self._connected = True
                 self._current_server = (host, port)
                 self._server_index = server_idx
@@ -84,14 +97,18 @@ class TDXSource(BaseQuoteSource):
         self._connected = False
 
     def is_connected(self) -> bool:
-        """检查连接状态"""
+        """检查连接状态（带超时保护）"""
         if not self._connected or not self._api:
             return False
         try:
-            # 尝试获取服务器时间来测试连接
-            self._api.get_security_count(1)
+            old_timeout = socket.getdefaulttimeout()
+            socket.setdefaulttimeout(TDX_REQUEST_TIMEOUT)
+            try:
+                self._api.get_security_count(1)
+            finally:
+                socket.setdefaulttimeout(old_timeout)
             return True
-        except:
+        except Exception:
             self._connected = False
             return False
 

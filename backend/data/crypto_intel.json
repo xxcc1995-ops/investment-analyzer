@@ -643,6 +643,91 @@
       "collected_at": "2026-06-14T23:28:07.961219"
     },
     {
+      "hash": "9a3a8781014e",
+      "source": "CoinDesk",
+      "source_tier": 1,
+      "source_lang": "en",
+      "source_category": "news",
+      "title": "Bitcoin shoots higher on Iran peace deal, with Strait of Hormuz set to open",
+      "url": "https://www.coindesk.com/markets/2026/06/14/bitcoin-shoots-higher-on-iran-deal-with-strait-of-hormuz-set-to-open",
+      "summary": "",
+      "published": "Mon, 15 Jun 2026 00:08:10 +0000",
+      "impact": "high",
+      "impact_reason": "包含关键词: ai",
+      "tags": [
+        "ai"
+      ],
+      "collected_at": "2026-06-15T08:49:45.477982"
+    },
+    {
+      "hash": "f9059d00ef88",
+      "source": "CoinDesk",
+      "source_tier": 1,
+      "source_lang": "en",
+      "source_category": "news",
+      "title": "SEC's big swing to clear tokenization path isn't likely to get resilience of full rule",
+      "url": "https://www.coindesk.com/news-analysis/2026/06/12/sec-s-big-swing-to-clear-tokenization-path-isn-t-likely-to-get-resilience-of-full-rule",
+      "summary": "",
+      "published": "Sun, 14 Jun 2026 14:00:00 +0000",
+      "impact": "high",
+      "impact_reason": "包含关键词: sec",
+      "tags": [
+        "sec"
+      ],
+      "collected_at": "2026-06-15T08:49:45.477982"
+    },
+    {
+      "hash": "11ac1697faf8",
+      "source": "CoinDesk",
+      "source_tier": 1,
+      "source_lang": "en",
+      "source_category": "news",
+      "title": "Crypto’s next billion-dollar hacker may move at superhuman speed",
+      "url": "https://www.coindesk.com/tech/2026/06/13/crypto-s-next-billion-dollar-hacker-may-move-at-superhuman-speed",
+      "summary": "",
+      "published": "Sat, 13 Jun 2026 18:00:00 +0000",
+      "impact": "high",
+      "impact_reason": "包含关键词: hack",
+      "tags": [
+        "hack"
+      ],
+      "collected_at": "2026-06-15T08:49:45.477982"
+    },
+    {
+      "hash": "15234feb7ab9",
+      "source": "CoinDesk",
+      "source_tier": 1,
+      "source_lang": "en",
+      "source_category": "news",
+      "title": "Tokenization mirrors the $20 trillion ETF boom as blockchain and AI converge, Ondo exec says",
+      "url": "https://www.coindesk.com/business/2026/06/13/tokenization-mirrors-the-usd20-trillion-etf-boom-as-blockchain-and-ai-converge-ondo-exec-says",
+      "summary": "",
+      "published": "Sat, 13 Jun 2026 15:29:00 +0000",
+      "impact": "high",
+      "impact_reason": "包含关键词: ai",
+      "tags": [
+        "ai"
+      ],
+      "collected_at": "2026-06-15T08:49:45.477982"
+    },
+    {
+      "hash": "a1209561d598",
+      "source": "Decrypt",
+      "source_tier": 2,
+      "source_lang": "en",
+      "source_category": "news",
+      "title": "Reve 2.0 Review: The Best AI Image Generator for Layout Control",
+      "url": "https://decrypt.co/371033/reve-2-review-best-ai-image-generator-layout-control",
+      "summary": "The startup that beat Midjourney at a penny per image is back with a 4K model that plans pictures like code—and refuses far less than its rivals",
+      "published": "Sun, 14 Jun 2026 19:11:33 +0000",
+      "impact": "high",
+      "impact_reason": "包含关键词: ai",
+      "tags": [
+        "ai"
+      ],
+      "collected_at": "2026-06-15T08:49:47.773101"
+    },
+    {
       "hash": "45d844b49c6d",
       "source": "The Block",
       "source_tier": 1,
@@ -952,6 +1037,91 @@
       "collected_at": "2026-06-14T23:28:07.961219"
     },
     {
+      "hash": "415dd2300619",
+      "source": "CoinDesk",
+      "source_tier": 1,
+      "source_lang": "en",
+      "source_category": "news",
+      "title": "Bitcoin could crash to $48,000, if this historical pattern is triggered",
+      "url": "https://www.coindesk.com/markets/2026/06/14/bitcoin-could-crash-to-usd48-000-if-this-historical-pattern-is-triggered",
+      "summary": "",
+      "published": "Sun, 14 Jun 2026 19:17:30 +0000",
+      "impact": "medium",
+      "impact_reason": "包含关键词: bitcoin",
+      "tags": [
+        "bitcoin"
+      ],
+      "collected_at": "2026-06-15T08:49:45.477982"
+    },
+    {
+      "hash": "499e2b6f60e4",
+      "source": "CoinDesk",
+      "source_tier": 1,
+      "source_lang": "en",
+      "source_category": "news",
+      "title": "Here's what SpaceX's IPO means for its $1.3 billion bitcoin reserve",
+      "url": "https://www.coindesk.com/business/2026/06/13/here-s-what-spacex-s-ipo-means-for-its-usd1-3-billion-bitcoin-reserve",
+      "summary": "",
+      "published": "Sat, 13 Jun 2026 17:00:16 +0000",
+      "impact": "medium",
+      "impact_reason": "包含关键词: bitcoin",
+      "tags": [
+        "bitcoin"
+      ],
+      "collected_at": "2026-06-15T08:49:45.477982"
+    },
+    {
+      "hash": "7765baa5af1e",
+      "source": "CoinDesk",
+      "source_tier": 1,
+      "source_lang": "en",
+      "source_category": "news",
+      "title": "Bitcoin rises above $64,000 after Pakistan prime minister says Iran peace deal is near",
+      "url": "https://www.coindesk.com/markets/2026/06/13/bitcoin-rises-above-usd64-000-after-pakistan-prime-minister-says-iran-peace-deal-is-near",
+      "summary": "",
+      "published": "Sat, 13 Jun 2026 16:16:54 +0000",
+      "impact": "medium",
+      "impact_reason": "包含关键词: bitcoin",
+      "tags": [
+        "bitcoin"
+      ],
+      "collected_at": "2026-06-15T08:49:45.477982"
+    },
+    {
+      "hash": "4ef26985f2a5",
+      "source": "CoinDesk",
+      "source_tier": 1,
+      "source_lang": "en",
+      "source_category": "news",
+      "title": "Wall Street is moving past crypto pilots and deeper into Ethereum, says Etherealize founder",
+      "url": "https://www.coindesk.com/business/2026/06/13/wall-street-is-moving-past-crypto-pilots-and-deeper-into-ethereum-says-etherealize-founder",
+      "summary": "",
+      "published": "Sat, 13 Jun 2026 16:00:00 +0000",
+      "impact": "medium",
+      "impact_reason": "包含关键词: ethereum",
+      "tags": [
+        "ethereum"
+      ],
+      "collected_at": "2026-06-15T08:49:45.477982"
+    },
+    {
+      "hash": "da8c82a7a499",
+      "source": "CoinDesk",
+      "source_tier": 1,
+      "source_lang": "en",
+      "source_category": "news",
+      "title": "Saylor to Musk: Thanks to you, 25% of 'Mag8' firms now hold bitcoin",
+      "url": "https://www.coindesk.com/markets/2026/06/13/saylor-to-musk-thanks-to-you-25-of-mag8-firms-now-hold-bitcoin",
+      "summary": "",
+      "published": "Sat, 13 Jun 2026 13:05:40 +0000",
+      "impact": "medium",
+      "impact_reason": "包含关键词: bitcoin",
+      "tags": [
+        "bitcoin"
+      ],
+      "collected_at": "2026-06-15T08:49:45.477982"
+    },
+    {
       "hash": "7c1d2f6ea512",
       "source": "The Block",
       "source_tier": 1,
@@ -1190,9 +1360,129 @@
       "impact_reason": "一般资讯",
       "tags": [],
       "collected_at": "2026-06-14T23:58:38.507558"
+    },
+    {
+      "hash": "c75435c742ce",
+      "source": "CoinDesk",
+      "source_tier": 1,
+      "source_lang": "en",
+      "source_category": "news",
+      "title": "Summer of crypto (regs): State of Crypto",
+      "url": "https://www.coindesk.com/policy/2026/06/14/summer-of-crypto-regs-state-of-crypto",
+      "summary": "",
+      "published": "Sun, 14 Jun 2026 18:30:00 +0000",
+      "impact": "low",
+      "impact_reason": "一般资讯",
+      "tags": [],
+      "collected_at": "2026-06-15T08:49:45.477982"
+    },
+    {
+      "hash": "d5b987c28758",
+      "source": "CoinDesk",
+      "source_tier": 1,
+      "source_lang": "en",
+      "source_category": "news",
+      "title": "Aerodrome is turning liquidity into a prediction market with its biggest upgrade yet",
+      "url": "https://www.coindesk.com/tech/2026/06/12/aerodrome-is-turning-liquidity-into-a-prediction-market-with-its-biggest-upgrade-yet",
+      "summary": "",
+      "published": "Sun, 14 Jun 2026 15:00:00 +0000",
+      "impact": "low",
+      "impact_reason": "一般资讯",
+      "tags": [],
+      "collected_at": "2026-06-15T08:49:45.477982"
+    },
+    {
+      "hash": "2e7ec8417e38",
+      "source": "CoinDesk",
+      "source_tier": 1,
+      "source_lang": "en",
+      "source_category": "news",
+      "title": "Wall Street and crypto are crashing into each other as tokenized treasury markets hit $14.6 billion",
+      "url": "https://www.coindesk.com/markets/2026/06/11/wall-street-and-crypto-are-crashing-into-each-other-as-tokenized-treasury-markets-hit-usd14-6-billion",
+      "summary": "",
+      "published": "Sun, 14 Jun 2026 13:00:00 +0000",
+      "impact": "low",
+      "impact_reason": "一般资讯",
+      "tags": [],
+      "collected_at": "2026-06-15T08:49:45.477982"
+    },
+    {
+      "hash": "c00e7a2ffa99",
+      "source": "CoinDesk",
+      "source_tier": 1,
+      "source_lang": "en",
+      "source_category": "news",
+      "title": "Stablecoins Were Meant to Disrupt Finance. Instead, They Became Idle Cash.",
+      "url": "https://www.coindesk.com/opinion/2026/06/13/stablecoins-were-meant-to-disrupt-finance-instead-they-became-idle-cash",
+      "summary": "",
+      "published": "Sat, 13 Jun 2026 16:51:00 +0000",
+      "impact": "low",
+      "impact_reason": "一般资讯",
+      "tags": [],
+      "collected_at": "2026-06-15T08:49:45.477982"
+    },
+    {
+      "hash": "bff07d6d2503",
+      "source": "CoinDesk",
+      "source_tier": 1,
+      "source_lang": "en",
+      "source_category": "news",
+      "title": "Perpetual futures could become crypto's next ETF moment",
+      "url": "https://www.coindesk.com/business/2026/06/13/perpetual-futures-could-become-crypto-s-next-etf-moment",
+      "summary": "",
+      "published": "Sat, 13 Jun 2026 14:00:00 +0000",
+      "impact": "low",
+      "impact_reason": "一般资讯",
+      "tags": [],
+      "collected_at": "2026-06-15T08:49:45.477982"
+    },
+    {
+      "hash": "a6c63bd320a1",
+      "source": "CoinDesk",
+      "source_tier": 1,
+      "source_lang": "en",
+      "source_category": "news",
+      "title": "Crypto should adopt the best of centralization, says LMAX CEO",
+      "url": "https://www.coindesk.com/business/2026/06/09/crypto-should-adopt-the-best-of-centralization-says-lmax-ceo",
+      "summary": "",
+      "published": "Sat, 13 Jun 2026 13:00:00 +0000",
+      "impact": "low",
+      "impact_reason": "一般资讯",
+      "tags": [],
+      "collected_at": "2026-06-15T08:49:45.477982"
+    },
+    {
+      "hash": "3014edef8aec",
+      "source": "CoinTelegraph",
+      "source_tier": 2,
+      "source_lang": "en",
+      "source_category": "news",
+      "title": "StanChart looks for 3 signs of BTC bottom, including Strategy’s Monday news",
+      "url": "https://cointelegraph.com/news/stanchart-looks-for-3-signs-of-btc-bottom-including-strategys-monday-news?utm_source=rss_feed&utm_medium=rss&utm_campaign=rss_partner_inbound",
+      "summary": "<p style=\"float: right; margin: 0 0 10px 15px; width: 240px;\"><img alt=\"StanChart looks for 3 signs of BTC bottom, including Strategy’s Monday news\" class=\"type:primaryImage\" src=\"https://images.cointelegraph.com/images/528_aHR0cHM6Ly9zMy1pbWFnZXMuY3RtZWRpYS5pby9tZWRpYS9hcnRpY2xlLWNvdmVycy9oaS13aHkt",
+      "published": "Sun, 14 Jun 2026 19:05:46 +0000",
+      "impact": "low",
+      "impact_reason": "一般资讯",
+      "tags": [],
+      "collected_at": "2026-06-15T08:49:47.015829"
+    },
+    {
+      "hash": "42ec00cd8ced",
+      "source": "The Defiant",
+      "source_tier": 2,
+      "source_lang": "en",
+      "source_category": "defi",
+      "title": "World Liberty Financial Pays UFC Freedom 250 Fighters in USD1 at White House",
+      "url": "https://thedefiant.io/news/cefi/world-liberty-financial-usd1-ufc-freedom-250-white-house",
+      "summary": "Trump-backed World Liberty Financial funded a $250,000 Performance of the Night bonus pool at UFC Freedom 250, distributing the awards in its USD1 stablecoin on the White House South Lawn.",
+      "published": "Sun, 14 Jun 2026 21:14:07 GMT",
+      "impact": "low",
+      "impact_reason": "一般资讯",
+      "tags": [],
+      "collected_at": "2026-06-15T08:49:50.362080"
     }
   ],
-  "last_crawl": "2026-06-15T00:40:20.613876",
+  "last_crawl": "2026-06-15T10:27:14.559125",
   "sources": {
     "CoinDesk": {
       "status": "ok",
@@ -1201,27 +1491,27 @@
     },
     "The Block": {
       "status": "ok",
-      "fetched": 19,
+      "fetched": 0,
       "new": 0
     },
     "CoinTelegraph": {
       "status": "ok",
-      "fetched": 20,
+      "fetched": 0,
       "new": 0
     },
     "Decrypt": {
       "status": "ok",
-      "fetched": 20,
+      "fetched": 0,
       "new": 0
     },
     "Bitcoin Magazine": {
       "status": "ok",
-      "fetched": 10,
+      "fetched": 0,
       "new": 0
     },
     "The Defiant": {
       "status": "ok",
-      "fetched": 20,
+      "fetched": 0,
       "new": 0
     },
     "Bankless": {

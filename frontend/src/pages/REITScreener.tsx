@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import React, { useState, useEffect, useCallback } from 'react'
 import axios from 'axios'
 
 const API_BASE = '/api'
@@ -402,8 +402,8 @@ export default function REITScreener() {
               </thead>
               <tbody>
                 {reits.map((reit, i) => (
-                  <>
-                    <tr key={reit.code} style={{
+                  <React.Fragment key={reit.code}>
+                    <tr style={{
                       cursor: 'pointer',
                       background: expandedRow === reit.code ? 'var(--bg-secondary)' : undefined,
                     }} onClick={() => setExpandedRow(expandedRow === reit.code ? null : reit.code)}>
@@ -639,7 +639,7 @@ export default function REITScreener() {
                         </td>
                       </tr>
                     )}
-                  </>
+                  </React.Fragment>
                 ))}
                 {reits.length === 0 && (
                   <tr>

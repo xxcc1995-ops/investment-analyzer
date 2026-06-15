@@ -1,0 +1,8 @@
+{
+  "wereadApiBase": "https://weread.111965.xyz",
+  "accounts": [],
+  "maxArticlesPerAccount": 20,
+  "retryMaxAttempts": 5,
+  "retryDelayMs": 400,
+  "syncDays": 2
+}

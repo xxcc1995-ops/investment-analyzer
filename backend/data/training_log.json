@@ -1,0 +1,38 @@
+[
+  {
+    "exercise_type": "delay_discounting",
+    "question_id": "dd_01",
+    "answer": "B",
+    "confidence": 70,
+    "score": 100,
+    "correct": true,
+    "timestamp": "2026-06-15T10:35:35.820721"
+  },
+  {
+    "exercise_type": "delay_discounting",
+    "question_id": "dd_05",
+    "answer": "B",
+    "confidence": 70,
+    "score": 100,
+    "correct": true,
+    "timestamp": "2026-06-15T10:35:41.340335"
+  },
+  {
+    "exercise_type": "delay_discounting",
+    "question_id": "dd_04",
+    "answer": "B",
+    "confidence": 70,
+    "score": 40,
+    "correct": false,
+    "timestamp": "2026-06-15T10:35:50.668205"
+  },
+  {
+    "exercise_type": "delay_discounting",
+    "question_id": "dd_03",
+    "answer": "B",
+    "confidence": 70,
+    "score": 40,
+    "correct": false,
+    "timestamp": "2026-06-15T10:36:11.430117"
+  }
+]

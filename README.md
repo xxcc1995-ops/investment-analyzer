@@ -104,11 +104,26 @@
 | 房价同比(一线) | +0.7% | > 0% |
 | 失业率 | 5.2% | < 5% |
 
+## 微信公众号日报
+
+自动抓取微信读书中关注的公众号文章，生成每日 Markdown 日报。
+
+```bash
+cd wechat-digest
+npm install
+npm run login      # 扫码登录微信读书
+npm run sync       # 同步最近2天文章
+npm run summarize  # 生成今日日报
+```
+
+详见 [wechat-digest/README.md](wechat-digest/README.md)
+
 ## 技术栈
 
 - 前端：React + TypeScript + ECharts + Vite
 - 后端：Python FastAPI + AKShare
 - 数据源：新浪财经（行情）、东方财富（财务）、AKShare（宏观/指数/期货/REIT）、集思录（基金套利/可转债）、Polymarket（预测市场）、雪球（大V持仓）
+- 微信公众号：Node.js + Cheerio（文章抓取与日报生成）
 
 ## 快速开始
 
@@ -119,7 +134,7 @@ cd backend
 python -m venv venv
 venv\Scripts\activate  # Windows
 pip install -r requirements.txt
-python -m uvicorn app.main:app --reload --port 8001
+python -m uvicorn app.main:app --reload --port 8002
 ```
 
 ### 前端
@@ -131,7 +146,7 @@ npx vite --port 5173
 ```
 
 - 前端：http://localhost:5173
-- 后端API：http://localhost:8001
+- 后端API：http://localhost:8002
 
 ## 多设备同步
 

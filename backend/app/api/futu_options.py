@@ -1,4 +1,37 @@
-"""富途期权链 API - 真实市场数据 + BSM分析"""
+"""富途期权链 API - 真实市场数据 + BSM分析
+
+============================== API使用指南 ==============================
+
+【第一步】确保OpenD已启动
+- 下载：https://www.futunn.com/download/OpenAPI
+- 用富途账号登录，确保显示"已连接"
+
+【第二步】查看期权链
+- GET /chain?stock_code=HK.00700 → 获取腾讯所有期权合约
+- 返回的数据已包含Greeks、评分、流动性分析
+
+【第三步】分析策略
+- GET /strategy/covered_call → 备兑看涨策略（持股收租）
+- GET /strategy/cash_secured_put → 现金担保看跌（等抄底）
+- GET /strategy/credit_spread → 价差策略（有限风险）
+- GET /strategy/straddle → 跨式策略（赌大行情）
+- GET /strategy/iron_condor → 铁鹰式（赌横盘）
+
+【第四步】查看盈亏图
+- GET /strategy/pnl?strategy=covered_call → 生成P&L图数据
+
+【辅助功能】
+- GET /connection → 检查OpenD连接状态
+- GET /hv → 历史波动率
+- GET /greeks → BSM计算器（手动算Greeks）
+- GET /rolling → 轮动建议（平仓/展期/持有）
+- GET /max_pain → 最大痛苦点
+- GET /theta_decay → 时间衰减曲线
+- GET /iv_surface → 波动率曲面
+- GET /screen → 策略筛选器
+- GET /philosophy → 交易理念
+- GET /help → 使用帮助
+"""
 
 from fastapi import APIRouter, Query
 import subprocess
@@ -59,7 +92,23 @@ def option_chain(
     option_type: str = Query('all', description="期权类型: put/call/all"),
     risk_free_rate: float = Query(0.04, description="无风险利率"),
 ):
-    """获取真实期权链数据 + BSM Greeks + 评分"""
+    """
+    获取完整期权链数据 - 这是最核心的接口
+
+    【返回数据包含什么？】
+    每个期权合约都有：
+    - 基础信息：行权价、到期日、剩余天数
+    - 实时报价：买价、卖价、最新价、成交量、未平仓量
+    - Greeks指标：Delta/Gamma/Theta/Vega（衡量风险）
+    - 评分（0-100）：综合7个维度的推荐分数
+    - 流动性分析：买卖价差、是否适合交易
+    - 盈利指标：年化收益率、盈利概率、OTM缓冲
+
+    【怎么用？】
+    1. 先看 best_put 和 best_call（系统推荐的最佳合约）
+    2. 再看 chain 列表，按 score 排序找高分合约
+    3. 关注 can_trade=true 的合约（流动性好）
+    """
     try:
         from app.services.futu_option_service import get_option_chain_from_futu
         return get_option_chain_from_futu(stock_code, option_type, risk_free_rate)
@@ -111,7 +160,20 @@ def greeks(
     option_type: str = Query('put', description="期权类型"),
     risk_free_rate: float = Query(0.04, description="无风险利率"),
 ):
-    """BSM期权计算器"""
+    """
+    BSM期权计算器 - 手动计算期权理论价格和Greeks
+
+    【什么时候用？】
+    当你想自己算一下"这个期权理论上值多少钱"时。
+    输入5个参数，系统告诉你理论价格+所有风险指标。
+
+    【参数说明】
+    - spot: 股票现价（比如300）
+    - strike: 行权价（比如320）
+    - days: 还剩多少天到期（比如30）
+    - sigma: 波动率（一般0.2-0.5，可以用/hv接口查历史波动率）
+    - option_type: 'put'(看跌) 或 'call'(看涨)
+    """
     from app.services.futu_option_service import bsm_price
     T = days / 365
     result = bsm_price(spot, strike, T, risk_free_rate, sigma, option_type)
@@ -133,7 +195,27 @@ def rolling(
     current_iv: float = Query(None, description="当前真实IV（小数）"),
     risk_free_rate: float = Query(0.04, description="无风险利率"),
 ):
-    """轮动建议：hold/roll/close（改进版：支持传入真实IV）"""
+    """
+    轮动建议 - 告诉你当前持仓该怎么做
+
+    【什么时候用？】
+    你已经卖了一个期权，现在想知道：
+    - 该不该平仓？（赚够了或风险太大）
+    - 该不该展期？（快到期了想继续做）
+    - 还是继续持有？（状态良好）
+
+    【参数说明】
+    - spot: 股票现在的价格
+    - strike: 你卖的期权的行权价
+    - premium: 你当初收了多少权利金
+    - dte_left: 还剩多少天到期
+    - option_type: 你卖的是put还是call
+
+    【返回值】
+    - action: 'close'(平仓) / 'roll'(展期) / 'hold'(持有)
+    - reason: 为什么建议这么做
+    - profit_pct: 当前赚了百分之多少
+    """
     from app.services.futu_option_service import get_rolling_recommendation
     return get_rolling_recommendation(
         spot, strike, premium, dte_left, entry_dte,
@@ -218,6 +300,184 @@ def max_pain(
     if 'error' in chain_data:
         return chain_data
     return calculate_max_pain(chain_data.get('chain', []), chain_data.get('spot_price', 0))
+
+
+@router.get("/screen")
+def screen_strategies(
+    stock_code: str = Query('HK.00700', description="港股代码"),
+    trade_fee: float = Query(16, description="每笔交易手续费(港币)"),
+    exercise_fee: float = Query(100, description="行权手续费(港币)"),
+    min_yield: float = Query(15, description="最低年化收益率(%)"),
+    min_otm: float = Query(3, description="最低OTM距离(%)"),
+    min_volume: int = Query(0, description="最低成交量"),
+    risk_free_rate: float = Query(0.04, description="无风险利率"),
+):
+    """
+    策略筛选器 - 自动扫描所有期权，找出最赚钱的机会
+
+    【通俗理解】
+    这个接口帮你做"选股"工作：
+    1. 扫描腾讯的所有期权合约
+    2. 扣除手续费后计算真实年化收益
+    3. 只保留年化收益 > min_yield 的合约
+    4. 按收益从高到低排序
+
+    【参数说明】
+    - trade_fee: 每笔交易手续费（富途一般15-20港币）
+    - exercise_fee: 行权手续费（富途一般100港币）
+    - min_yield: 最低年化收益率（比如15%表示只看年化>15%的）
+    - min_otm: 最低OTM距离（比如3%表示行权价至少离现价3%）
+
+    【怎么用？】
+    1. 先用默认参数扫描
+    2. 看返回的 results 列表
+    3. 关注 net_yield（扣费后年化）和 score（综合评分）
+    4. 选一个你满意的合约交易
+    """
+    from app.services.futu_option_service import get_option_chain_from_futu
+
+    chain_data = get_option_chain_from_futu(stock_code, 'all', risk_free_rate)
+    if 'error' in chain_data:
+        return chain_data
+
+    spot = chain_data['spot_price']
+    chain = chain_data.get('chain', [])
+    results = []
+
+    for c in chain:
+        if c.get('last', 0) <= 0 and c.get('mid', 0) <= 0:
+            continue
+        if min_volume > 0 and c.get('volume', 0) < min_volume:
+            continue
+
+        strike = c['strike']
+        dte = c.get('dte', 0)
+        if dte <= 0:
+            continue
+        lot_size = c.get('contract_size', 100)
+        premium = c.get('mid', 0) or c.get('last', 0)
+        if premium <= 0:
+            continue
+
+        otm_pct = c.get('otm_pct', 0)
+        annual_factor = 365 / dte
+
+        if c['option_type'] == 'call':
+            # Covered Call: 持有正股 + 卖Call
+            # 被行权时: 收益 = (行权价 - 现价 + 权利金) * lot_size - 交易费 - 行权费
+            # 不被行权: 收益 = 权利金 * lot_size - 交易费
+            investment = spot * lot_size
+            gross_profit = (strike - spot + premium) * lot_size
+            net_profit_exercised = gross_profit - trade_fee - exercise_fee
+            net_profit_not_exercised = premium * lot_size - trade_fee
+
+            net_yield_exercised = (net_profit_exercised / investment) * annual_factor * 100
+            net_yield_best = (net_profit_not_exercised / investment) * annual_factor * 100
+            gross_yield = (gross_profit / investment) * annual_factor * 100
+
+            if otm_pct < min_otm:
+                continue
+
+            # 检查是否达标（取被行权时的收益，更保守）
+            if net_yield_exercised < min_yield:
+                continue
+
+            results.append({
+                'strategy': 'cc',
+                'strategy_name': 'Covered Call',
+                'code': c.get('code', ''),
+                'spot': round(spot, 2),
+                'strike': strike,
+                'premium': round(premium, 4),
+                'dte': dte,
+                'lot_size': lot_size,
+                'otm_pct': round(otm_pct, 1),
+                'iv': c.get('iv', 0),
+                'delta': round(c.get('delta', 0), 4),
+                'pop': c.get('pop', 0),
+                'volume': c.get('volume', 0),
+                'open_interest': c.get('open_interest', 0),
+                'bid': c.get('bid', 0),
+                'ask': c.get('ask', 0),
+                'spread_pct': c.get('spread_pct', 0),
+                'gross_yield': round(gross_yield, 2),
+                'net_yield': round(net_yield_exercised, 2),
+                'net_yield_best': round(net_yield_best, 2),
+                'net_profit': round(net_profit_exercised, 2),
+                'premium_income': round(premium * lot_size, 2),
+                'investment': round(investment, 2),
+                'breakeven': round(spot - premium + (trade_fee + exercise_fee) / lot_size, 2),
+                'max_profit': round(net_profit_exercised, 2),
+                'score': c.get('score', 0),
+            })
+
+        elif c['option_type'] == 'put':
+            # Cash Secured Put: 卖Put + 准备现金
+            # 不被行权: 收益 = 权利金 * lot_size - 交易费
+            # 被行权: 收益 = 权利金 * lot_size - 交易费 - 行权费
+            collateral = (strike - premium) * lot_size
+            if collateral <= 0:
+                continue
+
+            net_profit_best = premium * lot_size - trade_fee
+            net_profit_worst = premium * lot_size - trade_fee - exercise_fee
+
+            net_yield_best = (net_profit_best / collateral) * annual_factor * 100
+            net_yield_worst = (net_profit_worst / collateral) * annual_factor * 100
+            gross_yield = (premium * lot_size / collateral) * annual_factor * 100
+
+            if otm_pct < min_otm:
+                continue
+
+            # 检查是否达标（取最坏情况，被行权时）
+            if net_yield_worst < min_yield:
+                continue
+
+            results.append({
+                'strategy': 'csp',
+                'strategy_name': 'Cash Secured Put',
+                'code': c.get('code', ''),
+                'spot': round(spot, 2),
+                'strike': strike,
+                'premium': round(premium, 4),
+                'dte': dte,
+                'lot_size': lot_size,
+                'otm_pct': round(otm_pct, 1),
+                'iv': c.get('iv', 0),
+                'delta': round(c.get('delta', 0), 4),
+                'pop': c.get('pop', 0),
+                'volume': c.get('volume', 0),
+                'open_interest': c.get('open_interest', 0),
+                'bid': c.get('bid', 0),
+                'ask': c.get('ask', 0),
+                'spread_pct': c.get('spread_pct', 0),
+                'gross_yield': round(gross_yield, 2),
+                'net_yield': round(net_yield_worst, 2),
+                'net_yield_best': round(net_yield_best, 2),
+                'net_profit': round(net_profit_worst, 2),
+                'premium_income': round(premium * lot_size, 2),
+                'collateral': round(collateral, 2),
+                'breakeven': round(strike - premium + trade_fee / lot_size, 2),
+                'max_profit': round(net_profit_best, 2),
+                'score': c.get('score', 0),
+            })
+
+    # 按扣费后年化降序排列
+    results.sort(key=lambda x: x['net_yield'], reverse=True)
+
+    return {
+        'stock_code': stock_code,
+        'spot_price': spot,
+        'stock_name': chain_data.get('stock_name', ''),
+        'hv': chain_data.get('hv', 0),
+        'trade_fee': trade_fee,
+        'exercise_fee': exercise_fee,
+        'min_yield': min_yield,
+        'total_scanned': len(chain),
+        'passed_count': len(results),
+        'results': results,
+        'update_time': chain_data.get('update_time', ''),
+    }
 
 
 @router.get("/strategy/straddle")

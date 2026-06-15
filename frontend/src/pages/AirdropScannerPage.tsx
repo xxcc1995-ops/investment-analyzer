@@ -12,15 +12,16 @@
 import { useState, useEffect, useCallback } from 'react'
 import {
   Tabs, Table, Tag, Card, Row, Col, Statistic, Button, Space,
-  Badge, Tooltip, Progress, Collapse, Checkbox, Input, Select,
+  Tooltip, Progress, Collapse, Checkbox, Input, Select,
   message, Empty, Spin, Divider,
 } from 'antd'
 import {
   GiftOutlined, ThunderboltOutlined, RocketOutlined,
   FileTextOutlined, BarChartOutlined, TeamOutlined,
   ReloadOutlined, LinkOutlined, StarFilled,
-  PlusOutlined, DeleteOutlined, ExportOutlined, ImportOutlined,
-  CheckCircleFilled, ClockCircleFilled, FireFilled,
+  PlusOutlined, ExportOutlined, ImportOutlined,
+  CheckCircleFilled, FireFilled,
+  ExperimentOutlined, TwitterOutlined,
 } from '@ant-design/icons'
 import { airdropScannerApi } from '../services/api'
 
@@ -56,13 +57,6 @@ function getScoreColor(score: number): string {
   return SCORE_COLORS.very_low
 }
 
-function getScoreLabel(score: number): string {
-  if (score >= 75) return '高'
-  if (score >= 50) return '中'
-  if (score >= 25) return '低'
-  return '极低'
-}
-
 // ============ 主组件 ============
 
 export default function AirdropScannerPage() {
@@ -76,7 +70,7 @@ export default function AirdropScannerPage() {
             空投机会扫描器 <Tag color="gold">系统化空投</Tag>
           </h2>
           <div style={{ color: '#8b949e', fontSize: 13 }}>
-            未发币协议扫描 · 交易所活动 · 链上打新 · 空投资讯 · 机会评分 · 多号管理
+            未发币协议 · 交易所活动 · 链上打新 · 测试网 · 空投资讯(12源) · 机会评分 · 多号管理
           </div>
         </div>
       </div>
@@ -93,6 +87,12 @@ export default function AirdropScannerPage() {
         </TabPane>
         <TabPane tab={<span><RocketOutlined /> 链上打新</span>} key="launchpad">
           <LaunchpadProjects />
+        </TabPane>
+        <TabPane tab={<span><ExperimentOutlined /> 测试网</span>} key="testnet">
+          <TestnetProjects />
+        </TabPane>
+        <TabPane tab={<span><TwitterOutlined /> 大V监控</span>} key="twitter">
+          <TwitterKolFeed />
         </TabPane>
         <TabPane tab={<span><FileTextOutlined /> 空投资讯</span>} key="news">
           <AirdropNews />
@@ -606,8 +606,8 @@ function ExchangeActivities() {
                 </div>
               }
               extra={
-                <Tag color={statusColors[campaign.status]}>
-                  {{ active: '进行中', upcoming: '即将', ended: '已结束' }[campaign.status]}
+                <Tag color={statusColors[campaign.status] || 'default'}>
+                  {({ active: '进行中', upcoming: '即将', ended: '已结束' } as Record<string, string>)[campaign.status] || campaign.status}
                 </Tag>
               }
             >
@@ -629,8 +629,8 @@ function ExchangeActivities() {
                 </Col>
               </Row>
               <div style={{ marginTop: 8, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <Tag color={difficultyColors[campaign.difficulty]}>
-                  {{ easy: '简单', medium: '中等', hard: '困难' }[campaign.difficulty]}
+                <Tag color={difficultyColors[campaign.difficulty] || 'default'}>
+                  {({ easy: '简单', medium: '中等', hard: '困难' } as Record<string, string>)[campaign.difficulty] || campaign.difficulty}
                 </Tag>
                 {campaign.url && (
                   <Button
@@ -779,7 +779,357 @@ function LaunchpadProjects() {
   )
 }
 
-// ============ Tab 5: 空投资讯 ============
+// ============ Tab 5: 测试网/激励测试网 ============
+
+function TestnetProjects() {
+  const [data, setData] = useState<any>(null)
+  const [loading, setLoading] = useState(true)
+
+  const loadData = useCallback(async () => {
+    setLoading(true)
+    try {
+      const res = await airdropScannerApi.getTestnetProjects()
+      setData(res.data)
+    } catch (e) {
+      console.error('加载测试网项目失败:', e)
+    } finally {
+      setLoading(false)
+    }
+  }, [])
+
+  useEffect(() => { loadData() }, [loadData])
+
+  if (loading) return <Spin size="large" style={{ display: 'block', margin: '60px auto' }} />
+  if (!data) return <Empty description="暂无数据" />
+
+  const projects = data.projects || []
+
+  const statusColors: Record<string, string> = {
+    active: 'green',
+    upcoming: 'blue',
+    ended: 'default',
+  }
+
+  return (
+    <div>
+      {/* 统计 */}
+      <Row gutter={16} style={{ marginBottom: 16 }}>
+        <Col span={8}>
+          <Card size="small" style={{ background: '#161b22', border: '1px solid #30363d' }}>
+            <Statistic
+              title={<span style={{ color: '#8b949e' }}>测试网项目</span>}
+              value={data.total_count}
+              valueStyle={{ color: '#e6edf3' }}
+            />
+          </Card>
+        </Col>
+        <Col span={8}>
+          <Card size="small" style={{ background: '#161b22', border: '1px solid #30363d' }}>
+            <Statistic
+              title={<span style={{ color: '#8b949e' }}>活跃项目</span>}
+              value={data.active_count}
+              valueStyle={{ color: '#52c41a' }}
+            />
+          </Card>
+        </Col>
+        <Col span={8}>
+          <Card size="small" style={{ background: '#161b22', border: '1px solid #30363d' }}>
+            <Statistic
+              title={<span style={{ color: '#8b949e' }}>数据更新</span>}
+              value={data.update_time ? new Date(data.update_time).toLocaleTimeString('zh-CN') : 'N/A'}
+              valueStyle={{ color: '#8b949e', fontSize: 16 }}
+            />
+          </Card>
+        </Col>
+      </Row>
+
+      {/* 项目列表 */}
+      <Row gutter={[16, 16]}>
+        {projects.map((project: any) => (
+          <Col key={project.id} xs={24} sm={12} lg={8} xl={6}>
+            <Card
+              size="small"
+              style={{
+                background: '#161b22',
+                border: '1px solid #30363d',
+                height: '100%',
+              }}
+              title={
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <Tag color="cyan">{project.type}</Tag>
+                  <Tag color={statusColors[project.status] || 'default'}>
+                    {({ active: '进行中', upcoming: '即将', ended: '已结束' } as Record<string, string>)[project.status] || project.status}
+                  </Tag>
+                </div>
+              }
+              extra={
+                project.funding && (
+                  <Tag color="gold">融资 {project.funding}</Tag>
+                )
+              }
+            >
+              <div style={{ color: '#e6edf3', fontWeight: 500, marginBottom: 4, fontSize: 15 }}>
+                {project.project_name}
+              </div>
+              <div style={{ color: '#1890ff', fontSize: 12, marginBottom: 8 }}>
+                {project.chain}
+              </div>
+              <div style={{ color: '#8b949e', fontSize: 12, marginBottom: 12, lineHeight: 1.5 }}>
+                {project.notes}
+              </div>
+              {/* 操作建议 */}
+              {project.actions && project.actions.length > 0 && (
+                <div style={{ marginBottom: 8 }}>
+                  <div style={{ color: '#8b949e', fontSize: 11, marginBottom: 4 }}>建议操作：</div>
+                  <Space size={4} wrap>
+                    {project.actions.map((action: string, i: number) => (
+                      <Tag key={i} style={{ fontSize: 11 }}>{action}</Tag>
+                    ))}
+                  </Space>
+                </div>
+              )}
+              {project.url && (
+                <Button
+                  type="link"
+                  size="small"
+                  icon={<LinkOutlined />}
+                  onClick={() => window.open(project.url, '_blank')}
+                  style={{ padding: 0, marginTop: 4 }}
+                >
+                  访问官网
+                </Button>
+              )}
+            </Card>
+          </Col>
+        ))}
+      </Row>
+    </div>
+  )
+}
+
+// ============ Tab 6: Twitter 大V监控 ============
+
+function TwitterKolFeed() {
+  const [data, setData] = useState<any>(null)
+  const [loading, setLoading] = useState(true)
+  const [signalFilter, setSignalFilter] = useState<string>('all')
+
+  const loadData = useCallback(async () => {
+    setLoading(true)
+    try {
+      const res = await airdropScannerApi.getTwitterKolFeed()
+      setData(res.data)
+    } catch (e) {
+      console.error('加载Twitter大V数据失败:', e)
+    } finally {
+      setLoading(false)
+    }
+  }, [])
+
+  useEffect(() => { loadData() }, [loadData])
+
+  if (loading) return <Spin size="large" style={{ display: 'block', margin: '60px auto' }} />
+  if (!data) return <Empty description="暂无数据" />
+
+  let tweets = data.tweets || []
+  if (signalFilter !== 'all') {
+    tweets = tweets.filter((t: any) => t.signal_level === signalFilter)
+  }
+
+  const signalColors: Record<string, string> = {
+    high: '#ff4d4f',
+    medium: '#faad14',
+    low: '#8b949e',
+  }
+
+  const signalLabels: Record<string, string> = {
+    high: '🔴 高信号',
+    medium: '🟡 中信号',
+    low: '⚪ 低信号',
+  }
+
+  const tierColors: Record<string, string> = {
+    T1: 'gold',
+    T2: 'blue',
+  }
+
+  return (
+    <div>
+      {/* 统计与筛选 */}
+      <Row gutter={16} style={{ marginBottom: 16 }}>
+        <Col span={6}>
+          <Card size="small" style={{ background: '#161b22', border: '1px solid #30363d' }}>
+            <Statistic
+              title={<span style={{ color: '#8b949e' }}>监控大V</span>}
+              value={data.total_kols}
+              suffix={<span style={{ fontSize: 12, color: '#52c41a' }}>(✓{data.kol_ok})</span>}
+              valueStyle={{ color: '#e6edf3' }}
+            />
+          </Card>
+        </Col>
+        <Col span={6}>
+          <Card size="small" style={{ background: '#161b22', border: '1px solid #30363d' }}>
+            <Statistic
+              title={<span style={{ color: '#8b949e' }}>🔴 高信号推文</span>}
+              value={data.high_signal}
+              valueStyle={{ color: '#ff4d4f' }}
+            />
+          </Card>
+        </Col>
+        <Col span={6}>
+          <Card size="small" style={{ background: '#161b22', border: '1px solid #30363d' }}>
+            <Statistic
+              title={<span style={{ color: '#8b949e' }}>🟡 中信号推文</span>}
+              value={data.medium_signal}
+              valueStyle={{ color: '#faad14' }}
+            />
+          </Card>
+        </Col>
+        <Col span={6}>
+          <Card size="small" style={{ background: '#161b22', border: '1px solid #30363d' }}>
+            <Statistic
+              title={<span style={{ color: '#8b949e' }}>信号推文总数</span>}
+              value={data.total_signal_tweets}
+              valueStyle={{ color: '#e6edf3' }}
+            />
+          </Card>
+        </Col>
+      </Row>
+
+      {/* 筛选按钮 */}
+      <div style={{ marginBottom: 12, display: 'flex', gap: 8, alignItems: 'center' }}>
+        <span style={{ color: '#8b949e' }}>信号级别：</span>
+        {['all', 'high', 'medium', 'low'].map(f => (
+          <Button
+            key={f}
+            size="small"
+            type={signalFilter === f ? 'primary' : 'default'}
+            danger={f === 'high' && signalFilter === f}
+            onClick={() => setSignalFilter(f)}
+          >
+            {{ all: '全部', high: '🔴 高信号', medium: '🟡 中信号', low: '⚪ 低信号' }[f]}
+          </Button>
+        ))}
+        <Button size="small" icon={<ReloadOutlined />} onClick={loadData} style={{ marginLeft: 'auto' }}>
+          刷新
+        </Button>
+      </div>
+
+      {/* KOL状态 */}
+      <Card
+        size="small"
+        title={<span style={{ color: '#e6edf3' }}>👥 监控账号状态</span>}
+        style={{ background: '#161b22', border: '1px solid #30363d', marginBottom: 16 }}
+        bodyStyle={{ padding: '8px 16px' }}
+        collapsible
+        defaultCollapsed
+      >
+        <Space wrap size={8}>
+          {(data.kol_status || []).map((kol: any) => (
+            <Tooltip key={kol.handle} title={`${kol.focus} | 推文: ${kol.tweet_count}`}>
+              <Tag
+                color={kol.status === 'ok' ? tierColors[kol.tier] || 'default' : 'red'}
+                style={{ cursor: 'pointer' }}
+              >
+                {kol.status === 'ok' ? '✓' : '✗'} @{kol.handle}
+                <span style={{ fontSize: 10, marginLeft: 4 }}>{kol.tier}</span>
+              </Tag>
+            </Tooltip>
+          ))}
+        </Space>
+      </Card>
+
+      {/* 推文列表 */}
+      {tweets.length === 0 ? (
+        <Empty description="暂无空投信号推文" />
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          {tweets.map((tweet: any, index: number) => (
+            <Card
+              key={index}
+              size="small"
+              style={{
+                background: '#161b22',
+                border: `1px solid ${tweet.signal_level === 'high' ? '#ff4d4f33' : '#30363d'}`,
+              }}
+              bodyStyle={{ padding: '12px 16px' }}
+            >
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12 }}>
+                <div style={{ flex: 1 }}>
+                  {/* 头部信息 */}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+                    <Tag color={signalColors[tweet.signal_level]}>
+                      {signalLabels[tweet.signal_level]}
+                    </Tag>
+                    <Tag color={tierColors[tweet.tier] || 'default'}>{tweet.tier}</Tag>
+                    <a
+                      href={`https://twitter.com/${tweet.handle}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      style={{ color: '#1890ff', fontSize: 13 }}
+                    >
+                      @{tweet.handle}
+                    </a>
+                    <span style={{ color: '#8b949e', fontSize: 12 }}>{tweet.kol_name}</span>
+                  </div>
+
+                  {/* 推文内容 */}
+                  <div style={{ color: '#e6edf3', fontSize: 14, lineHeight: 1.6, marginBottom: 6 }}>
+                    {tweet.text}
+                  </div>
+
+                  {/* 信号关键词 */}
+                  {tweet.signal_keywords && tweet.signal_keywords.length > 0 && (
+                    <div style={{ marginBottom: 6 }}>
+                      <Space size={4} wrap>
+                        {tweet.signal_keywords.map((kw: string, i: number) => (
+                          <Tag key={i} color="volcano" style={{ fontSize: 11 }}>{kw}</Tag>
+                        ))}
+                      </Space>
+                    </div>
+                  )}
+
+                  {/* 行动建议 */}
+                  {tweet.action_needed && (
+                    <div style={{
+                      color: tweet.signal_level === 'high' ? '#ff4d4f' : '#faad14',
+                      fontSize: 13, fontWeight: 500,
+                      padding: '4px 8px',
+                      background: tweet.signal_level === 'high' ? '#ff4d4f10' : '#faad1410',
+                      borderRadius: 4,
+                      display: 'inline-block',
+                    }}>
+                      {tweet.action_needed}
+                    </div>
+                  )}
+                </div>
+
+                {/* 右侧操作 */}
+                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4 }}>
+                  <span style={{ color: '#8b949e', fontSize: 11, whiteSpace: 'nowrap' }}>
+                    {tweet.published ? new Date(tweet.published).toLocaleString('zh-CN', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : ''}
+                  </span>
+                  {tweet.link && (
+                    <Button
+                      type="link"
+                      size="small"
+                      icon={<LinkOutlined />}
+                      onClick={() => window.open(tweet.link, '_blank')}
+                    >
+                      原文
+                    </Button>
+                  )}
+                </div>
+              </div>
+            </Card>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ============ Tab 7: 空投资讯 ============
 
 function AirdropNews() {
   const [data, setData] = useState<any>(null)

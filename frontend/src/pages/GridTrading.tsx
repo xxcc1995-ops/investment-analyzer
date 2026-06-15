@@ -127,7 +127,10 @@ interface OptimizeResult {
 // 辅助函数
 // ============================================================
 
-const fmt = (n: number) => n?.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) ?? '-'
+const fmt = (n: unknown) => {
+  const num = typeof n === 'number' ? n : Number(n)
+  return isNaN(num) ? '-' : num.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+}
 
 const Tip = ({ text, children }: { text: string; children?: React.ReactNode }) => (
   <Tooltip title={text} overlayStyle={{ maxWidth: 300 }}>
@@ -432,38 +435,38 @@ export default function GridTrading() {
   // ===== 表格列定义 =====
   const gridLevelColumns: Column<GridLevel>[] = [
     { key: 'price', title: '价格', dataIndex: 'price', align: 'right', render: v => fmt(v) },
-    { key: 'distance', title: '距现价%', dataIndex: 'distance_pct', align: 'right', render: v => <span style={{ color: v < 0 ? '#52c41a' : v > 0 ? '#ff4d4f' : '#d4a76a' }}>{v > 0 ? '+' : ''}{v}%</span> },
+    { key: 'distance', title: '距现价%', dataIndex: 'distance_pct', align: 'right', render: v => { const n = Number(v); return <span style={{ color: n < 0 ? '#52c41a' : n > 0 ? '#ff4d4f' : '#d4a76a' }}>{n > 0 ? '+' : ''}{n}%</span> } },
     { key: 'type', title: '类型', align: 'center', render: (_, r) => <span style={{ color: r.type === 'buy' ? '#52c41a' : r.type === 'sell' ? '#ff4d4f' : '#d4a76a', fontWeight: 600 }}>{r.type === 'buy' ? '买入' : r.type === 'sell' ? '卖出' : '当前'}</span> },
     { key: 'shares', title: '每格股数', align: 'right', render: () => analysis?.shares_per_grid },
     { key: 'capital', title: '每格资金', align: 'right', render: () => analysis ? `${getCurrency(analysis.market)}${fmt(analysis.capital_per_grid)}` : '-' },
   ]
 
   const tradeColumns: Column<Trade>[] = [
-    { key: 'date', title: '日期', dataIndex: 'date', render: v => <span style={{ fontSize: 12 }}>{v}</span> },
+    { key: 'date', title: '日期', dataIndex: 'date', render: v => <span style={{ fontSize: 12 }}>{String(v ?? '')}</span> },
     { key: 'action', title: '操作', align: 'center', render: (_, r) => <span style={{ color: r.action === 'buy' ? '#52c41a' : '#ff4d4f', fontWeight: 600 }}>{r.action === 'buy' ? '买入' : r.action === 'stop_loss' ? '止损' : '卖出'}</span> },
-    { key: 'price', title: '价格', dataIndex: 'price', align: 'right', render: v => fmt(v) },
-    { key: 'level', title: '网格层级', dataIndex: 'level', align: 'right', render: v => fmt(v) },
+    { key: 'price', title: '价格', dataIndex: 'price', align: 'right', render: v => fmt(v as number) },
+    { key: 'level', title: '网格层级', dataIndex: 'level', align: 'right', render: v => fmt(v as number) },
     { key: 'shares', title: '股数', dataIndex: 'shares', align: 'right' },
     { key: 'pnl', title: '盈亏', align: 'right', render: (_, r) => <span style={{ color: (r.pnl || 0) >= 0 ? '#52c41a' : '#ff4d4f' }}>{r.pnl !== undefined && r.pnl !== null ? `${getCurrency(analysis?.market)}${fmt(r.pnl)}` : '-'}</span> },
   ]
 
   const positionColumns: Column<any>[] = [
-    { key: 'level', title: '网格层级', dataIndex: 'level', align: 'right', render: v => fmt(v) },
+    { key: 'level', title: '网格层级', dataIndex: 'level', align: 'right', render: v => fmt(v as number) },
     { key: 'shares', title: '股数', dataIndex: 'shares', align: 'right' },
-    { key: 'entry', title: '买入价', dataIndex: 'entry', align: 'right', render: v => fmt(v) },
-    { key: 'unrealized', title: '未实现盈亏', dataIndex: 'unrealized', align: 'right', render: v => <span style={{ color: v >= 0 ? '#52c41a' : '#ff4d4f' }}>{getCurrency(analysis?.market)}{fmt(v)}</span> },
+    { key: 'entry', title: '买入价', dataIndex: 'entry', align: 'right', render: v => fmt(v as number) },
+    { key: 'unrealized', title: '未实现盈亏', dataIndex: 'unrealized', align: 'right', render: v => { const n = Number(v); return <span style={{ color: n >= 0 ? '#52c41a' : '#ff4d4f' }}>{getCurrency(analysis?.market)}{fmt(n)}</span> } },
   ]
 
   const optimizeColumns: Column<any>[] = [
     { key: 'rank', title: '排名', align: 'center', render: (_, __, i) => i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : `#${i + 1}` },
-    { key: 'width_pct', title: '网格宽度%', dataIndex: 'width_pct', align: 'right', render: v => `${v}%` },
+    { key: 'width_pct', title: '网格宽度%', dataIndex: 'width_pct', align: 'right', render: v => `${v ?? ''}%` },
     { key: 'num_grids', title: '网格数', dataIndex: 'num_grids', align: 'right' },
     { key: 'sizing', title: '仓位方法', dataIndex: 'sizing', render: v => v === 'equal' ? '等额' : '金字塔' },
-    { key: 'total_return', title: '总收益%', dataIndex: 'total_return', align: 'right', colorize: true, render: v => `${v}%` },
-    { key: 'sharpe', title: '夏普比率', dataIndex: 'sharpe', align: 'right', render: v => <span style={{ color: v > 1 ? '#52c41a' : '#faad14' }}>{v}</span> },
-    { key: 'max_drawdown', title: '最大回撤%', dataIndex: 'max_drawdown', align: 'right', render: v => <span style={{ color: '#ff4d4f' }}>{v}%</span> },
+    { key: 'total_return', title: '总收益%', dataIndex: 'total_return', align: 'right', colorize: true, render: v => `${v ?? ''}%` },
+    { key: 'sharpe', title: '夏普比率', dataIndex: 'sharpe', align: 'right', render: v => <span style={{ color: Number(v) > 1 ? '#52c41a' : '#faad14' }}>{String(v ?? '')}</span> },
+    { key: 'max_drawdown', title: '最大回撤%', dataIndex: 'max_drawdown', align: 'right', render: v => <span style={{ color: '#ff4d4f' }}>{v ?? ''}%</span> },
     { key: 'win_rate', title: '胜率%', dataIndex: 'win_rate', align: 'right' },
-    { key: 'score', title: '综合评分', dataIndex: 'score', align: 'right', render: v => <span style={{ color: '#d4a76a', fontWeight: 700 }}>{v}</span> },
+    { key: 'score', title: '综合评分', dataIndex: 'score', align: 'right', render: v => <span style={{ color: '#d4a76a', fontWeight: 700 }}>{String(v ?? '')}</span> },
   ]
 
   // ===== Tab定义 =====

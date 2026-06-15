@@ -38,6 +38,7 @@ const MobileSettings = lazy(() => import('./pages/MobileSettings'))
 const CBBacktestPage = lazy(() => import('./pages/CBBacktestPage'))
 const Portfolio = lazy(() => import('./pages/Portfolio'))
 const StrategyValidation = lazy(() => import('./pages/StrategyValidation'))
+const BankValuation = lazy(() => import('./pages/BankValuation'))
 const CryptoMasterPage = lazy(() => import('./pages/CryptoMasterPage'))
 const QuantBacktest = lazy(() => import('./pages/QuantBacktest'))
 const PrefrontalTraining = lazy(() => import('./pages/PrefrontalTraining'))
@@ -219,6 +220,7 @@ function App() {
               <Route path="/decision-guard" element={<DecisionGuard />} />
               <Route path="/prefrontal-training" element={<PrefrontalTraining />} />
               <Route path="/strategy-validation" element={<StrategyValidation />} />
+              <Route path="/bank-valuation" element={<BankValuation />} />
               <Route path="/portfolio" element={<Portfolio />} />
               <Route path="/settings" element={<MobileSettings />} />
             </Routes>
