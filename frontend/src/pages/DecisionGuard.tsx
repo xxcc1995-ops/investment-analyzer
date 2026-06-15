@@ -1054,11 +1054,36 @@ export default function DecisionGuard() {
         )}
 
         {/* 操作按钮 */}
-        <div style={{ display: 'flex', gap: 12 }}>
+        <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
           <button onClick={handleReset} style={primaryBtnStyle}>🔄 做新的决策</button>
           <button onClick={loadHistory} style={secondaryBtnStyle} disabled={historyLoading}>
             📋 查看决策日志
           </button>
+          {diagnosis.score >= 55 && target && (
+            <button
+              onClick={() => {
+                const decisionId = analysisResult?.decision_id || ''
+                const params = new URLSearchParams({
+                  code: target,
+                  type: decisionType === 'buy' ? 'buy' : decisionType === 'sell' ? 'sell' : 'buy',
+                  reason: reason.slice(0, 100),
+                  decision_id: decisionId,
+                  score: String(diagnosis.score),
+                })
+                window.location.hash = ''
+                window.dispatchEvent(new CustomEvent('navigate-portfolio', { detail: params.toString() }))
+                alert('请在持仓页面记录此交易')
+              }}
+              style={{
+                ...secondaryBtnStyle,
+                background: 'rgba(88,166,255,0.1)',
+                border: '1px solid rgba(88,166,255,0.3)',
+                color: '#58a6ff',
+              }}
+            >
+              💼 记录到持仓
+            </button>
+          )}
         </div>
       </div>
     );

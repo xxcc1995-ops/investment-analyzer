@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import ReactECharts from 'echarts-for-react'
 import { portfolioApi } from '../services/api'
-import type { PortfolioSummary, PortfolioTransaction, PortfolioPosition, RiskExposure, PerformancePoint } from '../services/api'
+import type { PortfolioSummary, PortfolioTransaction, PortfolioPosition, RiskExposure, PerformancePoint, PortfolioRiskAnalysis } from '../services/api'
 import { StatCard, StatCardGroup, PageSection, DataTable, TabBar, LoadingSpinner, EmptyState, Tag } from '../components/ui'
 import type { Column } from '../components/ui'
 import { useTradingInterceptor } from '../hooks/useTradingInterceptor'
@@ -39,6 +39,8 @@ export default function Portfolio() {
   const [transactions, setTransactions] = useState<PortfolioTransaction[]>([])
   const [performance, setPerformance] = useState<PerformancePoint[]>([])
   const [risk, setRisk] = useState<RiskExposure | null>(null)
+  const [riskAnalysis, setRiskAnalysis] = useState<PortfolioRiskAnalysis | null>(null)
+  const [riskLoading, setRiskLoading] = useState(false)
   const [showAddTxn, setShowAddTxn] = useState(false)
   const [addLoading, setAddLoading] = useState(false)
 
@@ -59,6 +61,13 @@ export default function Portfolio() {
       setTransactions(txnRes.data.transactions || [])
       setPerformance(perfRes.data.points || [])
       setRisk(riskRes.data)
+
+      // 异步加载风险分析（数据量较大，不阻塞主界面）
+      setRiskLoading(true)
+      portfolioApi.getRiskAnalysis()
+        .then(res => setRiskAnalysis(res.data))
+        .catch(e => console.error('加载风险分析失败:', e))
+        .finally(() => setRiskLoading(false))
     } catch (e) {
       console.error('加载组合数据失败:', e)
     } finally {
@@ -120,6 +129,7 @@ export default function Portfolio() {
     { key: 'transactions', label: '交易记录' },
     { key: 'performance', label: '收益曲线' },
     { key: 'risk', label: '风险暴露' },
+    { key: 'risk_analysis', label: '风险分析' },
   ]
 
   return (
@@ -156,6 +166,10 @@ export default function Portfolio() {
 
         {tab === 'risk' && (
           <RiskTab risk={risk} />
+        )}
+
+        {tab === 'risk_analysis' && (
+          <RiskAnalysisTab data={riskAnalysis} loading={riskLoading} />
         )}
       </PageSection>
 
@@ -537,6 +551,159 @@ function RiskTab({ risk }: { risk: RiskExposure | null }) {
     </div>
   )
 }
+
+// ============ 风险分析（VaR/CVaR/压力测试） ============
+
+function RiskAnalysisTab({ data, loading }: { data: PortfolioRiskAnalysis | null; loading: boolean }) {
+  if (loading) return <LoadingSpinner text="加载风险分析数据（正在获取历史行情）..." />
+  if (!data || !data.has_data) {
+    return <EmptyState icon="📉" title="暂无风险分析数据" description={data?.message || '请先添加持仓'} />
+  }
+
+  const riskLevel = (var_pct: number) => {
+    const abs = Math.abs(var_pct)
+    if (abs >= 5) return { label: '高风险', color: '#ef4444' }
+    if (abs >= 3) return { label: '中高风险', color: '#f59e0b' }
+    if (abs >= 1.5) return { label: '中等风险', color: '#3b82f6' }
+    return { label: '低风险', color: '#22c55e' }
+  }
+
+  const var95Level = riskLevel(data.var_95?.var_pct || 0)
+
+  return (
+    <div style={{ marginTop: 16 }}>
+      {/* 核心指标卡片 */}
+      <div style={{
+        display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
+        gap: 12, marginBottom: 20,
+      }}>
+        <MetricCard
+          label="VaR (95%)"
+          value={`${Math.abs(data.var_95?.var_pct || 0).toFixed(2)}%`}
+          subValue={formatMoney(data.var_95?.var_amount || 0)}
+          color={var95Level.color}
+          tip="95%置信度下，单日最大预期损失"
+        />
+        <MetricCard
+          label="VaR (99%)"
+          value={`${Math.abs(data.var_99?.var_pct || 0).toFixed(2)}%`}
+          subValue={formatMoney(data.var_99?.var_amount || 0)}
+          color="#f59e0b"
+          tip="99%置信度下，单日最大预期损失"
+        />
+        <MetricCard
+          label="CVaR (95%)"
+          value={`${Math.abs(data.cvar_95?.cvar_pct || 0).toFixed(2)}%`}
+          subValue={formatMoney(data.cvar_95?.cvar_amount || 0)}
+          color="#ef4444"
+          tip="尾部平均损失（超过VaR后的平均亏损）"
+        />
+        <MetricCard
+          label="年化波动率"
+          value={`${data.volatility_annual.toFixed(2)}%`}
+          color={data.volatility_annual > 30 ? '#ef4444' : data.volatility_annual > 20 ? '#f59e0b' : '#22c55e'}
+          tip="年化收益率的标准差"
+        />
+        <MetricCard
+          label="最大回撤"
+          value={`${data.max_drawdown.toFixed(2)}%`}
+          color={data.max_drawdown < -30 ? '#ef4444' : data.max_drawdown < -15 ? '#f59e0b' : '#22c55e'}
+          tip="历史上从峰值到谷底的最大跌幅"
+        />
+        <MetricCard
+          label="夏普比率"
+          value={data.sharpe_ratio.toFixed(3)}
+          color={data.sharpe_ratio > 1 ? '#22c55e' : data.sharpe_ratio > 0 ? '#3b82f6' : '#ef4444'}
+          tip="风险调整后收益（无风险利率2%）"
+        />
+        <MetricCard
+          label="集中度 HHI"
+          value={data.concentration_hhi.toFixed(4)}
+          color={data.concentration_hhi > 0.25 ? '#ef4444' : data.concentration_hhi > 0.15 ? '#f59e0b' : '#22c55e'}
+          tip="赫芬达尔指数，越接近1越集中"
+        />
+        <MetricCard
+          label="前3大持仓占比"
+          value={`${data.top3_pct.toFixed(1)}%`}
+          color={data.top3_pct > 70 ? '#ef4444' : data.top3_pct > 50 ? '#f59e0b' : '#22c55e'}
+          tip="前3大持仓市值占总仓位比例"
+        />
+      </div>
+
+      {/* 数据说明 */}
+      <div style={{
+        marginBottom: 16, padding: '8px 12px', borderRadius: 6,
+        background: 'rgba(88,166,255,0.08)', border: '1px solid rgba(88,166,255,0.2)',
+        color: '#8b949e', fontSize: 12,
+      }}>
+        基于 {data.data_days} 个交易日历史数据，使用历史模拟法（非参数化）计算。持仓 {data.position_count} 只，总市值 {formatMoney(data.total_value)}。
+      </div>
+
+      {/* 压力测试 */}
+      {data.stress_test && data.stress_test.length > 0 && (
+        <div style={{ background: '#161b22', borderRadius: 8, border: '1px solid #30363d', padding: 16 }}>
+          <div style={{ fontWeight: 600, marginBottom: 12, fontSize: 15 }}>压力测试场景</div>
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+            <thead>
+              <tr style={{ borderBottom: '1px solid #30363d' }}>
+                <th style={{ textAlign: 'left', padding: '8px 12px', color: '#8b949e' }}>场景</th>
+                <th style={{ textAlign: 'right', padding: '8px 12px', color: '#8b949e' }}>损失金额</th>
+                <th style={{ textAlign: 'right', padding: '8px 12px', color: '#8b949e' }}>损失比例</th>
+                <th style={{ textAlign: 'right', padding: '8px 12px', color: '#8b949e' }}>冲击后市值</th>
+                <th style={{ textAlign: 'left', padding: '8px 12px', color: '#8b949e', paddingLeft: 20 }}>影响最大个股</th>
+              </tr>
+            </thead>
+            <tbody>
+              {data.stress_test.map((s, idx) => {
+                const worst = s.position_impacts?.[0]
+                return (
+                  <tr key={idx} style={{ borderBottom: '1px solid #21262d' }}>
+                    <td style={{ padding: '10px 12px' }}>
+                      <span style={{ color: s.type === 'market' ? '#ef4444' : '#f59e0b', fontWeight: 600 }}>
+                        {s.name}
+                      </span>
+                    </td>
+                    <td style={{ textAlign: 'right', padding: '10px 12px', color: '#ef4444', fontWeight: 600 }}>
+                      {formatMoney(s.total_loss)}
+                    </td>
+                    <td style={{ textAlign: 'right', padding: '10px 12px' }}>
+                      <Tag color="#ef4444">{s.total_loss_pct.toFixed(2)}%</Tag>
+                    </td>
+                    <td style={{ textAlign: 'right', padding: '10px 12px', color: '#e6edf3' }}>
+                      {formatMoney(s.portfolio_after)}
+                    </td>
+                    <td style={{ padding: '10px 12px', paddingLeft: 20, color: '#8b949e' }}>
+                      {worst ? `${worst.name} (${worst.loss_pct.toFixed(1)}%)` : '-'}
+                    </td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// 指标卡片子组件
+function MetricCard({
+  label, value, subValue, color, tip,
+}: {
+  label: string; value: string; subValue?: string; color: string; tip?: string
+}) {
+  return (
+    <div style={{
+      background: '#161b22', borderRadius: 8, border: '1px solid #30363d',
+      padding: '12px 16px', position: 'relative',
+    }} title={tip}>
+      <div style={{ color: '#8b949e', fontSize: 12, marginBottom: 4 }}>{label}</div>
+      <div style={{ color, fontSize: 22, fontWeight: 700 }}>{value}</div>
+      {subValue && <div style={{ color: '#8b949e', fontSize: 12, marginTop: 2 }}>{subValue}</div>}
+    </div>
+  )
+}
+
 
 // ============ 添加交易弹窗 ============
 

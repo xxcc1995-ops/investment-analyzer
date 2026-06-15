@@ -67,3 +67,37 @@ class RiskExposure(BaseModel):
     concentration_warnings: list[str] = Field(default_factory=list)  # 集中度警告
     max_single_pct: float = 0  # 最大单一持仓占比
     max_sector_pct: float = 0  # 最大行业占比
+
+
+class StressTestScenario(BaseModel):
+    """压力测试场景"""
+    name: str  # 场景名称
+    type: str  # market / rate
+    shock: float  # 冲击幅度
+    total_loss: float = 0  # 总损失金额
+    total_loss_pct: float = 0  # 总损失比例(%)
+    portfolio_after: float = 0  # 冲击后组合市值
+    position_impacts: list[dict] = Field(default_factory=list)  # 各持仓影响
+
+
+class PortfolioRiskAnalysis(BaseModel):
+    """组合风险分析结果"""
+    has_data: bool = False
+    message: str = ""
+    total_value: float = 0
+    position_count: int = 0
+    # VaR
+    var_95: dict = Field(default_factory=dict)  # {var_pct, var_amount, confidence, data_days}
+    var_99: dict = Field(default_factory=dict)
+    # CVaR
+    cvar_95: dict = Field(default_factory=dict)  # {cvar_pct, cvar_amount, confidence}
+    # 波动率 & 回撤
+    volatility_annual: float = 0  # 年化波动率(%)
+    max_drawdown: float = 0  # 最大回撤(%)
+    sharpe_ratio: float = 0  # 夏普比率
+    # 集中度
+    concentration_hhi: float = 0  # HHI指数
+    top3_pct: float = 0  # 前3大持仓占比(%)
+    # 压力测试
+    stress_test: list[StressTestScenario] = Field(default_factory=list)
+    data_days: int = 0  # 使用的历史数据天数

@@ -14,6 +14,7 @@ from ..services.portfolio_service import (
     get_performance_history,
     get_risk_exposure,
     delete_transaction,
+    get_portfolio_risk_summary,
 )
 
 router = APIRouter()
@@ -96,6 +97,13 @@ async def api_get_risk():
     """风险暴露"""
     risk = get_risk_exposure()
     return risk.model_dump()
+
+
+@router.get("/risk-analysis")
+async def api_get_risk_analysis():
+    """组合风险分析（VaR / CVaR / 压力测试）"""
+    result = get_portfolio_risk_summary()
+    return result.model_dump()
 
 
 @router.delete("/transaction/{txn_id}")

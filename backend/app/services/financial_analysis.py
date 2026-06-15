@@ -749,7 +749,7 @@ def _calculate_beneish_m_score(income: list, balance: list, cashflow: list) -> f
     prev_ca = prev_bal.get("total_current_assets")
     curr_ppe = (curr_bal.get("total_assets") or 0) - (curr_bal.get("total_current_assets") or 0) - (curr_bal.get("total_non_current_assets") or 0) if curr_bal.get("total_non_current_assets") else None
     prev_ppe = (prev_bal.get("total_assets") or 0) - (prev_bal.get("total_current_assets") or 0) - (prev_bal.get("total_non_current_assets") or 0) if prev_bal.get("total_non_current_assets") else None
-    curr_dep = curr_cashflow[0].get("depreciation_amortization") if cashflow else None
+    curr_dep = cashflow[0].get("depreciation_amortization") if cashflow else None
     prev_dep = cashflow[1].get("depreciation_amortization") if len(cashflow) >= 2 else None
     curr_sell = (curr_inc.get("sell_expense") or 0) + (curr_inc.get("manage_expense") or 0)
     prev_sell = (prev_inc.get("sell_expense") or 0) + (prev_inc.get("manage_expense") or 0)

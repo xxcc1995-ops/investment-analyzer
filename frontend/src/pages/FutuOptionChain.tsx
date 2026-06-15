@@ -1130,20 +1130,20 @@ export default function FutuOptionChain() {
                 <div style={{ color: '#999', fontSize: 12 }}>Delta</div>
                 <div style={{ color: '#1890ff', fontSize: 20, fontWeight: 700 }}>{calcResult?.greeks?.delta?.toFixed(4) ?? '-'}</div>
               </div>
-              <div style={{ background: '#1a1a2e', padding: 14, borderRadius: 8, border: '1px solid #333' }}>
+              <div title="Delta的变化率。Gamma越大，Delta变化越快" style={{ background: '#1a1a2e', padding: 14, borderRadius: 8, border: '1px solid #333', cursor: 'help' }}>
                 <div style={{ color: '#999', fontSize: 12 }}>Gamma</div>
                 <div style={{ color: '#faad14', fontSize: 20, fontWeight: 700 }}>{calcResult?.greeks?.gamma?.toFixed(6) ?? '-'}</div>
               </div>
-              <div style={{ background: '#1a1a2e', padding: 14, borderRadius: 8, border: '1px solid #333' }}>
+              <div title="每天时间价值衰减金额。卖期权者的朋友：时间流逝你赚钱" style={{ background: '#1a1a2e', padding: 14, borderRadius: 8, border: '1px solid #333', cursor: 'help' }}>
                 <div style={{ color: '#999', fontSize: 12 }}>Theta/天</div>
                 <div style={{ color: '#ff4d4f', fontSize: 20, fontWeight: 700 }}>{calcResult?.greeks?.theta?.toFixed(4) ?? '-'}</div>
               </div>
-              <div style={{ background: '#1a1a2e', padding: 14, borderRadius: 8, border: '1px solid #333' }}>
+              <div title="IV波动率变动1%→期权价变动量。Vega越大，对波动率变化越敏感" style={{ background: '#1a1a2e', padding: 14, borderRadius: 8, border: '1px solid #333', cursor: 'help' }}>
                 <div style={{ color: '#999', fontSize: 12 }}>Vega (1%变动)</div>
                 <div style={{ color: '#722ed1', fontSize: 20, fontWeight: 700 }}>{calcResult?.greeks?.vega?.toFixed(4) ?? '-'}</div>
               </div>
               {calcResult.greeks.rho != null && (
-                <div style={{ background: '#1a1a2e', padding: 14, borderRadius: 8, border: '1px solid #333' }}>
+                <div title="利率变动1%→期权价变动量，影响通常较小" style={{ background: '#1a1a2e', padding: 14, borderRadius: 8, border: '1px solid #333', cursor: 'help' }}>
                   <div style={{ color: '#999', fontSize: 12 }}>Rho (1%利率变动)</div>
                   <div style={{ color: '#13c2c2', fontSize: 20, fontWeight: 700 }}>{calcResult.greeks.rho.toFixed(4)}</div>
                 </div>

@@ -589,3 +589,30 @@ export interface RiskExposure {
   max_single_pct: number
   max_sector_pct: number
 }
+
+export interface StressTestScenario {
+  name: string
+  type: string
+  shock: number
+  total_loss: number
+  total_loss_pct: number
+  portfolio_after: number
+  position_impacts: { code: string; name: string; loss: number; loss_pct: number }[]
+}
+
+export interface PortfolioRiskAnalysis {
+  has_data: boolean
+  message: string
+  total_value: number
+  position_count: number
+  var_95: { var_pct: number; var_amount: number; confidence: number; data_days: number }
+  var_99: { var_pct: number; var_amount: number; confidence: number; data_days: number }
+  cvar_95: { cvar_pct: number; cvar_amount: number; confidence: number }
+  volatility_annual: number
+  max_drawdown: number
+  sharpe_ratio: number
+  concentration_hhi: number
+  top3_pct: number
+  stress_test: StressTestScenario[]
+  data_days: number
+}

@@ -1,5 +1,5 @@
 """
-组合管理服务 — 持仓管理、交易记录、收益跟踪、风险暴露
+组合管理服务 — 持仓管理、交易记录、收益跟踪、风险暴露、VaR/CVaR/压力测试
 
 数据持久化：SQLite（invest.db）
 实时价格：通过 MultiSourceQuoteService 获取
@@ -9,12 +9,15 @@ import json
 import os
 import uuid
 import logging
+import math
+import numpy as np
 from datetime import datetime, timedelta
 from typing import Optional
 
 from app.models.portfolio import (
     Transaction, Position, PortfolioSummary,
     PerformancePoint, RiskExposure,
+    PortfolioRiskAnalysis, StressTestScenario,
 )
 from app.core.database import get_db
 
@@ -535,4 +538,342 @@ def get_risk_exposure() -> RiskExposure:
         concentration_warnings=warnings,
         max_single_pct=round(max_single, 2),
         max_sector_pct=round(max_sector, 2),
+    )
+
+
+# ============================================================
+# 组合级风险分析（VaR / CVaR / 压力测试）
+# ============================================================
+
+def _get_historical_returns(code: str, market: str = "A", days: int = 250) -> list[float]:
+    """
+    获取个股历史日收益率序列（用于VaR计算）。
+    优先使用 AKShare 获取日线数据，失败时返回空列表。
+    """
+    try:
+        import akshare as ak
+        # A股日线
+        if market == "A":
+            # akshare 需要纯数字代码
+            pure_code = code.replace(".", "").strip()
+            df = ak.stock_zh_a_hist(
+                symbol=pure_code, period="daily",
+                start_date=(datetime.now() - timedelta(days=days + 30)).strftime("%Y%m%d"),
+                end_date=datetime.now().strftime("%Y%m%d"),
+                adjust="qfq",
+            )
+            if df is not None and len(df) > 5:
+                closes = df["收盘"].tolist()
+                returns = []
+                for i in range(1, len(closes)):
+                    if closes[i - 1] > 0:
+                        returns.append((closes[i] - closes[i - 1]) / closes[i - 1])
+                return returns[-days:]
+        # 港股
+        elif market == "HK":
+            df = ak.stock_hk_hist(
+                symbol=code, period="daily",
+                start_date=(datetime.now() - timedelta(days=days + 30)).strftime("%Y%m%d"),
+                end_date=datetime.now().strftime("%Y%m%d"),
+                adjust="qfq",
+            )
+            if df is not None and len(df) > 5:
+                closes = df["收盘"].tolist()
+                returns = []
+                for i in range(1, len(closes)):
+                    if closes[i - 1] > 0:
+                        returns.append((closes[i] - closes[i - 1]) / closes[i - 1])
+                return returns[-days:]
+    except Exception as e:
+        logger.warning(f"获取 {code} 历史收益率失败: {e}")
+    return []
+
+
+def calculate_portfolio_var(
+    positions: list[Position],
+    confidence: float = 0.95,
+    days: int = 250,
+) -> dict:
+    """
+    组合 VaR（历史模拟法）。
+
+    步骤：
+    1. 获取每只持仓的历史日收益率
+    2. 按市值加权得到组合日收益率序列
+    3. 取分位数作为 VaR
+
+    Returns:
+        {"var_pct": float, "var_amount": float, "confidence": float, "data_days": int}
+    """
+    if not positions:
+        return {"var_pct": 0, "var_amount": 0, "confidence": confidence, "data_days": 0}
+
+    total_value = sum(p.market_value for p in positions)
+    if total_value <= 0:
+        return {"var_pct": 0, "var_amount": 0, "confidence": confidence, "data_days": 0}
+
+    # 收集各持仓收益率
+    all_returns = []
+    weights = []
+    min_len = float("inf")
+
+    for p in positions:
+        rets = _get_historical_returns(p.code, p.market, days)
+        if len(rets) >= 20:  # 至少20个交易日数据
+            all_returns.append(rets)
+            weights.append(p.market_value / total_value)
+            min_len = min(min_len, len(rets))
+
+    if not all_returns or min_len < 20:
+        return {"var_pct": 0, "var_amount": 0, "confidence": confidence, "data_days": 0}
+
+    # 对齐长度
+    all_returns = [r[-int(min_len):] for r in all_returns]
+
+    # 加权组合收益率
+    portfolio_returns = []
+    for i in range(int(min_len)):
+        weighted = sum(w * r[i] for w, r in zip(weights, all_returns))
+        portfolio_returns.append(weighted)
+
+    arr = np.array(portfolio_returns)
+    var_pct = float(np.percentile(arr, (1 - confidence) * 100))
+    var_amount = abs(var_pct) * total_value
+
+    return {
+        "var_pct": round(var_pct * 100, 4),
+        "var_amount": round(var_amount, 2),
+        "confidence": confidence,
+        "data_days": int(min_len),
+    }
+
+
+def calculate_portfolio_cvar(
+    positions: list[Position],
+    confidence: float = 0.95,
+    days: int = 250,
+) -> dict:
+    """
+    组合 CVaR / Expected Shortfall（历史模拟法）。
+    CVaR = VaR 以下所有损失的均值。
+
+    Returns:
+        {"cvar_pct": float, "cvar_amount": float, "confidence": float}
+    """
+    if not positions:
+        return {"cvar_pct": 0, "cvar_amount": 0, "confidence": confidence}
+
+    total_value = sum(p.market_value for p in positions)
+    if total_value <= 0:
+        return {"cvar_pct": 0, "cvar_amount": 0, "confidence": confidence}
+
+    all_returns = []
+    weights = []
+    min_len = float("inf")
+
+    for p in positions:
+        rets = _get_historical_returns(p.code, p.market, days)
+        if len(rets) >= 20:
+            all_returns.append(rets)
+            weights.append(p.market_value / total_value)
+            min_len = min(min_len, len(rets))
+
+    if not all_returns or min_len < 20:
+        return {"cvar_pct": 0, "cvar_amount": 0, "confidence": confidence}
+
+    all_returns = [r[-int(min_len):] for r in all_returns]
+    portfolio_returns = []
+    for i in range(int(min_len)):
+        weighted = sum(w * r[i] for w, r in zip(weights, all_returns))
+        portfolio_returns.append(weighted)
+
+    arr = np.array(portfolio_returns)
+    var_threshold = np.percentile(arr, (1 - confidence) * 100)
+    tail_losses = arr[arr <= var_threshold]
+
+    if len(tail_losses) == 0:
+        return {"cvar_pct": 0, "cvar_amount": 0, "confidence": confidence}
+
+    cvar_pct = float(np.mean(tail_losses))
+    cvar_amount = abs(cvar_pct) * total_value
+
+    return {
+        "cvar_pct": round(cvar_pct * 100, 4),
+        "cvar_amount": round(cvar_amount, 2),
+        "confidence": confidence,
+    }
+
+
+def calculate_portfolio_stress_test(
+    positions: list[Position],
+    scenarios: list[dict] = None,
+) -> list[StressTestScenario]:
+    """
+    组合压力测试。
+
+    默认场景：
+    - 市场暴跌 10% / 20% / 30%
+    - 利率上升 100bp / 200bp
+
+    每个持仓按行业对利率敏感度做差异化冲击。
+    """
+    if not positions:
+        return []
+
+    if scenarios is None:
+        scenarios = [
+            {"name": "市场暴跌10%", "type": "market", "shock": -0.10},
+            {"name": "市场暴跌20%", "type": "market", "shock": -0.20},
+            {"name": "市场暴跌30%", "type": "market", "shock": -0.30},
+            {"name": "利率上升100bp", "type": "rate", "shock": 0.01},
+            {"name": "利率上升200bp", "type": "rate", "shock": 0.02},
+        ]
+
+    total_value = sum(p.market_value for p in positions)
+    if total_value <= 0:
+        return []
+
+    # 行业对利率敏感度（利率上升时的跌幅系数）
+    RATE_SENSITIVITY = {
+        "金融": -0.3,      # 银行受益于息差扩大，保险受益于投资收益
+        "地产": -2.5,      # 高杠杆，利率敏感
+        "消费": -0.8,
+        "医药": -0.5,
+        "科技": -1.2,      # 成长股对利率敏感
+        "能源": -0.4,
+        "制造": -0.7,
+        "互联网": -1.0,
+        "交通运输": -0.6,
+        "其他": -0.8,
+    }
+
+    results = []
+    for scenario in scenarios:
+        scenario_type = scenario["type"]
+        shock = scenario["shock"]
+        scenario_name = scenario["name"]
+
+        total_loss = 0.0
+        position_impacts = []
+
+        for p in positions:
+            if scenario_type == "market":
+                # 市场冲击：所有持仓等比例下跌
+                loss = p.market_value * shock
+            elif scenario_type == "rate":
+                # 利率冲击：按行业敏感度差异化
+                sector = _guess_sector(p.name)
+                sensitivity = RATE_SENSITIVITY.get(sector, -0.8)
+                # shock 是利率变动（正数=加息），敏感度是负数
+                pct_change = sensitivity * shock  # 加息 -> 负收益
+                loss = p.market_value * pct_change
+            else:
+                loss = 0
+
+            total_loss += loss
+            position_impacts.append({
+                "code": p.code,
+                "name": p.name,
+                "loss": round(loss, 2),
+                "loss_pct": round(loss / p.market_value * 100, 2) if p.market_value > 0 else 0,
+            })
+
+        results.append(StressTestScenario(
+            name=scenario_name,
+            type=scenario_type,
+            shock=shock,
+            total_loss=round(total_loss, 2),
+            total_loss_pct=round(total_loss / total_value * 100, 2) if total_value > 0 else 0,
+            portfolio_after=round(total_value + total_loss, 2),
+            position_impacts=sorted(position_impacts, key=lambda x: x["loss"]),
+        ))
+
+    return results
+
+
+def get_portfolio_risk_summary() -> PortfolioRiskAnalysis:
+    """
+    综合风险摘要：VaR / CVaR / 最大回撤 / 波动率 / 集中度 / 压力测试。
+    """
+    positions = get_positions()
+
+    if not positions:
+        return PortfolioRiskAnalysis(
+            has_data=False,
+            message="暂无持仓，无法进行风险分析",
+        )
+
+    total_value = sum(p.market_value for p in positions)
+
+    # 获取组合历史收益率用于波动率和最大回撤
+    all_returns = []
+    weights = []
+    min_len = float("inf")
+
+    for p in positions:
+        rets = _get_historical_returns(p.code, p.market, 250)
+        if len(rets) >= 20:
+            all_returns.append(rets)
+            weights.append(p.market_value / total_value)
+            min_len = min(min_len, len(rets))
+
+    # 默认值
+    volatility_annual = 0.0
+    max_drawdown = 0.0
+    sharpe_ratio = 0.0
+    data_days = 0
+
+    if all_returns and min_len >= 20:
+        all_returns = [r[-int(min_len):] for r in all_returns]
+        portfolio_returns = []
+        for i in range(int(min_len)):
+            weighted = sum(w * r[i] for w, r in zip(weights, all_returns))
+            portfolio_returns.append(weighted)
+
+        arr = np.array(portfolio_returns)
+        volatility_daily = float(np.std(arr))
+        volatility_annual = volatility_daily * math.sqrt(252) * 100  # 年化波动率(%)
+
+        # 最大回撤
+        cumulative = np.cumprod(1 + arr)
+        running_max = np.maximum.accumulate(cumulative)
+        drawdowns = (cumulative - running_max) / running_max
+        max_drawdown = float(np.min(drawdowns)) * 100
+
+        # Sharpe (假设无风险利率2%)
+        annual_return = float(np.mean(arr)) * 252
+        if volatility_annual > 0:
+            sharpe_ratio = (annual_return - 0.02) / (volatility_annual / 100)
+
+        data_days = int(min_len)
+
+    # VaR / CVaR
+    var_95 = calculate_portfolio_var(positions, 0.95)
+    var_99 = calculate_portfolio_var(positions, 0.99)
+    cvar_95 = calculate_portfolio_cvar(positions, 0.95)
+
+    # 集中度
+    hhi = sum((p.market_value / total_value) ** 2 for p in positions) if total_value > 0 else 0
+    top3_pct = sum(
+        p.market_value / total_value * 100
+        for p in sorted(positions, key=lambda x: x.market_value, reverse=True)[:3]
+    ) if total_value > 0 else 0
+
+    # 压力测试
+    stress_results = calculate_portfolio_stress_test(positions)
+
+    return PortfolioRiskAnalysis(
+        has_data=True,
+        total_value=round(total_value, 2),
+        position_count=len(positions),
+        var_95=var_95,
+        var_99=var_99,
+        cvar_95=cvar_95,
+        volatility_annual=round(volatility_annual, 2),
+        max_drawdown=round(max_drawdown, 2),
+        sharpe_ratio=round(sharpe_ratio, 3),
+        concentration_hhi=round(hhi, 4),
+        top3_pct=round(top3_pct, 2),
+        stress_test=stress_results,
+        data_days=data_days,
     )

@@ -59,7 +59,7 @@ export default function StrategyValidation() {
     try {
       const res = await fetch(`${API_BASE}/backtest?strategy=${strategyKey}&start_date=2020-01-01&end_date=2024-12-31&top_n=10&rebalance_frequency=quarterly`)
       const data = await res.json()
-      setResult(data)
+      setResult(data.backtest_result || data)
     } catch (e) {
       console.error('Backtest failed:', e)
     } finally {
@@ -76,7 +76,7 @@ export default function StrategyValidation() {
       for (const key of keys) {
         const res = await fetch(`${API_BASE}/backtest?strategy=${key}&start_date=2020-01-01&end_date=2024-12-31&top_n=10&rebalance_frequency=quarterly`)
         const data = await res.json()
-        results.push(data)
+        results.push(data.backtest_result || data)
       }
       setAllResults(results)
       setCompareMode(true)

@@ -4,6 +4,7 @@ import type {
   PortfolioSummary,
   PerformancePoint,
   RiskExposure,
+  PortfolioRiskAnalysis,
 } from './types'
 
 // ============ 组合管理API ============
@@ -41,6 +42,9 @@ export const portfolioApi = {
 
   /** 风险暴露 */
   getRisk: () => api.get<RiskExposure>('/portfolio/risk'),
+
+  /** 组合风险分析（VaR/CVaR/压力测试） */
+  getRiskAnalysis: () => api.get<PortfolioRiskAnalysis>('/portfolio/risk-analysis'),
 
   /** 删除交易记录 */
   deleteTransaction: (txnId: string) =>

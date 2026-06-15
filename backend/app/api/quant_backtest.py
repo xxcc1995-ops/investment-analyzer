@@ -185,6 +185,118 @@ async def run_ensemble_api(request: Dict[str, Any]):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.post("/optimize")
+async def optimize_quant_strategy(request: Dict[str, Any]):
+    """
+    策略参数网格优化
+
+    请求体：
+    {
+        "strategy": "multi_factor",
+        "param_space": {
+            "top_n": [10, 20, 30],
+            "weight_value": [0.15, 0.25, 0.35]
+        },
+        "metric": "sharpe",
+        "train_start": "2020-01-01",
+        "train_end": "2023-12-31",
+        "test_start": "2024-01-01",
+        "test_end": "2025-12-31",
+        "initial_capital": 1000000,
+        "benchmark": "000300",
+        "rebalance_freq": "monthly",
+        "top_n": 20,
+        "max_workers": 4
+    }
+
+    返回：
+    {
+        "best_params": {...},
+        "best_test_metric": 1.23,
+        "best_train_metric": 1.45,
+        "all_results": [...],
+        "overfit_warning": false,
+        "overfit_details": "No overfitting detected",
+        "total_combinations": 9,
+        "elapsed_seconds": 42.5,
+        "metric_name": "sharpe",
+        "strategy_name": "multi_factor"
+    }
+    """
+    try:
+        from ..services.quant.optimizer import GridSearchOptimizer
+
+        strategy = request.get('strategy', 'multi_factor')
+        param_space = request.get('param_space')
+        if not param_space or not isinstance(param_space, dict):
+            raise HTTPException(status_code=400, detail="param_space is required and must be a dict of lists")
+
+        # 验证 param_space 格式
+        for k, v in param_space.items():
+            if not isinstance(v, list) or len(v) == 0:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"param_space['{k}'] must be a non-empty list"
+                )
+
+        metric = request.get('metric', 'sharpe')
+        valid_metrics = {'sharpe', 'sharpe_ratio', 'calmar', 'calmar_ratio', 'return', 'annual_return', 'total_return'}
+        if metric not in valid_metrics:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid metric '{metric}'. Valid: {sorted(valid_metrics)}"
+            )
+
+        train_start = request.get('train_start')
+        train_end = request.get('train_end')
+        test_start = request.get('test_start')
+        test_end = request.get('test_end')
+        if not all([train_start, train_end, test_start, test_end]):
+            raise HTTPException(
+                status_code=400,
+                detail="train_start, train_end, test_start, test_end are all required"
+            )
+
+        optimizer = GridSearchOptimizer(
+            strategy_name=strategy,
+            param_space=param_space,
+            metric=metric,
+            max_workers=request.get('max_workers', 4),
+            initial_capital=request.get('initial_capital', 1_000_000),
+            benchmark=request.get('benchmark', '000300'),
+            rebalance_freq=request.get('rebalance_freq', 'monthly'),
+            top_n=request.get('top_n', 20),
+        )
+
+        output = optimizer.optimize(
+            train_start=train_start,
+            train_end=train_end,
+            test_start=test_start,
+            test_end=test_end,
+        )
+
+        return {
+            'best_params': output.best_params,
+            'best_test_metric': output.best_test_metric,
+            'best_train_metric': output.best_train_metric,
+            'all_results': output.all_results,
+            'overfit_warning': output.overfit_warning,
+            'overfit_details': output.overfit_details,
+            'total_combinations': output.total_combinations,
+            'elapsed_seconds': output.elapsed_seconds,
+            'metric_name': output.metric_name,
+            'strategy_name': output.strategy_name,
+        }
+
+    except HTTPException:
+        raise
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"Quant optimize error: {e}\n{traceback.format_exc()}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.get("/factor-analysis")
 async def factor_analysis(
     factor: str = Query('momentum', description="因子名称"),
