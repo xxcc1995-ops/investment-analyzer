@@ -88,7 +88,7 @@ function App() {
   const navigate = useNavigate()
 
   // 理性门卫
-  const [showGate, setShowGate] = useState(() => !sessionStorage.getItem('rationality_gate_passed'))
+  const [showGate, setShowGate] = useState(false) // disabled for debugging
   const [gateDismissed, setGateDismissed] = useState(false)
 
   // 加载国债收益率

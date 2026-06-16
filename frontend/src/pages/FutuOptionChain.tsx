@@ -166,6 +166,7 @@ export default function FutuOptionChain() {
   const [screenExerciseFee, setScreenExerciseFee] = useState('100')
   const [screenMinYield, setScreenMinYield] = useState('15')
   const [screenMinOtm, setScreenMinOtm] = useState('3')
+  const [chainMinYield, setChainMinYield] = useState(10)
   const [screenResult, setScreenResult] = useState<any>(null)
   const [screenLoading, setScreenLoading] = useState(false)
 
@@ -380,9 +381,10 @@ export default function FutuOptionChain() {
     setScreenLoading(false)
   }, [stockCode, screenTradeFee, screenExerciseFee, screenMinYield, screenMinOtm])
 
-  // Filter chain by expiry
+  // Filter chain by expiry + min annual yield
   const filteredChain = chain?.chain?.filter(c => {
     if (selectedExpiry !== 'all' && c.expiry !== selectedExpiry) return false
+    if (chainMinYield > 0 && (c.annual_yield || 0) < chainMinYield) return false
     return true
   }) || []
 
@@ -564,6 +566,17 @@ export default function FutuOptionChain() {
                 <option value="call">Call</option>
               </select>
             </label>
+            <label style={{ color: '#ccc' }}>最低年化:
+              <select value={chainMinYield} onChange={e => setChainMinYield(Number(e.target.value))}
+                style={{ marginLeft: 6, padding: '4px 8px', background: '#1a1a2e', color: '#fff', border: '1px solid #444', borderRadius: 4 }}>
+                <option value={0}>全部</option>
+                <option value={5}>≥5%</option>
+                <option value={10}>≥10%</option>
+                <option value={15}>≥15%</option>
+                <option value={20}>≥20%</option>
+                <option value={30}>≥30%</option>
+              </select>
+            </label>
             <div style={{ display: 'flex', gap: 4 }}>
               <button onClick={() => setViewMode('table')} disabled={viewMode === 'table'}
                 style={{ padding: '4px 12px', background: viewMode === 'table' ? '#d4a76a' : '#333', color: viewMode === 'table' ? '#000' : '#fff', border: 'none', borderRadius: 4, cursor: 'pointer' }}>
@@ -607,7 +620,8 @@ export default function FutuOptionChain() {
                 )}
                 <div style={{ background: '#1a1a2e', padding: 14, borderRadius: 8, border: '1px solid #333' }}>
                   <div style={{ color: '#999', fontSize: 12 }}>合约数量</div>
-                  <div style={{ color: '#722ed1', fontSize: 22, fontWeight: 700 }}>{chain.total}份</div>
+                  <div style={{ color: '#722ed1', fontSize: 22, fontWeight: 700 }}>{filteredChain.length}<span style={{ fontSize: 13, color: '#999' }}>/{chain.total}</span></div>
+                  {chainMinYield > 0 && <div style={{ color: '#999', fontSize: 11 }}>年化≥{chainMinYield}%</div>}
                 </div>
                 {maxPain && !maxPain.error && (
                   <div style={{ background: '#2e2e1a', padding: 14, borderRadius: 8, border: '1px solid #faad14' }}>

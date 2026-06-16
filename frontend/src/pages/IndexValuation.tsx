@@ -12,6 +12,8 @@ interface IndexData {
   name_en: string
   category: string
   country: string
+  description?: string
+  highlights?: string[]
   pe: number | null
   pe_percentile: number | null
   pb: number | null
@@ -93,6 +95,8 @@ export default function IndexValuation() {
   const [selectedCode, setSelectedCode] = useState<string>('')
   const [historyData, setHistoryData] = useState<any>(null)
   const [historyLoading, setHistoryLoading] = useState(false)
+  const [hoveredIndex, setHoveredIndex] = useState<IndexData | null>(null)
+  const [tooltipPos, setTooltipPos] = useState<{ x: number; y: number }>({ x: 0, y: 0 })
 
   const loadData = useCallback(async () => {
     setLoading(true)
@@ -210,9 +214,9 @@ export default function IndexValuation() {
 
       {/* ==================== Tab 1: 估值总览 ==================== */}
       {activeTab === 'overview' && (
-        <div style={{ padding: '16px 20px', overflowX: 'auto' }}>
-          <table>
-            <thead>
+        <div style={{ padding: '16px 20px', overflowX: 'auto', maxHeight: 'calc(100vh - 200px)', overflowY: 'auto' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+            <thead style={{ position: 'sticky', top: 0, zIndex: 10, background: 'var(--bg-primary)' }}>
               <tr>
                 <th style={{ textAlign: 'left' }}>指数</th>
                 <th>国家</th>
@@ -235,7 +239,18 @@ export default function IndexValuation() {
                 const sig = idx.investment_signal
                 return (
                   <tr key={idx.code}>
-                    <td style={{ fontWeight: 600, textAlign: 'left' }}>
+                    <td
+                      style={{ fontWeight: 600, textAlign: 'left', cursor: 'pointer', position: 'relative' }}
+                      onMouseEnter={(e) => {
+                        console.log('Mouse entered:', idx.name, idx.description ? 'has description' : 'no description')
+                        setHoveredIndex(idx)
+                        setTooltipPos({ x: e.clientX, y: e.clientY })
+                      }}
+                      onMouseLeave={() => {
+                        console.log('Mouse left')
+                        setHoveredIndex(null)
+                      }}
+                    >
                       <div>{idx.name}</div>
                       <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>{idx.name_en}</div>
                     </td>
@@ -546,6 +561,64 @@ export default function IndexValuation() {
               </div>
             </div>
           </div>
+        </div>
+      )}
+
+      {/* 浮动介绍框 */}
+      {hoveredIndex && (
+        <div
+          style={{
+            position: 'fixed',
+            left: '50%',
+            top: '50%',
+            transform: 'translate(-50%, -50%)',
+            width: 340,
+            padding: '16px',
+            background: '#1f2937',
+            border: '2px solid #58a6ff',
+            borderRadius: 10,
+            boxShadow: '0 8px 24px rgba(0,0,0,0.6)',
+            zIndex: 10000,
+            pointerEvents: 'none',
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
+            <span style={{ fontSize: 20 }}>{getCountryFlag(hoveredIndex.country)}</span>
+            <div>
+              <div style={{ fontWeight: 700, fontSize: 15 }}>{hoveredIndex.name}</div>
+              <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>{hoveredIndex.name_en}</div>
+            </div>
+            <span style={{
+              marginLeft: 'auto',
+              padding: '2px 8px', borderRadius: 6, fontSize: 11,
+              background: hoveredIndex.category === '宽基' ? 'rgba(88,166,255,0.15)' : 'rgba(63,185,80,0.15)',
+              color: hoveredIndex.category === '宽基' ? '#58a6ff' : '#3fb950',
+            }}>
+              {hoveredIndex.category}
+            </span>
+          </div>
+
+          <div style={{ fontSize: 13, lineHeight: 1.6, color: 'var(--text-secondary)', marginBottom: 12 }}>
+            {hoveredIndex.description || '暂无详细介绍'}
+          </div>
+
+          {hoveredIndex.highlights && hoveredIndex.highlights.length > 0 ? (
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+              {hoveredIndex.highlights.map((h, i) => (
+                <span key={i} style={{
+                  padding: '3px 8px', borderRadius: 6, fontSize: 11,
+                  background: 'rgba(88,166,255,0.1)', color: '#58a6ff',
+                  border: '1px solid rgba(88,166,255,0.2)',
+                }}>
+                  {h}
+                </span>
+              ))}
+            </div>
+          ) : (
+            <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+              请刷新页面加载最新数据
+            </div>
+          )}
         </div>
       )}
     </div>

@@ -42,24 +42,32 @@ INDEX_CONFIG = {
         "csindex": "000510", "lg_name": None, "lg_pe_name": "中证A500",
         "fund_code": "159338", "fund_name": "中证A500ETF",
         "fund_type": "场内ETF", "fund_channel": "券商APP",
+        "description": "从A股中选取500只各行业龙头股，覆盖约50%市值。行业分布均衡，兼顾成长与价值，是A股最具代表性的宽基指数之一。",
+        "highlights": ["行业均衡配置", "覆盖A股核心资产", "适合长期定投"],
     },
     "000300": {
         "name": "沪深300", "name_en": "CSI 300", "category": "宽基", "country": "中国",
         "csindex": "000300", "lg_name": "沪深300", "lg_pe_name": "沪深300",
         "fund_code": "510300", "fund_name": "沪深300ETF",
         "fund_type": "场内ETF", "fund_channel": "券商APP",
+        "description": "沪深两市市值最大、流动性最好的300只股票，占A股总市值约60%。是中国股市的'晴雨表'，机构投资者的核心配置。",
+        "highlights": ["A股旗舰指数", "流动性最佳", "机构标配"],
     },
     "000905": {
         "name": "中证500", "name_en": "CSI 500", "category": "宽基", "country": "中国",
         "csindex": "000905", "lg_name": "中证500", "lg_pe_name": "中证500",
         "fund_code": "510500", "fund_name": "中证500ETF",
         "fund_type": "场内ETF", "fund_channel": "券商APP",
+        "description": "排除沪深300后，市值排名前500的中盘股。代表中国经济中坚力量，成长性优于大盘股，波动也更大。",
+        "highlights": ["中盘股代表", "成长性较强", "弹性较大"],
     },
     "399006": {
         "name": "创业板指", "name_en": "ChiNext", "category": "宽基", "country": "中国",
         "csindex": "399006", "lg_name": None, "lg_pe_name": "创业板指",
         "fund_code": "159915", "fund_name": "创业板ETF",
         "fund_type": "场内ETF", "fund_channel": "券商APP",
+        "description": "创业板市值最大、流动性最好的100只股票。以新能源、医药、科技等新兴产业为主，高成长高波动。",
+        "highlights": ["新兴产业集中", "高成长高波动", "适合风险偏好者"],
     },
     # 港股
     "HSI": {
@@ -67,12 +75,16 @@ INDEX_CONFIG = {
         "csindex": None, "lg_name": None, "etf_ticker": "EWH",
         "fund_code": "159920", "fund_name": "恒生ETF",
         "fund_type": "场内ETF", "fund_channel": "券商APP",
+        "description": "香港股市旗舰指数，包含港股市值最大、流动性最好的50只股票。金融、地产、科技巨头云集，股息率较高。",
+        "highlights": ["港股旗舰", "高股息", "金融地产权重高"],
     },
     "HSTECH": {
         "name": "恒生科技", "name_en": "Hang Seng Tech", "category": "宽基", "country": "中国香港",
         "csindex": None, "lg_name": None, "etf_ticker": "KWEB",
         "fund_code": "513180", "fund_name": "恒生科技ETF",
         "fund_type": "场内ETF", "fund_channel": "券商APP",
+        "description": "港股上市的30家最大科技企业，包括腾讯、阿里、美团等。是中国科技行业的风向标，波动较大但成长性强。",
+        "highlights": ["中国科技龙头", "腾讯阿里权重高", "高波动高成长"],
     },
     # 美国
     "SPX": {
@@ -80,12 +92,16 @@ INDEX_CONFIG = {
         "csindex": None, "lg_name": None, "multpl": "s-p-500-pe-ratio", "etf_ticker": "SPY",
         "fund_code": "513500", "fund_name": "标普500ETF",
         "fund_type": "场内ETF", "fund_channel": "券商APP",
+        "description": "美国500家最大上市公司，占美股总市值约80%。全球最重要的股票指数，长期年化约10%，是全球资产配置的核心。",
+        "highlights": ["全球第一指数", "长期年化10%", "全球配置核心"],
     },
     "NDX": {
         "name": "纳斯达克100", "name_en": "NASDAQ 100", "category": "宽基", "country": "美国",
         "csindex": None, "lg_name": None, "multpl": None, "etf_ticker": "QQQ",
         "fund_code": "513100", "fund_name": "纳斯达克100ETF",
         "fund_type": "场内ETF", "fund_channel": "券商APP",
+        "description": "纳斯达克市值最大的100家非金融公司，苹果、微软、英伟达等科技巨头权重高。代表全球科技创新方向，高成长高波动。",
+        "highlights": ["科技股集中", "AI/半导体龙头", "高成长高波动"],
     },
     # 日本
     "N225": {
@@ -93,6 +109,8 @@ INDEX_CONFIG = {
         "csindex": None, "lg_name": None, "etf_ticker": "EWJ",
         "fund_code": "513880", "fund_name": "日经225ETF",
         "fund_type": "场内ETF", "fund_channel": "券商APP",
+        "description": "日本225家蓝筹股，丰田、索尼、软银等。日元贬值+日本央行宽松政策推动近年表现，是分散亚洲风险的选择。",
+        "highlights": ["日本经济代表", "日元资产配置", "近年表现亮眼"],
     },
     # 德国
     "DAX": {
@@ -100,6 +118,8 @@ INDEX_CONFIG = {
         "csindex": None, "lg_name": None, "etf_ticker": "EWG",
         "fund_code": "513030", "fund_name": "德国DAX ETF",
         "fund_type": "场内ETF", "fund_channel": "券商APP",
+        "description": "德国40家最大上市公司，西门子、SAP、奔驰等。欧洲最大经济体的代表，工业和制造业权重高。",
+        "highlights": ["欧洲经济龙头", "工业制造业强", "欧元资产配置"],
     },
     # 印度
     "SENSEX": {
@@ -107,6 +127,8 @@ INDEX_CONFIG = {
         "csindex": None, "lg_name": None, "etf_ticker": "INDA",
         "fund_code": "164824", "fund_name": "印度基金LOF",
         "fund_type": "场外LOF", "fund_channel": "券商APP/天天基金",
+        "description": "印度30家最大上市公司，代表全球增长最快的主要经济体。人口红利+数字化转型驱动，长期增长潜力大。",
+        "highlights": ["人口红利", "高增长经济体", "长期潜力大"],
     },
     # 越南
     "VN30": {
@@ -114,6 +136,8 @@ INDEX_CONFIG = {
         "csindex": None, "lg_name": None, "etf_ticker": "VNM",
         "fund_code": "", "fund_name": "无直接ETF",
         "fund_type": "无", "fund_channel": "需通过QDII或港股通",
+        "description": "越南30家最大上市公司。东南亚新兴制造业中心，类似20年前的中国，高增长但市场不成熟，波动极大。",
+        "highlights": ["新兴制造业中心", "高增长高风险", "市场不成熟"],
     },
     # 澳洲
     "ASX200": {
@@ -121,6 +145,8 @@ INDEX_CONFIG = {
         "csindex": None, "lg_name": None, "etf_ticker": "EWA",
         "fund_code": "", "fund_name": "无直接ETF",
         "fund_type": "无", "fund_channel": "需通过QDII",
+        "description": "澳大利亚200家最大上市公司，矿业（必和必拓）和金融（联邦银行）权重高。资源型经济体，高股息特征。",
+        "highlights": ["资源型经济", "高股息", "矿业金融为主"],
     },
     # 全球
     "MSCI_EM": {
@@ -128,6 +154,8 @@ INDEX_CONFIG = {
         "csindex": None, "lg_name": None, "etf_ticker": "EEM",
         "fund_code": "513050", "fund_name": "中概互联ETF",
         "fund_type": "场内ETF", "fund_channel": "券商APP",
+        "description": "覆盖24个新兴市场国家，中国、印度、巴西、台湾等权重高。分散单一国家风险，分享新兴市场增长红利。",
+        "highlights": ["全球分散配置", "新兴市场增长", "分散国家风险"],
     },
 
     # === 红利指数 ===
@@ -136,18 +164,24 @@ INDEX_CONFIG = {
         "csindex": "000922", "lg_name": None,
         "fund_code": "515080", "fund_name": "中证红利ETF",
         "fund_type": "场内ETF", "fund_channel": "券商APP",
+        "description": "选取100只现金股息率高、分红稳定的股票。银行、煤炭、钢铁等传统行业为主，股息率通常4-6%，适合追求稳定现金流的投资者。",
+        "highlights": ["高股息4-6%", "分红稳定", "防御性强"],
     },
     "SPXDIV": {
         "name": "标普高红利", "name_en": "S&P High Dividend", "category": "红利", "country": "美国",
         "csindex": None, "lg_name": None, "yahoo": "SPYD",
         "fund_code": "515180", "fund_name": "标普红利ETF",
         "fund_type": "场内ETF", "fund_channel": "券商APP",
+        "description": "标普500中股息率最高的80只股票。公用事业、消费必需品等防御性行业为主，股息率通常3-5%，适合美股收息。",
+        "highlights": ["美股高股息", "防御性行业", "美元收息"],
     },
     "000932": {
         "name": "消费红利", "name_en": "Consumer Dividend", "category": "红利", "country": "中国",
         "csindex": "000932", "lg_name": None,
         "fund_code": "501008", "fund_name": "消费红利基金",
         "fund_type": "场外基金", "fund_channel": "天天基金/蚂蚁财富",
+        "description": "消费行业（白酒、食品、家电）中股息率最高的30只股票。兼具消费股成长性和高股息防御性，是红利策略的升级版。",
+        "highlights": ["消费+红利", "成长与防御兼顾", "白酒家电权重高"],
     },
 
     # === 补充宽基指数 ===
@@ -156,18 +190,24 @@ INDEX_CONFIG = {
         "csindex": "000016", "lg_name": "上证50", "lg_pe_name": "上证50",
         "fund_code": "510050", "fund_name": "上证50ETF",
         "fund_type": "场内ETF", "fund_channel": "券商APP",
+        "description": "上海证券交易所市值最大、流动性最好的50只股票。金融（银行、保险）权重超50%，是大盘蓝筹的代表。",
+        "highlights": ["大盘蓝筹代表", "金融权重高", "估值通常较低"],
     },
     "000852": {
         "name": "中证1000", "name_en": "CSI 1000", "category": "宽基", "country": "中国",
         "csindex": "000852", "lg_name": None, "lg_pe_name": "中证1000",
         "fund_code": "512100", "fund_name": "中证1000ETF",
         "fund_type": "场内ETF", "fund_channel": "券商APP",
+        "description": "排除沪深300和中证500后，市值排名前1000的小盘股。弹性最大，适合捕捉小盘股行情，但风险也最高。",
+        "highlights": ["小盘股代表", "弹性最大", "风险最高"],
     },
     "000688": {
         "name": "科创50", "name_en": "STAR 50", "category": "宽基", "country": "中国",
         "csindex": "000688", "lg_name": None, "lg_pe_name": "科创50",
         "fund_code": "588000", "fund_name": "科创50ETF",
         "fund_type": "场内ETF", "fund_channel": "券商APP",
+        "description": "科创板市值最大的50只股票，半导体、生物医药、新能源为主。是中国硬科技的代表，估值波动大，适合长期看好科技的投资者。",
+        "highlights": ["硬科技代表", "半导体权重高", "高估值高波动"],
     },
 }
 
@@ -730,6 +770,8 @@ def get_all_indices_data() -> Dict:
             "name_en": config.get("name_en", ""),
             "category": config["category"],
             "country": config.get("country", ""),
+            "description": config.get("description", ""),
+            "highlights": config.get("highlights", []),
             "pe": None, "pe_percentile": None,
             "pb": None, "pb_percentile": None,
             "roe": None,
