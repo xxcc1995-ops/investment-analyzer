@@ -14,6 +14,20 @@ if (isNativePlatform()) {
   })
 }
 
+// ========== 请求拦截器：敏感端点自动携带 API Key ==========
+const API_KEY = import.meta.env.VITE_API_KEY || ''
+const SENSITIVE_PREFIXES = ['/tractor', '/portfolio', '/futu-options', '/grid', '/cb', '/fund-arb']
+
+api.interceptors.request.use(config => {
+  if (API_KEY) {
+    const url = config.url || ''
+    if (SENSITIVE_PREFIXES.some(p => url.startsWith(p))) {
+      config.headers['X-API-Key'] = API_KEY
+    }
+  }
+  return config
+})
+
 // ========== 响应拦截器：统一错误处理 ==========
 api.interceptors.response.use(
   response => response,

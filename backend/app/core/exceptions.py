@@ -1,11 +1,25 @@
 """Custom exceptions and global exception handler for the API."""
 
 import logging
+import re
 import traceback
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
 logger = logging.getLogger(__name__)
+
+# 敏感信息过滤正则
+_SENSITIVE_PATTERNS = [
+    (re.compile(r'(password|passwd|secret|token|api_key|apikey)["\s]*[:=]\s*[^\s,}]+', re.IGNORECASE), r'\1=***'),
+    (re.compile(r'(Bearer)\s+[A-Za-z0-9\-._~+/]+=*', re.IGNORECASE), r'\1 ***'),
+]
+
+
+def _sanitize_text(text: str) -> str:
+    """过滤日志中的敏感信息。"""
+    for pattern, replacement in _SENSITIVE_PATTERNS:
+        text = pattern.sub(replacement, text)
+    return text
 
 
 class AppError(Exception):
@@ -69,7 +83,8 @@ def register_exception_handlers(app: FastAPI):
     @app.exception_handler(Exception)
     async def global_exception_handler(request: Request, exc: Exception):
         """Handle all unhandled exceptions."""
-        logger.error(f"Unhandled error: {exc} path={request.url.path}\n{traceback.format_exc()}")
+        safe_traceback = _sanitize_text(traceback.format_exc())
+        logger.error(f"Unhandled error: {exc} path={request.url.path}\n{safe_traceback}")
         return JSONResponse(
             status_code=500,
             content={"error": "服务器内部错误，请稍后重试", "type": "InternalServerError"},

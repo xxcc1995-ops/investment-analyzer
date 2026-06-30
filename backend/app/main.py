@@ -3,13 +3,15 @@ load_dotenv()
 
 import asyncio
 import logging
+import os
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import JSONResponse
-from app.api import stocks, cb, scraper, bonds, index_valuation, dividend, cigar_butt, cross_analysis, value_investing, reit, macro, futures, jc_screener, polymarket, export_champions, grid, national_team, right_side, fund_holdings, decision, t_trading, backtest, fund_arb, futu_options, drawdown_control, daily_info, tractor, cb_backtest, valuation, quantdinger, portfolio, sector_valuation, crypto_master, quant_backtest, airdrop_scanner, crypto_crawler, wechat_digest
+from app.api import stocks, cb, scraper, bonds, index_valuation, dividend, cigar_butt, cross_analysis, value_investing, reit, macro, futures, jc_screener, polymarket, export_champions, grid, national_team, right_side, fund_holdings, decision, t_trading, backtest, fund_arb, futu_options, drawdown_control, daily_info, tractor, cb_backtest, valuation, quantdinger, portfolio, sector_valuation, crypto_master, quant_backtest, airdrop_scanner, crypto_crawler
 from app.core.exceptions import register_exception_handlers
+from app.core.security_middleware import ApiKeyMiddleware, SENSITIVE_PREFIXES
 
 logger = logging.getLogger(__name__)
 
@@ -100,13 +102,28 @@ register_exception_handlers(app)
 # 请求超时中间件（60秒）
 app.add_middleware(RequestTimeoutMiddleware)
 
+# CORS 配置 - 白名单模式，支持环境变量覆盖
+_default_origins = [
+    "http://localhost:5173",
+    "http://localhost:3000",
+    "http://127.0.0.1:5173",
+    "http://127.0.0.1:3000",
+]
+_allowed_origins = [
+    o.strip() for o in os.getenv("ALLOWED_ORIGINS", "").split(",") if o.strip()
+] or _default_origins
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=False,  # allow_origins=["*"] 时不能设为 True（违反CORS规范）
-    allow_methods=["*"],
+    allow_origins=_allowed_origins,
+    allow_credentials=True,
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allow_headers=["*"],
 )
+
+# API Key 认证中间件 - 保护敏感端点（tractor交易、portfolio组合等）
+# 未设置 API_KEY 环境变量时不启用认证（本地开发零配置）
+app.add_middleware(ApiKeyMiddleware, api_key=os.getenv("API_KEY", ""))
 
 app.include_router(stocks.router, prefix="/api/stocks", tags=["stocks"])
 app.include_router(cb.router, prefix="/api/cb", tags=["cb"])
@@ -147,7 +164,6 @@ app.include_router(crypto_master.router, prefix="/api/crypto-master", tags=["币
 app.include_router(quant_backtest.router, prefix="/api/quant", tags=["量化回测"])
 app.include_router(airdrop_scanner.router, prefix="/api/airdrop-scanner", tags=["空投扫描器"])
 app.include_router(crypto_crawler.router, prefix="/api/crypto-crawler", tags=["币圈情报搜集"])
-app.include_router(wechat_digest.router, prefix="/api/wechat-digest", tags=["微信公众号日报"])
 
 
 @app.get("/")

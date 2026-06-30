@@ -34,56 +34,11 @@
 """
 
 from fastapi import APIRouter, Query
-import subprocess
-import json
-import sys
 import os
 
 router = APIRouter()
 
 BACKEND_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
-
-def _run_futu_script(script_content: str, timeout: int = 120) -> dict:
-    """Execute a Futu script via subprocess and return result."""
-    script_path = os.path.join(BACKEND_DIR, '_futu_temp.py')
-    result_path = os.path.join(BACKEND_DIR, '_futu_result.json')
-
-    try:
-        with open(script_path, 'w', encoding='utf-8') as f:
-            f.write(script_content)
-
-        venv_python = os.path.join(BACKEND_DIR, 'venv', 'Scripts', 'python.exe')
-        if not os.path.exists(venv_python):
-            venv_python = sys.executable
-
-        proc = subprocess.run(
-            [venv_python, script_path],
-            capture_output=True, text=True, timeout=timeout, cwd=BACKEND_DIR
-        )
-
-        try:
-            os.remove(script_path)
-        except:
-            pass
-
-        if proc.returncode == 0 and os.path.exists(result_path):
-            with open(result_path, 'r', encoding='utf-8') as f:
-                data = json.load(f)
-            try:
-                os.remove(result_path)
-            except:
-                pass
-            return data
-        else:
-            error = proc.stderr[:300] if proc.stderr else 'unknown error'
-            try:
-                os.remove(result_path)
-            except:
-                pass
-            return {'error': f'Failed: {error}', 'chain': [], 'update_time': ''}
-    except Exception as e:
-        return {'error': f'API error: {str(e)}', 'chain': [], 'update_time': ''}
 
 
 @router.get("/chain")

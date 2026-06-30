@@ -169,7 +169,7 @@ INDEX_CONFIG = {
     },
     "SPXDIV": {
         "name": "标普高红利", "name_en": "S&P High Dividend", "category": "红利", "country": "美国",
-        "csindex": None, "lg_name": None, "yahoo": "SPYD",
+        "csindex": None, "lg_name": None, "yahoo": None, "etf_ticker": None,
         "fund_code": "515180", "fund_name": "标普红利ETF",
         "fund_type": "场内ETF", "fund_channel": "券商APP",
         "description": "标普500中股息率最高的80只股票。公用事业、消费必需品等防御性行业为主，股息率通常3-5%，适合美股收息。",
@@ -393,6 +393,55 @@ def _get_sp500_dividend_with_percentile() -> Dict:
     except Exception as e:
         logger.warning(f"获取标普500 股息率失败: {e}")
     return {"dividend_yield": None, "percentile": None}
+
+
+# ============================================================
+# 数据获取：stockanalysis.com（纳斯达克100）
+# ============================================================
+
+# NDX 只保留 PE（stockanalysis.com 实时数据，可靠）
+# PB、百分位、股息率等数据源不可靠，不提供：
+#   - PB: 无权威自动数据源（yfinance ETF PB≈2.0 不准确，gurufocus 403 禁止抓取）
+#   - 百分位: 无真实月度历史数据，估算参考值不可靠
+#   - 股息率: ETF级数据，非指数级
+
+
+def _get_ndx_pe() -> Optional[float]:
+    """获取纳斯达克100 PE（仅PE，其他指标不可靠不提供）
+
+    数据源：stockanalysis.com 爬取（实时数据）
+    PB/百分位/股息率等因数据源不可靠，已移除：
+      - PB: 无权威自动数据源（yfinance ETF priceToBook≈2.0 不准确）
+      - 百分位: 无真实月度历史数据，估算参考值不可靠
+      - 股息率: ETF级数据，非指数级
+    """
+    pe = None
+
+    # 优先从 stockanalysis.com 获取
+    try:
+        url = "https://stockanalysis.com/etf/qqq/"
+        resp = requests.get(url, headers=HEADERS, timeout=15)
+        resp.raise_for_status()
+        text = resp.text
+
+        # 从页面提取 PE Ratio
+        pe_match = re.search(r'PE Ratio\s*([\d.]+)', text)
+        if pe_match:
+            pe_val = float(pe_match.group(1))
+            if 1 < pe_val < 1000:
+                pe = round(pe_val, 2)
+                logger.info(f"从stockanalysis获取QQQ PE: {pe}")
+    except Exception as e:
+        logger.warning(f"从stockanalysis获取QQQ PE失败: {e}")
+
+    # 备用：yfinance（仅取PE，PB不准确故不取）
+    if pe is None:
+        etf_data = _get_etf_pe_pb("QQQ")
+        if etf_data["pe"]:
+            pe = etf_data["pe"]
+            logger.info(f"从yfinance获取QQQ PE(备用): {pe}")
+
+    return pe
 
 
 # ============================================================
@@ -828,6 +877,11 @@ def get_all_indices_data() -> Dict:
             if item["pb"] and item["pe"] and item["pe"] > 0:
                 item["roe"] = round(item["pb"] / item["pe"] * 100, 2)
 
+        # 纳斯达克100：仅保留PE（PB/百分位/股息率数据源不可靠）
+        elif code == "NDX":
+            item["pe"] = _get_ndx_pe()
+            # PB、百分位、股息率、ROE 均不设置（保持 None）
+
         # 恒生指数/恒生科技：富途API优先
         elif code in ("HSI", "HSTECH"):
             futu_code = FUTU_CODES.get(code, {}).get("snapshot")
@@ -863,8 +917,9 @@ def get_all_indices_data() -> Dict:
                 item["pb"] = futu_data["pb"]
                 item["dividend_yield"] = futu_data.get("dividend_yield")
             # 备用yfinance
-            if item["pe"] is None and config.get("etf_ticker"):
-                etf_data = _get_etf_pe_pb(config["etf_ticker"])
+            yf_ticker = config.get("etf_ticker") or config.get("yahoo")
+            if item["pe"] is None and yf_ticker:
+                etf_data = _get_etf_pe_pb(yf_ticker)
                 item["pe"] = etf_data["pe"]
                 item["pb"] = etf_data["pb"]
                 if not item["dividend_yield"]:
@@ -975,6 +1030,10 @@ def get_index_history(code: str) -> Dict:
             pb_series.sort(key=lambda x: x["date"])
         except Exception as e:
             logger.warning(f"获取标普500历史PE/PB失败: {e}")
+
+    # 纳斯达克100：无可靠历史数据源，不提供历史序列
+    elif code == "NDX":
+        pass  # PE/PB历史数据不可靠，返回空序列
 
     result = {
         "code": code,

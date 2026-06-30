@@ -2,6 +2,7 @@ from fastapi import APIRouter, HTTPException, Depends
 from app.services.data_service import DataService
 from app.services.multi_source_quote import multi_source_service
 from app.deps import get_data_service
+from app.core.validators import validate_stock_code, validate_keyword
 import logging
 
 logger = logging.getLogger(__name__)
@@ -12,6 +13,7 @@ router = APIRouter()
 @router.get("/search")
 def search_stock(keyword: str, data_service: DataService = Depends(get_data_service)):
     """搜索股票"""
+    validate_keyword(keyword)
     results = data_service.search_stock(keyword)
     return {"results": results}
 
@@ -32,6 +34,7 @@ def reconnect_data_sources():
 @router.get("/{stock_code}/basic")
 def get_stock_basic(stock_code: str, data_service: DataService = Depends(get_data_service)):
     """获取股票基本信息和实时行情"""
+    validate_stock_code(stock_code)
     data = data_service.get_stock_basic(stock_code)
     if "error" in data:
         raise HTTPException(status_code=400, detail=data["error"])

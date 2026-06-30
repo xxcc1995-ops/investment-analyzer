@@ -104,20 +104,11 @@
 | 房价同比(一线) | +0.7% | > 0% |
 | 失业率 | 5.2% | < 5% |
 
-## 微信公众号日报
-
-通过微信读书 API 自动抓取关注的公众号文章，AI 生成每日摘要日报。
-
-- **侧边栏入口：** 行情总览 → 公众号日报
-- **功能：** 扫码登录 → 同步文章 → AI 摘要 → 按公众号分组展示
-- **技术：** Python 后端 (httpx + BeautifulSoup) + React 前端
-
 ## 技术栈
 
 - 前端：React + TypeScript + ECharts + Vite
 - 后端：Python FastAPI + AKShare
 - 数据源：新浪财经（行情）、东方财富（财务）、AKShare（宏观/指数/期货/REIT）、集思录（基金套利/可转债）、Polymarket（预测市场）、雪球（大V持仓）
-- 微信公众号：Node.js + Cheerio（文章抓取与日报生成）
 
 ## 快速开始
 

@@ -26,4 +26,3 @@ export type { AIAnalysisResult, AnalysisHistory, PerformanceStats } from './quan
 export { portfolioApi } from './portfolio'
 export { cryptoMasterApi } from './cryptoMaster'
 export { airdropScannerApi } from './airdropScanner'
-export { wechatDigestApi } from './wechatDigest'

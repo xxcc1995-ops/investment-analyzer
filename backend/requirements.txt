@@ -18,4 +18,5 @@ beautifulsoup4>=4.12.0
 lxml>=5.0.0
 qrcode>=7.4
 Pillow>=10.0.0
-browser-cookie3>=1.8.0
+pytdx>=1.72
+futu-api>=8.0
