@@ -250,6 +250,8 @@ def _process_single_fund(
 
         fund_price = safe_float(fund_info[3], 0)
         fund_change_pct = safe_float(fund_info[32], 0) if len(fund_info) > 32 else 0
+        # 新浪 fields[9] = 成交额(元) → 万元
+        turnover_wan = round(safe_float(fund_info[9], 0) / 10000, 2) if len(fund_info) > 9 else 0
         # 使用配置中的名称，因为新浪API返回的名称可能是乱码
         fund_name = config["name"]
 
@@ -300,6 +302,7 @@ def _process_single_fund(
                     "usdcny_rate": usdcny_rate,
                     "holdings_detail": holdings_detail,
                     "is_multi_underlying": True,
+                    "turnover": turnover_wan,
                 }
 
         # 单标的基金处理（原有逻辑）
@@ -347,6 +350,7 @@ def _process_single_fund(
             "position": position,
             "usdcny_rate": usdcny_rate,
             "is_multi_underlying": False,
+            "turnover": turnover_wan,
         }
     except Exception as e:
         logger.warning(f"处理基金 {fund_code} 失败: {e}")

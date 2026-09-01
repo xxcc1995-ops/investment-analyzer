@@ -529,15 +529,59 @@ export default function StockAnalysis({ code }: StockAnalysisProps) {
       const values = history.map(h => h.value)
       const label = type === 'pe' ? 'PE(TTM)' : type === 'pb' ? 'PB' : '股息率(%)'
       const color = type === 'pe' ? '#58a6ff' : type === 'pb' ? '#d29922' : '#3fb950'
+      // 百分位口径与后端 _calc_valuation_stats 一致：仅统计 0 < v < upperLimit，升序排名
+      const upperLimit = type === 'pe' ? 500 : type === 'pb' ? 100 : 30
+      const sorted = values.filter(v => v != null && v > 0 && v < upperLimit).sort((a, b) => a - b)
+      const percentileOf = (v: number): number => {
+        if (!sorted.length) return 0
+        let lo = 0, hi = sorted.length
+        while (lo < hi) { const mid = (lo + hi) >> 1; if (sorted[mid] <= v) lo = mid + 1; else hi = mid }
+        return Math.round(lo / sorted.length * 1000) / 10
+      }
+      // 历史极值（含日期）
+      let maxIdx = 0, minIdx = 0
+      values.forEach((v, i) => {
+        if (v != null && (values[maxIdx] == null || v > values[maxIdx])) maxIdx = i
+        if (v != null && (values[minIdx] == null || v < values[minIdx])) minIdx = i
+      })
       return {
-        tooltip: { trigger: 'axis', formatter: (params: { axisValue: string; value: number }[]) => `${params[0].axisValue}<br/>${label}: ${params[0].value}` },
+        tooltip: {
+          trigger: 'axis',
+          backgroundColor: '#1c2128', borderColor: '#30363d',
+          textStyle: { color: '#e6edf3', fontSize: 12 },
+          axisPointer: { type: 'line', lineStyle: { color: '#8b949e', type: 'dashed' } },
+          formatter: (params: { axisValue: string; value: number }[]) => {
+            const p = params[0]
+            const pct = percentileOf(p.value)
+            return `${p.axisValue}<br/>${label}: <b>${p.value}</b><br/>历史百分位: <b>${pct}%</b>（高于历史上 ${pct}% 的交易日）`
+          }
+        },
         textStyle: chartBaseStyle,
-        xAxis: { type: 'category', data: dates, axisLabel: { rotate: 45, ...chartBaseStyle, fontSize: 10, interval: Math.floor(dates.length / 8) }, axisLine: { lineStyle: { color: '#30363d' } } },
-        yAxis: { type: 'value', name: label, axisLabel: chartBaseStyle, nameTextStyle: { ...chartBaseStyle, fontSize: 12 }, splitLine: { lineStyle: { color: '#21262d' } } },
+        dataZoom: [
+          { type: 'inside', xAxisIndex: 0, filterMode: 'none', zoomOnMouseWheel: true, moveOnMouseMove: true, moveOnMouseWheel: false },
+          {
+            type: 'slider', xAxisIndex: 0, filterMode: 'none', height: 24, bottom: 10,
+            borderColor: '#30363d', backgroundColor: 'rgba(48,54,61,0.3)',
+            fillerColor: 'rgba(88,166,255,0.15)',
+            handleStyle: { color: '#58a6ff' }, moveHandleStyle: { color: '#58a6ff' },
+            textStyle: { color: '#8b949e', fontSize: 10 },
+            dataBackground: { lineStyle: { color: '#30363d' }, areaStyle: { color: 'rgba(48,54,61,0.4)' } },
+            selectedDataBackground: { lineStyle: { color: '#58a6ff' }, areaStyle: { color: 'rgba(88,166,255,0.2)' } },
+          },
+        ],
+        xAxis: { type: 'category', data: dates, axisLabel: { ...chartBaseStyle, fontSize: 10, hideOverlap: true }, axisLine: { lineStyle: { color: '#30363d' } } },
+        yAxis: { type: 'value', name: label, scale: true, axisLabel: chartBaseStyle, nameTextStyle: { ...chartBaseStyle, fontSize: 12 }, splitLine: { lineStyle: { color: '#21262d' } } },
         series: [{
           name: label, type: 'line', data: values, smooth: true, symbol: 'none',
           lineStyle: { width: 1.5, color },
           areaStyle: { color: { type: 'linear', x: 0, y: 0, x2: 0, y2: 1, colorStops: [{ offset: 0, color: `${color}26` }, { offset: 1, color: 'rgba(0,0,0,0)' }] } },
+          markPoint: {
+            silent: true, symbol: 'circle', symbolSize: 7,
+            data: [
+              { coord: [maxIdx, values[maxIdx]], itemStyle: { color: '#f85149' }, label: { show: true, position: 'top', distance: 8, fontSize: 10, fontWeight: 600, color: '#f85149', formatter: `历史最高 ${values[maxIdx]}\n${dates[maxIdx]}` } },
+              { coord: [minIdx, values[minIdx]], itemStyle: { color: '#3fb950' }, label: { show: true, position: 'bottom', distance: 8, fontSize: 10, fontWeight: 600, color: '#3fb950', formatter: `历史最低 ${values[minIdx]}\n${dates[minIdx]}` } },
+            ]
+          },
           markLine: {
             silent: true, symbol: 'none', lineStyle: { type: 'dashed', width: 1 },
             data: [
@@ -548,7 +592,7 @@ export default function StockAnalysis({ code }: StockAnalysisProps) {
             ]
           }
         }],
-        grid: chartGrid, backgroundColor: 'transparent'
+        grid: { left: 60, right: 40, top: 40, bottom: 75 }, backgroundColor: 'transparent'
       }
     }
   }, [valuationHistory])
@@ -872,20 +916,38 @@ export default function StockAnalysis({ code }: StockAnalysisProps) {
             <div className="chart-container"><div className="chart-title">资产负债率</div><ReactECharts option={getDebtChartOption} style={{ height: 300 }} /></div>
           </div>
 
-          {/* 历史估值走势 */}
+          {/* 历史估值走势（理杏仁式：全宽大图 + 时间框选 + 悬停百分位 + 极值标注） */}
           {valuationHistory?.stats && (
-            <>
-              <div className="charts-row">
-                <div className="chart-container"><div className="chart-title">PE(TTM) 历史走势</div><ReactECharts option={getValuationChartOption('pe')} style={{ height: 350 }} /></div>
-                <div className="chart-container"><div className="chart-title">PB 历史走势</div><ReactECharts option={getValuationChartOption('pb')} style={{ height: 350 }} /></div>
-              </div>
-              {valuationHistory.div_history?.length > 0 && (
-                <div className="charts-row" style={{ marginTop: 16 }}>
-                  <div className="chart-container"><div className="chart-title">股息率(%) 历史走势</div><ReactECharts option={getValuationChartOption('div')} style={{ height: 350 }} /></div>
-                  <div className="chart-container" />
-                </div>
-              )}
-            </>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 16, marginBottom: 16 }}>
+              {(['pe', 'pb', 'div'] as const).map(type => {
+                const history = type === 'pe' ? valuationHistory.pe_history : type === 'pb' ? valuationHistory.pb_history : valuationHistory.div_history
+                const stats = valuationHistory.stats?.[type]
+                if (!history?.length || !stats) return null
+                const values = history.map(h => h.value)
+                let maxIdx = 0, minIdx = 0
+                values.forEach((v, i) => {
+                  if (v != null && (values[maxIdx] == null || v > values[maxIdx])) maxIdx = i
+                  if (v != null && (values[minIdx] == null || v < values[minIdx])) minIdx = i
+                })
+                const title = type === 'pe' ? 'PE(TTM) 历史走势' : type === 'pb' ? 'PB 历史走势' : '股息率(%) 历史走势'
+                const lvl = getValuationLevel(type, valuationHistory)
+                const statStyle = { fontSize: 12, color: 'var(--text-muted)' } as const
+                return (
+                  <div key={type} className="chart-container">
+                    <div className="chart-title">{title}</div>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 18, marginBottom: 8, alignItems: 'baseline' }}>
+                      <span style={statStyle}>当前 <b style={{ color: '#f85149' }}>{stats.current}</b></span>
+                      <span style={statStyle}>当前百分位 <b style={{ color: lvl.color }}>{stats.percentile}%（{lvl.level}）</b></span>
+                      <span style={statStyle}>历史最高 <b style={{ color: '#f85149' }}>{values[maxIdx]}</b>（{history[maxIdx]?.date}）</span>
+                      <span style={statStyle}>历史最低 <b style={{ color: '#3fb950' }}>{values[minIdx]}</b>（{history[minIdx]?.date}）</span>
+                      <span style={statStyle}>中位数 <b>{stats.median}</b></span>
+                      <span style={{ ...statStyle, marginLeft: 'auto', opacity: 0.7 }}>滚轮缩放 / 拖拽平移 / 下方滑条框选区间</span>
+                    </div>
+                    <ReactECharts option={getValuationChartOption(type)} style={{ height: 420 }} notMerge />
+                  </div>
+                )
+              })}
+            </div>
           )}
           {valuationHistory?.message && <div className="valuation-message">{valuationHistory.message}</div>}
         </>

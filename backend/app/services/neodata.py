@@ -1,3 +1,11 @@
+"""
+NeoData 金融数据服务（腾讯）
+数据源：腾讯 NeoData（需要 NEODATA_TOKEN）
+配置：通过环境变量 NEODATA_TOKEN 设置Token
+
+状态（2026-07-15 审查）：当前未被任何路由调用。
+作为 CLAUDE.md 登记的数据源对接层保留；接入时需配置 NEODATA_TOKEN。
+"""
 import os
 import httpx
 import logging

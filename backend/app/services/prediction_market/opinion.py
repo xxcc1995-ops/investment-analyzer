@@ -1,9 +1,12 @@
 """Opinion 数据源适配器"""
 
+import logging
 import requests
 import os
 from typing import Optional, List, Dict
 from .base import MarketData, PredictionMarketSource
+
+logger = logging.getLogger(__name__)
 
 
 class OpinionSource(PredictionMarketSource):
@@ -84,11 +87,11 @@ class OpinionSource(PredictionMarketSource):
                     if r.status_code == 200:
                         data = r.json()
                         break
-                except:
+                except Exception:
                     continue
 
             if data is None:
-                print(f"Opinion API: 无法连接到 {self.api_base}")
+                logger.error(f"Opinion API: 无法连接到 {self.api_base}")
                 return []
 
             # 解析数据（根据实际API响应格式调整）
@@ -102,7 +105,7 @@ class OpinionSource(PredictionMarketSource):
             return result
 
         except Exception as e:
-            print(f"Opinion API error: {e}")
+            logger.error(f"Opinion API error: {e}")
             return []
 
     def get_market_detail(self, market_id: str) -> Optional[MarketData]:
@@ -121,12 +124,12 @@ class OpinionSource(PredictionMarketSource):
                     )
                     if r.status_code == 200:
                         return self._parse_market(r.json())
-                except:
+                except Exception:
                     continue
 
             return None
         except Exception as e:
-            print(f"Opinion market detail error: {e}")
+            logger.error(f"Opinion market detail error: {e}")
             return None
 
     def get_price_history(self, market_id: str,
@@ -151,12 +154,12 @@ class OpinionSource(PredictionMarketSource):
                     if r.status_code == 200:
                         data = r.json()
                         return self._parse_price_history(data)
-                except:
+                except Exception:
                     continue
 
             return []
         except Exception as e:
-            print(f"Opinion price history error: {e}")
+            logger.error(f"Opinion price history error: {e}")
             return []
 
     def calculate_fee(self, price: float, amount: float) -> float:
@@ -268,7 +271,7 @@ class OpinionSource(PredictionMarketSource):
                 raw_data=m,
             )
         except Exception as e:
-            print(f"Opinion parse error: {e}")
+            logger.error(f"Opinion parse error: {e}")
             return None
 
     def _parse_price_history(self, data) -> List[Dict]:

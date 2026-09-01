@@ -13,6 +13,8 @@ interface BondYield {
   change?: number
   pe?: number
   stock_bond_ratio?: number
+  earnings_yield?: number
+  spread?: number
 }
 
 interface TopBarProps {
@@ -220,6 +222,41 @@ const TopBar = memo(function TopBar({
             </div>
           </div>
         </div>
+
+        {/* 分隔线 */}
+        <div style={{ width: 1, height: 28, background: '#30363d' }} />
+
+        {/* 美债10Y − 盈利收益率 差值 */}
+        <Tooltip
+          title={
+            <div style={{ fontSize: 12, lineHeight: 1.7, maxWidth: 280 }}>
+              <div style={{ fontWeight: 600, marginBottom: 4 }}>差值 = 美债10Y收益率 − 标普500盈利收益率</div>
+              <div><span style={{ color: '#3fb950' }}>缩窄</span>（长债降得快）→ 股权风险溢价↑ → 股市涨</div>
+              <div><span style={{ color: '#f85149' }}>走阔</span>（盈利跌更快）→ 高开低走 / 债涨股跌背离</div>
+            </div>
+          }
+        >
+          <div style={{ textAlign: 'right', cursor: 'default' }}>
+            <div style={{ fontSize: 10, color: '#484f58', lineHeight: 1.2 }}>美债-盈利收益差</div>
+            <div style={{
+              fontSize: 14,
+              fontWeight: 600,
+              lineHeight: 1.3,
+              color: bondYields?.us?.spread == null
+                ? '#8b949e'
+                : (bondYields.us.spread < 0 ? '#3fb950' : '#f85149'),
+            }}>
+              {bondYields?.us?.spread != null
+                ? `${bondYields.us.spread >= 0 ? '+' : ''}${bondYields.us.spread.toFixed(2)}%`
+                : '--'}
+            </div>
+            <div style={{ fontSize: 10, color: '#8b949e', lineHeight: 1.2 }}>
+              {bondYields?.us?.earnings_yield != null
+                ? `盈利收益率 ${bondYields.us.earnings_yield.toFixed(2)}%`
+                : '\u00A0'}
+            </div>
+          </div>
+        </Tooltip>
       </div>
     </div>
   )

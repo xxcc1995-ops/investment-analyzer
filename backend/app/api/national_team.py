@@ -2,6 +2,7 @@
 
 from typing import List, Optional
 from fastapi import APIRouter, Query, HTTPException
+from app.core.validators import validate_stock_code
 from app.services.national_team_service import (
     get_shareholdings, get_etf_fund_flow, get_all_etf_flows, get_volume_alerts,
     get_dragon_tiger_board, get_block_trades, get_etf_share_changes,
@@ -30,6 +31,7 @@ def etf_flows():
 @router.get("/etf-flow/{etf_code}")
 def etf_flow(etf_code: str):
     """获取单只ETF资金流向"""
+    etf_code = validate_stock_code(etf_code)
     result = get_etf_fund_flow()
     etf = result.get('etfs', {}).get(etf_code)
     if not etf:

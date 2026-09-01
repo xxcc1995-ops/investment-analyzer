@@ -52,7 +52,7 @@ def _load_cache(key: str, ttl_hours: float = 72) -> Optional[pd.DataFrame]:
             return None
         with open(path, 'rb') as f:
             return pickle.load(f)
-    except:
+    except Exception:
         return None
 
 
@@ -61,7 +61,7 @@ def _save_cache(key: str, data: pd.DataFrame):
         path = _cache_path(key)
         with open(path, 'wb') as f:
             pickle.dump(data, f)
-    except:
+    except Exception:
         pass
 
 
@@ -93,7 +93,7 @@ def _fetch_kline_chunk(tc_code: str, start_date: str, end_date: str, adjust: str
             return []
 
         return stock_data.get(f'{adjust}day', stock_data.get('day', []))
-    except:
+    except Exception:
         return []
 
 
@@ -270,7 +270,7 @@ def get_all_a_share_codes() -> List[str]:
                             code = item.get('symbol', '')
                             if code.startswith(('sh6', 'sz0', 'sz3')):
                                 codes.append(code[2:])  # 去掉sh/sz前缀
-                except:
+                except Exception:
                     break
 
         if codes:
@@ -332,7 +332,7 @@ def get_stock_snapshot_sina(codes: List[str]) -> Optional[pd.DataFrame]:
                                 'volume': float(values[8]) if values[8] else 0,
                                 'amount': float(values[9]) if values[9] else 0,
                             })
-                    except:
+                    except Exception:
                         continue
 
         if not all_rows:

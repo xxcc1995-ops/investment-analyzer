@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef, lazy, Suspense } from 'react'
-import { Routes, Route, useNavigate, useParams } from 'react-router-dom'
+import { Routes, Route, Navigate, useNavigate, useParams } from 'react-router-dom'
 import AppShell from './components/AppShell'
 import ErrorBoundary from './components/ErrorBoundary'
 import { bondApi, stockApi } from './services/api'
@@ -17,32 +17,28 @@ const ValueInvesting = lazy(() => import('./pages/ValueInvesting'))
 const REITScreener = lazy(() => import('./pages/REITScreener'))
 const MacroData = lazy(() => import('./pages/MacroData'))
 const FuturesInsight = lazy(() => import('./pages/FuturesInsight'))
-const JCScreener = lazy(() => import('./pages/JCScreener'))
 const PolymarketPage = lazy(() => import('./pages/PolymarketPage'))
-const ExportChampions = lazy(() => import('./pages/ExportChampions'))
 const GridTrading = lazy(() => import('./pages/GridTrading'))
 const TTrading = lazy(() => import('./pages/TTrading'))
+const TTradingRealtime = lazy(() => import('./pages/TTradingRealtime'))
 const NationalTeamMonitor = lazy(() => import('./pages/NationalTeamMonitor'))
 const RightSideTrading = lazy(() => import('./pages/RightSideTrading'))
 const FundArbitragePage = lazy(() => import('./pages/FundArbitragePage'))
 const DecisionGuard = lazy(() => import('./pages/DecisionGuard'))
-const BacktestReport = lazy(() => import('./pages/BacktestReport'))
 const OptionCalculator = lazy(() => import('./pages/OptionCalculator'))
 const ConvertibleBondPage = lazy(() => import('./pages/ConvertibleBondPage'))
+const NearMaturityPage = lazy(() => import('./pages/NearMaturityPage'))
 const MasterStrategyPage = lazy(() => import('./pages/MasterStrategyPage'))
 const FutuOptionChain = lazy(() => import('./pages/FutuOptionChain'))
-const DrawdownControl = lazy(() => import('./pages/DrawdownControl'))
-const DailyInfo = lazy(() => import('./pages/DailyInfo'))
-const TractorPage = lazy(() => import('./pages/TractorPage'))
 const MobileSettings = lazy(() => import('./pages/MobileSettings'))
 const CBBacktestPage = lazy(() => import('./pages/CBBacktestPage'))
+const CbStrategiesPage = lazy(() => import('./pages/CbStrategiesPage'))
 const Portfolio = lazy(() => import('./pages/Portfolio'))
-const StrategyValidation = lazy(() => import('./pages/StrategyValidation'))
-const BankValuation = lazy(() => import('./pages/BankValuation'))
 const CryptoMasterPage = lazy(() => import('./pages/CryptoMasterPage'))
-const QuantBacktest = lazy(() => import('./pages/QuantBacktest'))
 const PrefrontalTraining = lazy(() => import('./pages/PrefrontalTraining'))
 const AirdropScannerPage = lazy(() => import('./pages/AirdropScannerPage'))
+const RelativeValuation = lazy(() => import('./pages/RelativeValuation'))
+const IndexEarnings = lazy(() => import('./pages/IndexEarnings'))
 
 // ============ 类型定义 ============
 
@@ -188,7 +184,7 @@ function App() {
         <ErrorBoundary>
           <Suspense fallback={<div className="loading"><div className="spinner"></div>加载中...</div>}>
             <Routes>
-              <Route path="/" element={<DailyInfo />} />
+              <Route path="/" element={<Navigate to="/index-valuation" replace />} />
               <Route path="/stock/:code?" element={<StockPageWrapper />} />
               <Route path="/index-valuation" element={<IndexValuation />} />
               <Route path="/macro" element={<MacroData />} />
@@ -197,19 +193,16 @@ function App() {
               <Route path="/cigar-butt" element={<CigarButtScreener />} />
               <Route path="/value-investing" element={<ValueInvesting />} />
               <Route path="/reit" element={<REITScreener />} />
-              <Route path="/export-champions" element={<ExportChampions />} />
-              <Route path="/jc-screener" element={<JCScreener />} />
               <Route path="/t-trading" element={<TTrading />} />
+              <Route path="/t-trading-realtime" element={<TTradingRealtime />} />
               <Route path="/grid-trading" element={<GridTrading />} />
               <Route path="/right-side" element={<RightSideTrading />} />
               <Route path="/futu-options" element={<FutuOptionChain />} />
               <Route path="/option-calculator" element={<OptionCalculator />} />
-              <Route path="/backtest" element={<BacktestReport />} />
-              <Route path="/quant-backtest" element={<QuantBacktest />} />
-              <Route path="/drawdown" element={<DrawdownControl />} />
               <Route path="/fund-arb" element={<FundArbitragePage />} />
-              <Route path="/tractor" element={<TractorPage />} />
               <Route path="/cb" element={<ConvertibleBondPage />} />
+              <Route path="/cb-near-mature" element={<NearMaturityPage />} />
+              <Route path="/cb-strategies" element={<CbStrategiesPage />} />
               <Route path="/cb-backtest" element={<CBBacktestPage />} />
               <Route path="/master-strategy" element={<MasterStrategyPage />} />
               <Route path="/polymarket" element={<PolymarketPage />} />
@@ -219,9 +212,9 @@ function App() {
               <Route path="/national-team" element={<NationalTeamMonitor />} />
               <Route path="/decision-guard" element={<DecisionGuard />} />
               <Route path="/prefrontal-training" element={<PrefrontalTraining />} />
-              <Route path="/strategy-validation" element={<StrategyValidation />} />
-              <Route path="/bank-valuation" element={<BankValuation />} />
               <Route path="/portfolio" element={<Portfolio />} />
+              <Route path="/relative-valuation" element={<RelativeValuation />} />
+              <Route path="/index-earnings" element={<IndexEarnings />} />
               <Route path="/settings" element={<MobileSettings />} />
             </Routes>
           </Suspense>

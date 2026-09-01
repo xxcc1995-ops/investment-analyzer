@@ -30,6 +30,22 @@
 
 多源容错机制：`MultiSourceQuoteService` 自动故障转移，失败源60秒冷却后重试。
 
+#### 日内实时行情（实时做T专用，2026-08-06 新增）
+
+腾讯控股 00700.HK 日内做T所需高频行情，**分层数据源（富途主源 + 腾讯兜底）**：
+
+| 数据类型 | 主源（富途 OpenAPI） | 兜底（腾讯免费源） | 说明 |
+|---------|------|------|------|
+| 1分钟分时 | — | `web.ifzq.gtimg.cn/appstock/app/minute/query?code=hk00700`（**无 r_ 前缀**） | 当日分时（价/量），腾讯高可靠 |
+| 5分钟K线 | `subscribe(K_5M)`→`get_cur_kline(KLType.K_5M)` | `mkline` 接口**对港股已失效**（301→web3 DNS 不可解析），不可用 | 日内支撑压力计算，走富途 |
+| 五档盘口 | `subscribe(ORDER_BOOK)`→`get_order_book(num=5)` | `qt.gtimg.cn/q=r_hk00700`（fields[9..28]）**港股量恒为0，仅价可用** | 买卖五档价/量 + 盘口失衡，走富途真实量 |
+
+代码位置：
+- 富途：`backend/app/services/realtime_t_monitor.py`（`_get_futu_order_book`/`_get_futu_5min_kline` + 模块级 `get_best_order_book`/`get_best_5min_kline`，富途优先、失败回落腾讯）；需 FutuOpenD 运行于 `127.0.0.1:11111` 且账户有港股 LV2 权限。
+- 腾讯：`backend/app/services/quote_sources/tencent_source.py`（`get_minute_kline`/`get_5min_kline`/`get_order_book`）。`QuoteData` 已扩展 bid2-5/ask2-5 字段。
+
+⚠️ **无逐笔成交**：免费源 + 富途免费档均不提供逐笔，最细粒度为1分钟分时 + 实时五档盘口。UI须明确标注，避免误导。
+
 ### 财务与基本面数据
 
 | 数据源 | 说明 | 认证 |
@@ -43,6 +59,25 @@
 | 数据源 | 说明 | 认证 |
 |--------|------|------|
 | FRED | 美联储经济数据（利率、就业、通胀等） | 需要 `FRED_API_KEY` |
+
+### 指数盈利估值自动取数源（2026-08-16 沙箱实测）
+
+为「指数盈利与估值查阅」模块自动化做的数据源实测结论（脚本备查 `backend/scripts/test_index_data_sources*.py`，沙箱需 `env -u HTTPS_PROXY -u HTTP_PROXY` 直连）：
+
+| 数据 | 源 | 状态 | 口径备注 |
+|------|-----|------|----------|
+| 中国十年期国债 | `ak.bond_zh_us_rate`（英为财情） | ✅ 日频长历史 | 与用户 Excel 2000-2007 段同源 |
+| 中国十年期国债（校验） | `ak.bond_china_yield`（中债官方） | ✅ 官方 | 取「中债国债收益率曲线」10年列 |
+| 美国十年期国债 | `ak.bond_zh_us_rate`（英为财情） | ✅ 同上 | FRED_API_KEY 未配置，DGS10 可作备选 |
+| 沪深300 收盘+PE-TTM | `ak.stock_index_pe_lg("沪深300")`（乐咕乐股） | ✅ 2005-04起日频5189行 | 收盘价与Wind完全一致；滚动PE与Wind差~5%（13.68 vs 14.38 同日实测） |
+| 沪深300 PE（校验） | `ak.stock_zh_index_value_csindex`（中证官网） | ✅ 仅最近20条 | 市盈率1=14.73，比乐咕更贴近Wind(差2.4%) |
+| 标普500 PE/EPS | multpl.com 月度表 | ⚠️ 半可用 | reported(GAAP)口径，与Wind(operating)系统性差~15%；仅月度+当日值，无周频 |
+| 标普500 EPS官方 | spglobal sp-500-eps-est.xlsx | ❌ 403 | 需浏览器头或手工下载 |
+| 纳指100 PE | stockanalysis.com/etf/qqq | ⚠️ 仅当前值(33.62) | 无免费长历史；历史需理杏仁或从即日起自攒 |
+| 万得全A 881001.WI | 新浪/腾讯/乐咕/韭圈儿 | ❌ 全军覆没 | Wind专有指数；乐咕"全A"是等权中位数口径≠万得全A；韭圈儿API 405 |
+| Tushare index_dailybasic | 需2000积分 | ⏸ 未启用 | `.env` 中 TUSHARE_TOKEN 为空；有token后可作沪深300 PE-TTM更优源 |
+
+**结论**：国债与沪深300可全自动（乐咕主源+官方校验）；标普500半自动（口径降级需用户确认）；纳指100可新建但历史自攒；万得全A免费通道不存在，维持Wind手工导出或理杏仁付费API。
 
 ### 预测市场
 
@@ -129,7 +164,10 @@ API端点：`GET /api/daily-info/overseas-news`
 6. **Polymarket预测市场** - 市场扫描、套利检测、价值发现、趋势追踪、Kelly仓位
 7. **跨平台套利（Polymarket vs Opinion）** - 跨平台价差检测、手续费感知、最优配资计算
 8. **空投机会扫描器** - 未发币协议扫描、交易所活动、链上打新、测试网追踪、Twitter大V监控、RSS聚合(12源)、多维度评分系统、多号管理
-9. **可转债策略分析** - 8种大师策略（安道全/双低/三低/摊大饼/YTM保本/下修博弈/强赎博弈/负溢价套利）、5维度质量评分、纯债价值、税后YTM、强赎风险量化、下修概率评估、策略回测引擎
+9. **可转债策略分析** - 八大战法（正收益/YTM保本、双低、轮动、临期债网格、下修博弈、强赎、问题债博弈、负溢价转股；源自《可转债：从入门到精通的八大战法》）、5维度质量评分、纯债价值、税后YTM、强赎风险量化、下修概率评估、策略回测引擎。数据源严格按「集思录API → 集思录网页版(Scrapling) → AKShare(仅基础字段)」三级容错；**AKShare 不提供 剩余年限/成交额/到期收益率(YTM)**，依赖这些字段的策略在无集思录登录态时严格返回空+提示（遵循「宁可空着不要不可靠数据」）。
+10. **实时做T（腾讯 00700.HK）** - 日内回转交易机会识别与实时推送。基于1分钟分时 + 五档盘口 + 5分钟K，算日内 VWAP / 支撑压力 / 盘口失衡 / 量能异动，三重确认 + 利润门槛（2倍 round-trip 成本）。WebSocket 实时推送信号到前端（弹窗+声音+桌面通知），风控熔断（单日4次硬限 / T仓30%上限 / 止损线）。做T记录复用 `t_position_service`（FIFO 盈亏 / 成本追踪）。**仅识别提醒，手动下单**（与拖拉机执行层删除后的取向一致）。数据源（分层）：**富途 OpenAPI 主源**（真实五档量+5分钟K，需 FutuOpenD:11111 + 港股 LV2）→ 腾讯兜底（分时 `web.ifzq.gtimg.cn/minute` + 盘口 `qt.gtimg.cn` 价可用量恒0）。代码：`backend/app/services/intraday_t_signal_service.py` + `realtime_t_monitor.py` + `app/api/t_realtime.py`；前端 `TTradingRealtime.tsx`（路由 `/t-trading-realtime`）。
+11. **指数盈利与估值查阅（2026-08-15 新增）** - 用户手工维护的三大指数「盈利与估值分析表」Excel（周度数据）在线查阅：标普500(1957~)/万得全A(2000~)/沪深300(2005~)。口径：估值中枢偏移率=PE-TTM×十年期国债收益率（基准线 标普70/全A60/沪深300=折价线）；合理收盘价=(100÷国债)×折扣×隐含EPS；风险溢价=100÷PE−国债收益率；EPS周期=隐含EPS平滑+4%zigzag（红涨绿跌）。**数据源 = 用户 Excel 原文件直读**（`D:/1957~2026年标普500盈利与估值/` 等三个固定路径，按文件 mtime 缓存失效，用户更新 Excel 后自动生效，不做外部抓取校验）。代码：`backend/app/services/index_earnings_service.py` + `app/api/index_earnings.py`（`/api/index-earnings/{list,data/{code}}`）；前端 `IndexEarnings.tsx`（路由 `/index-earnings`，菜单「行情总览→指数盈利估值」）。拆解脚本备查：`backend/scripts/analyze_index_excels.py`。
+  - **自动重建版 hs300_auto（2026-08-16）**：`backend/app/services/index_earnings_auto_service.py`，乐咕收盘+PE-TTM（日频→ISO周，周日标签=每周最后交易日）+ 英为财情国债，复刻用户公式（4周平滑+4%zigzag、利差×20、偏移率、合理价、风险溢价）；日频原始数据落盘 `backend/data/manual/hs300_auto_cache.json`（国债增量拉取，TTL 12h）；payload 内嵌 compare 块（Wind vs 乐咕 PE 对比序列+统计+中证官网校验）。实测口径：乐咕PE 比 Wind 系统性低 ~4.2%（1087周重叠），收盘价完全一致。
 
 ### 可转债策略回测验证（2024年）
 
@@ -140,6 +178,8 @@ API端点：`GET /api/daily-info/overseas-news`
 | 摊大饼策略 | **15.54%** | -13.43% | 0.93 | ✅ 达标 |
 
 回测参数：2024-01-01 ~ 2024-12-31，每周调仓，持仓15只，含手续费滑点。
+
+> ⚠️ **此表数据已失效，待重跑（2026-07-16 修复）**：原回测引擎存在 bug——策略定义里的 `sell_rule`（止盈/止损价）是死配置，从未被执行，卖出只按"轮出 top_n"；加上三策略 filter 截断(115/130/140)在低价券充足时失效，导致三个策略在模拟中计算上等价，故指标完全相同。已修复 `cb_backtest_service.py`：新增 `sell_fn`（lambda），每个交易日按价格阈值触发卖出（先于调仓轮出）。合成数据测试确认三策略卖出时机已真正分化（andaoquan@130 / dual_low@140 / pancake@145）。**上表数字需用修复后的引擎重跑 2024 全年真实数据后更新**，在此之前不得据此表做实盘决策。
 
 **注意**：2025年市场波动较大，年化收益下降。建议小资金实盘验证后再加仓。
 
@@ -174,15 +214,24 @@ API端点：`GET /api/daily-info/overseas-news`
 
 ## 启动命令
 
-```bash
-# 后端（端口8002）
-cd backend && python -m uvicorn app.main:app --reload --port 8002
+> **正式模式（日常使用，2026-08-17 起）**：双击 **`启动.vbs`** —— 全程无命令行窗口，托盘气泡提示进度，自动完成：强杀 8022 旧进程（含挂死，杀不掉自动自提权重试）→ 前端源码有更新则自动 `vite build` → 隐藏启动后端 → 健康等待（最长180s）→ 自动打开浏览器 **http://127.0.0.1:8022**。后端直接托管 `frontend/dist`（SPA 回退，单进程单端口）。双击 `停止.vbs` 停止。`start.bat` 为兼容入口（等价于启动.vbs）。日志在 `logs/`（backend.log / backend-error.log / frontend-build.log）。
+> 稳定性设计：每次启动必强杀旧进程再起新进程 → 不存在端口占用/挂死残留；前端构建产物由后端托管 → 不需要 vite 常驻、无 5180 冲突。
+> 开发模式（需要 HMR 时）手动起两个进程：
+> 8002/5173 为旧僵尸端口，**勿再使用**。
 
-# 前端（端口5173）
-cd frontend && npx vite --port 5173
+```bash
+# 开发模式-后端（端口8022）
+cd backend && python -m uvicorn app.main:app --port 8022 --no-use-colors
+
+# 开发模式-前端（端口5180，代理 /api → 8022）
+cd frontend && npx vite --port 5180
+
+# 前端生产构建（正式模式所需，dist 由后端托管）
+cd frontend && npx vite build
 ```
 
 ## 访问地址
 
-- 前端：http://localhost:5173
+- 正式模式（单端口）：http://127.0.0.1:8022
+- 开发模式前端：http://localhost:5180
 - QuantDinger：http://localhost:8888

@@ -42,6 +42,11 @@ Thumbs.db
 # Sensitive login data
 backend/.jisilu_login.json
 
+# 拖拉机套利：明文存储的券商账户密码 + 自动生成的 AutoIt 账户脚本
+backend/tractor/accounts.json
+backend/tractor/yinheaccounts.au3
+backend/tractor/*.au3
+
 # Capacitor / Android build
 frontend/android/app/build/
 frontend/android/.gradle/
@@ -54,3 +59,17 @@ frontend/android/capacitor.config.json
 *.pkl
 test.json
 test_result.json
+
+# 日志与运行产物
+logs/
+*.log
+backend/.cache/
+
+# 本地归档（含安装包，不入库）
+_archive/
+
+# 一次性临时脚本
+backend/_tmp_*.py
+backend/_extract_pdf.py
+backend/_rv_smoke.py
+frontend/vite.config.ts.timestamp-*.mjs

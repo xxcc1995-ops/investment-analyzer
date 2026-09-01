@@ -15,8 +15,15 @@ if (isNativePlatform()) {
 }
 
 // ========== 请求拦截器：敏感端点自动携带 API Key ==========
+// 必须与后端 app.core.security_middleware.SENSITIVE_PREFIXES 保持一致
 const API_KEY = import.meta.env.VITE_API_KEY || ''
-const SENSITIVE_PREFIXES = ['/tractor', '/portfolio', '/futu-options', '/grid', '/cb', '/fund-arb']
+const SENSITIVE_PREFIXES = [
+  '/portfolio', '/futu-options', '/grid', '/cb', '/fund-arb',
+  '/scraper', '/t-trading', '/decision', '/backtest',
+  '/cb-backtest', '/airdrop-scanner', '/crypto-master',
+  '/national-team', '/right-side', '/fund-holdings', '/relative-valuation',
+  '/polymarket', '/crypto-crawler', '/t-realtime',
+]
 
 api.interceptors.request.use(config => {
   if (API_KEY) {

@@ -1,9 +1,12 @@
 """Polymarket 数据源适配器"""
 
+import logging
 import requests
 import os
 from typing import Optional, List, Dict
 from .base import MarketData, PredictionMarketSource
+
+logger = logging.getLogger(__name__)
 
 
 class PolymarketSource(PredictionMarketSource):
@@ -67,7 +70,7 @@ class PolymarketSource(PredictionMarketSource):
                     result.append(parsed)
             return result
         except Exception as e:
-            print(f"Polymarket API error: {e}")
+            logger.error(f"Polymarket API error: {e}")
             return []
 
     def get_market_detail(self, market_id: str) -> Optional[MarketData]:
@@ -82,7 +85,7 @@ class PolymarketSource(PredictionMarketSource):
             r.raise_for_status()
             return self._parse_market(r.json())
         except Exception as e:
-            print(f"Polymarket market detail error: {e}")
+            logger.error(f"Polymarket market detail error: {e}")
             return None
 
     def get_price_history(self, market_id: str,
@@ -121,7 +124,7 @@ class PolymarketSource(PredictionMarketSource):
                         })
             return history
         except Exception as e:
-            print(f"Polymarket price history error: {e}")
+            logger.error(f"Polymarket price history error: {e}")
             return []
 
     def get_order_book(self, token_id: str) -> Optional[Dict]:
@@ -154,7 +157,7 @@ class PolymarketSource(PredictionMarketSource):
 
             return result
         except Exception as e:
-            print(f"Polymarket order book error: {e}")
+            logger.error(f"Polymarket order book error: {e}")
             return None
 
     def calculate_fee(self, price: float, amount: float) -> float:

@@ -91,7 +91,7 @@ class TDXSource(BaseQuoteSource):
         if self._api:
             try:
                 self._api.disconnect()
-            except:
+            except Exception:
                 pass
             self._api = None
         self._connected = False
@@ -170,7 +170,7 @@ class TDXSource(BaseQuoteSource):
                 name = q.get('name', stock_code)
                 if isinstance(name, bytes):
                     name = name.decode('gbk', errors='ignore')
-            except:
+            except Exception:
                 name = stock_code
 
             now = datetime.now()

@@ -220,7 +220,7 @@ def _fetch_single_est_nav(fid: str) -> tuple:
                         est_trade_date = (est_update_date - timedelta(days=1)).strftime('%Y-%m-%d')
                     else:
                         est_trade_date = est_date
-                except:
+                except Exception:
                     est_trade_date = gztime.split(' ')[0] if ' ' in gztime else gztime
 
             return fid, {
@@ -602,6 +602,52 @@ class FundService:
         return session
 
     @staticmethod
+    def get_em_purchase_status_map() -> Dict[str, dict]:
+        """天天基金申购状态兜底（akshare fund_purchase_em，无需登录，覆盖全部场外基金）
+
+        用于补齐集思录未覆盖基金的 申购状态/限购/赎回状态。
+        口径：基金公司公告级申购状态（与场内申购一致）；日累计限定金额 >= 1亿 视为无限额。
+        返回：{裸6位代码: {apply_status, apply_limit, redeem_status}}，1小时缓存。
+        """
+        cached = _get_cache('em_purchase_status_map', 3600)
+        if cached is not None:
+            return cached
+        result: Dict[str, dict] = {}
+        try:
+            import akshare as ak
+            df = ak.fund_purchase_em()
+            for _, row in df.iterrows():
+                code = str(row.get('基金代码', '')).strip().zfill(6)
+                if not code or not code.isdigit():
+                    continue
+                status = str(row.get('申购状态', '') or '').strip()
+                redeem = str(row.get('赎回状态', '') or '').strip()
+                try:
+                    cap = float(row.get('日累计限定金额', 0) or 0)
+                except (ValueError, TypeError):
+                    cap = 0.0
+                if '暂停' in status or '停止' in status:
+                    limit = '暂停申购'
+                elif status == '限大额' and 0 < cap < 1e8:
+                    limit = f'日限额{int(cap):,}元'
+                elif status == '场内交易':
+                    limit = ''  # ETF 等纯场内品种，无场外申购概念
+                elif status:
+                    limit = '无限额'
+                else:
+                    limit = ''
+                result[code] = {
+                    'apply_status': status,
+                    'apply_limit': limit,
+                    'redeem_status': redeem,
+                }
+            if result:
+                _set_cache('em_purchase_status_map', result)
+        except Exception as e:
+            logger.warning(f"天天基金申购状态获取失败(akshare fund_purchase_em): {e}")
+        return result
+
+    @staticmethod
     def _fetch_jisilu_lof() -> List[dict]:
         """从集思录获取LOF数据"""
         all_funds = []
@@ -667,6 +713,11 @@ class FundService:
             df = ak.fund_lof_spot_em()
             funds = []
             for _, row in df.iterrows():
+                # 成交额(元) -> 万元；成交量单位未知故不用 volume*price 推算
+                try:
+                    amount_yuan = float(row.get('成交额', 0) or 0)
+                except (ValueError, TypeError):
+                    amount_yuan = 0.0
                 funds.append({
                     'fund_id': str(row.get('代码', '')),
                     'fund_nm': str(row.get('名称', '')),
@@ -675,6 +726,7 @@ class FundService:
                     'nav_discount_rt': str(row.get('折溢价率', 0)),
                     'increase_rt': str(row.get('涨跌幅', 0)),
                     'volume': str(row.get('成交量', 0)),
+                    'turnover': round(amount_yuan / 10000, 2),  # 成交额(万元)
                     'amount': 0,
                     'apply_fee': '',
                     'redeem_fee': '',
@@ -731,7 +783,8 @@ class FundService:
                     'nav_discount_rt': '0',
                     'increase_rt': str(row.get('f3', 0) / 100 if row.get('f3') else 0),
                     'volume': str(volume),
-                    'amount': 0,
+                    'turnover': round((amount or 0) / 10000, 2),  # f6成交额(元) -> 万元
+                    'amount': amount or 0,
                     'apply_fee': '',
                     'redeem_fee': '',
                     'apply_status': '',
@@ -863,6 +916,7 @@ class FundService:
                 'nav_dt': cell.get('nav_dt', ''),
                 'price_dt': cell.get('price_dt', ''),
                 'issuer_nm': cell.get('issuer_nm', ''),
+                'est_nav': cell.get('est_nav', ''),  # 集思录实时估值(如有)，供 scan 合并使用
                 'estimated_profit': estimated_profit,
             }
         except Exception as e:

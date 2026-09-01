@@ -1,6 +1,7 @@
 """右侧交易判断 API"""
 
 from fastapi import APIRouter, HTTPException, Query
+from app.core.validators import validate_stock_code
 from app.services.right_side_service import (
     analyze_right_side, backtest_right_side,
     batch_scan_right_side, analyze_sector_rotation,
@@ -14,6 +15,7 @@ router = APIRouter()
 @router.get("/{stock_code}")
 def get_right_side_analysis(stock_code: str):
     """获取右侧交易判断结果（V2: 多时间框架 + ADX + 新指标）"""
+    stock_code = validate_stock_code(stock_code)
     result = analyze_right_side(stock_code)
     if "error" in result:
         raise HTTPException(status_code=400, detail=result["error"])
@@ -23,6 +25,7 @@ def get_right_side_analysis(stock_code: str):
 @router.get("/{stock_code}/backtest")
 def get_right_side_backtest(stock_code: str):
     """获取右侧交易历史回测信号"""
+    stock_code = validate_stock_code(stock_code)
     result = backtest_right_side(stock_code)
     if "error" in result:
         raise HTTPException(status_code=400, detail=result["error"])
@@ -48,6 +51,7 @@ def sector_rotation():
 @router.get("/{stock_code}/signal-history")
 def signal_history(stock_code: str):
     """获取历史信号及后续表现"""
+    stock_code = validate_stock_code(stock_code)
     return get_signal_performance_history(stock_code)
 
 
@@ -59,6 +63,7 @@ def watchlist_add(
     note: str = Query("", description="备注"),
 ):
     """添加到自选股"""
+    code = validate_stock_code(code)
     return add_to_watchlist(code=code, name=name, market=market, note=note)
 
 

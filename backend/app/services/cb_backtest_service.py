@@ -52,6 +52,7 @@ STRATEGIES = {
         'sort_key': lambda b: b['price'],  # 价格越低越优先
         'reverse': False,
         'sell_rule': 'price >= 130',
+        'sell_fn': lambda p: p >= 130,
     },
     'dual_low': {
         'name': '双低策略',
@@ -60,6 +61,7 @@ STRATEGIES = {
         'sort_key': lambda b: b['price'],
         'reverse': False,
         'sell_rule': 'price >= 140 or not in top_n',
+        'sell_fn': lambda p: p >= 140,  # "not in top_n" 由调仓轮出处理
     },
     'pancake': {
         'name': '摊大饼策略',
@@ -68,6 +70,7 @@ STRATEGIES = {
         'sort_key': lambda b: b['price'],
         'reverse': False,
         'sell_rule': 'price >= 150 or not in top_n',
+        'sell_fn': lambda p: p >= 150,  # "not in top_n" 由调仓轮出处理
     },
     'ytm_defense': {
         'name': 'YTM保本策略',
@@ -79,6 +82,7 @@ STRATEGIES = {
         'sort_key': lambda b: b['price'],
         'reverse': False,
         'sell_rule': 'price >= 125 or rating_downgrade',
+        'sell_fn': lambda p: p >= 125,  # rating_downgrade 回测内无法判断，仅价格触发
     },
     'revision_game': {
         'name': '下修博弈策略',
@@ -90,6 +94,7 @@ STRATEGIES = {
         'sort_key': lambda b: b['price'],
         'reverse': False,
         'sell_rule': 'price >= 135 or price <= 90',
+        'sell_fn': lambda p: p >= 135 or p <= 90,
     },
     'redeem_game': {
         'name': '强赎博弈策略',
@@ -101,6 +106,7 @@ STRATEGIES = {
         'sort_key': lambda b: abs(b['price'] - 125),  # 距125越近越优先
         'reverse': False,
         'sell_rule': 'price >= 140 or price <= 105',
+        'sell_fn': lambda p: p >= 140 or p <= 105,
     },
 }
 
@@ -584,6 +590,7 @@ def _simulate_strategy(
     filter_fn = strategy_def['filter']
     sort_fn = strategy_def['sort_key']
     reverse = strategy_def.get('reverse', False)
+    sell_fn = strategy_def.get('sell_fn')  # 盘中止损/止盈触发函数 p->bool
 
     rebalance_set = set(d.strftime('%Y-%m-%d') for d in rebalance_dates)
 
@@ -621,6 +628,43 @@ def _simulate_strategy(
                 monthly_returns.append((current_month_key[0], current_month_key[1], monthly_ret))
             current_month_key = month_key
             month_start_value = total_value
+
+        # 盘中止损/止盈：按策略 sell_fn 触发卖出（每个交易日检查，先于调仓）
+        # 修复原 bug：sell_rule 原为死配置，卖出只看轮出 top_n；现让价格阈值真正生效
+        if sell_fn is not None:
+            for code in list(holdings.keys()):
+                price = price_lookup.get((code, date_str))
+                if price is None:
+                    continue
+                if sell_fn(price):
+                    shares = holdings[code]['shares']
+                    sell_value = shares * price
+                    cost = _calc_trade_cost(sell_value, 'sell', commission_rate, 0, slippage_bps)
+                    total_commission += cost * (commission_rate / (commission_rate + slippage_bps / 10000)) if (commission_rate + slippage_bps / 10000) > 0 else 0
+                    total_slippage += sell_value * (slippage_bps / 10000)
+                    total_trade_count += 1
+                    cash += sell_value - cost
+                    trade_log.append({
+                        'date': date_str,
+                        'action': 'sell',
+                        'code': code,
+                        'name': bond_attrs.get(code, {}).get('name', ''),
+                        'price': round(price, 2),
+                        'shares': shares,
+                        'value': round(sell_value, 2),
+                        'cost': round(cost, 2),
+                        'reason': '止盈/止损',
+                    })
+                    del holdings[code]
+            # 卖出后重算总市值，供调仓买入目标使用
+            holdings_value = 0
+            for code, holding in holdings.items():
+                p = price_lookup.get((code, date_str))
+                if p:
+                    holdings_value += holding['shares'] * p
+                else:
+                    holdings_value += holding['shares'] * holding.get('last_price', holding['cost'] / max(holding['shares'], 1))
+            total_value = cash + holdings_value
 
         # 调仓
         if date_str in rebalance_set:

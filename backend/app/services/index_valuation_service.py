@@ -8,12 +8,15 @@
 - 东方财富（基金信息）：网页爬取
 """
 
+import socket
 import requests
 import re
 import math
 import logging
 from typing import Dict, List, Optional
 from datetime import datetime, timedelta
+from concurrent.futures import ThreadPoolExecutor
+import threading
 
 from app.core.cache import get_cache as _base_get_cache, set_cache as _set_cached
 
@@ -28,6 +31,27 @@ _CACHE_TTL_FUND = 86400       # 基金信息缓存1天
 
 def _get_cached(key: str, ttl: int = _CACHE_TTL_VALUATION):
     return _base_get_cache(key, ttl_seconds=ttl)
+
+
+# 富途 OpenD 网关可达性缓存：避免每次请求都去碰 11111 触发 futu-api 的无限重连风暴
+_FUTU_HOST, _FUTU_PORT = "127.0.0.1", 11111
+_futu_usable_cache = {"ok": None, "ts": 0.0}
+_FUTU_PROBE_TTL = 300  # 探测结果缓存 5 分钟
+
+
+def _futu_usable() -> bool:
+    """快速 TCP 探测 FutuOpenD 网关是否可达；不可达则缓存 5 分钟直接降级，杜绝重连风暴。"""
+    import time
+    now = time.time()
+    if _futu_usable_cache["ok"] is not None and now - _futu_usable_cache["ts"] < _FUTU_PROBE_TTL:
+        return _futu_usable_cache["ok"]
+    try:
+        with socket.create_connection((_FUTU_HOST, _FUTU_PORT), timeout=1.0):
+            _futu_usable_cache["ok"] = True
+    except OSError:
+        _futu_usable_cache["ok"] = False
+    _futu_usable_cache["ts"] = now
+    return _futu_usable_cache["ok"]
 
 
 # ============================================================
@@ -387,7 +411,11 @@ def _get_sp500_dividend_with_percentile() -> Dict:
         matches = re.findall(r'(\w+ \d+, \d+)\s+(\d+\.\d+)', text_hist)
         if matches:
             yield_values = [float(y) for _, y in matches if 0.1 <= float(y) <= 20]
-            percentile = _calc_percentile(current_yield, yield_values) if current_yield else None
+            # 股息率与PE/PB语义相反：收益率越高越便宜。
+            # _calc_percentile 返回"历史中≤当前值的比例"（越贵分位越高），
+            # 故此处取反，使"高股息率→低分位(便宜)"，与PE/PB百分位口径一致。
+            raw = _calc_percentile(current_yield, yield_values) if current_yield else None
+            percentile = round((100 - raw), 1) if raw is not None else None
             return {"dividend_yield": current_yield, "percentile": percentile}
         return {"dividend_yield": current_yield, "percentile": None}
     except Exception as e:
@@ -504,6 +532,8 @@ def _fetch_index_klines_sina(symbol: str, days: int = 3650) -> List[Dict]:
 
 def _get_futu_snapshot(code: str) -> Dict:
     """通过富途OpenAPI获取ETF/股票快照（PE/PB/股息率）"""
+    if not _futu_usable():
+        return {"pe": None, "pb": None, "dividend_yield": None}
     try:
         from futu import OpenQuoteContext, RET_OK
         ctx = OpenQuoteContext(host='127.0.0.1', port=11111)
@@ -529,6 +559,8 @@ def _get_futu_snapshot(code: str) -> Dict:
 
 def _get_futu_klines(code: str, years: int = 10) -> List[Dict]:
     """通过富途OpenAPI获取历史K线"""
+    if not _futu_usable():
+        return []
     try:
         from futu import OpenQuoteContext, RET_OK, KLType
         from datetime import datetime, timedelta
@@ -567,13 +599,30 @@ FUTU_CODES = {
     "MSCI_EM": {"snapshot": "US.EEM", "kline": "US.EEM"},       # MSCI新兴市场
 }
 
+# 富途不可用时，恒生/恒生科技 用对应 ETF 的 yfinance 代理（与富途同口径：盈富基金/恒生科技ETF）
+YFINANCE_HK_FALLBACK = {
+    "HSI": "2800.HK",      # 盈富基金
+    "HSTECH": "3067.HK",   # 恒生科技ETF
+}
+
 
 # ============================================================
 # 数据获取：yfinance（备用方案）
 # ============================================================
 
+# yfinance 429 限流短路：一旦被限流，5 分钟内所有 yfinance 调用直接返回空，
+# 避免每个指数都等 yfinance 库内部的退避重试（每次十余秒，19 指数串行必超时）
+_yf_rate_limited_ts = 0.0
+_YF_RATELIMIT_COOLDOWN = 300
+
+
 def _get_etf_pe_pb(ticker_symbol: str) -> Dict:
     """通过yfinance获取ETF的PE/PB/股息率"""
+    import time
+    global _yf_rate_limited_ts
+    # 短路：最近被 429 限流，直接返回空，不再请求
+    if _yf_rate_limited_ts and time.time() - _yf_rate_limited_ts < _YF_RATELIMIT_COOLDOWN:
+        return {"pe": None, "pb": None, "dividend_yield": None}
     try:
         import yfinance as yf
         import os
@@ -605,7 +654,12 @@ def _get_etf_pe_pb(ticker_symbol: str) -> Dict:
             "dividend_yield": round(div_yield, 2) if div_yield and 0.01 < div_yield < 30 else None,
         }
     except Exception as e:
-        logger.warning(f"获取ETF {ticker_symbol}估值失败: {e}")
+        msg = str(e)
+        if "Too Many Requests" in msg or "Rate" in msg or "429" in msg:
+            _yf_rate_limited_ts = time.time()
+            logger.warning(f"yfinance 被限流(429)，{_YF_RATELIMIT_COOLDOWN}s 内短路所有 yfinance 调用: {ticker_symbol}")
+        else:
+            logger.warning(f"获取ETF {ticker_symbol}估值失败: {e}")
     return {"pe": None, "pb": None, "dividend_yield": None}
 
 
@@ -744,18 +798,51 @@ def _validate_range(value: Optional[float], min_val: float, max_val: float) -> O
 
 
 # 10年期国债收益率近似值（用于风险溢价计算）
-_BOND_YIELDS = {
-    "中国": 2.3, "中国香港": 4.0, "美国": 4.3, "日本": 1.0,
-    "德国": 2.5, "印度": 7.0, "越南": 3.0, "澳大利亚": 4.2, "全球": 4.0,
-}
+# 实时10Y国债收益率缓存（按国家），避免每次重复解析收益率曲线
+_BOND_YIELD_10Y_CACHE: Dict[str, tuple] = {}  # country -> (timestamp, yield)
+
+
+def _get_bond_yield_10y(country: str) -> Optional[float]:
+    """获取实时10年期国债收益率（%），用于股权风险溢价。
+
+    可靠源：akshare bond_zh_us_rate 同时提供中国/美国10Y（项目已有封装）。
+    其他市场暂无可靠免费实时源，返回 None —— 按"宁可空着"原则，
+    风险溢价将被排除在综合信号之外，而不是用陈旧的硬编码常量。
+    """
+    import time
+    now = time.time()
+    cached = _BOND_YIELD_10Y_CACHE.get(country)
+    if cached and now - cached[0] < 86400:
+        return cached[1]
+
+    # 国家 -> 收益率曲线数据源
+    src_map = {"美国": "us", "全球": "us", "中国": "cn"}
+    src = src_map.get(country)
+    if not src:
+        return None
+    try:
+        from app.services.akshare_service import AKShareService
+        curve = AKShareService().get_yield_curve()
+        if not curve or src not in curve or not curve[src]:
+            return None
+        y10 = curve[src][-1].get("y10")
+        if not y10 or y10 <= 0:
+            return None
+        _BOND_YIELD_10Y_CACHE[country] = (now, y10)
+        return y10
+    except Exception as e:
+        logger.warning(f"获取{country} 10Y国债收益率失败: {e}")
+        return None
 
 
 def _calc_risk_premium(pe: Optional[float], country: str) -> Optional[float]:
-    """计算股权风险溢价 = 盈利收益率 - 10年期国债收益率"""
+    """计算股权风险溢价 = 盈利收益率 - 10年期国债收益率（实时）"""
     if not pe or pe <= 0:
         return None
     earnings_yield = 1 / pe * 100
-    bond_yield = _BOND_YIELDS.get(country, 3.5)
+    bond_yield = _get_bond_yield_10y(country)
+    if bond_yield is None:
+        return None
     return round(earnings_yield - bond_yield, 2)
 
 
@@ -800,19 +887,58 @@ def _calc_investment_signal(pe_p: Optional[float], pb_p: Optional[float],
 
 
 def get_all_indices_data() -> Dict:
-    """获取全部指数估值数据（带缓存）"""
+    """获取全部指数估值数据。
+    19 个指数串行抓取（估值+K线+基金信息各一外部调用）需 1-2 分钟，无法在 60s
+    请求超时内同步完成；而并行会因 akshare/py_mini_racer 非线程安全而崩进程。
+    故采用后台异步抓取：前端秒回（缓存/旧缓存/加载中，不 504），后台线程串行
+    抓完写缓存，前端稍后刷新即得完整数据。"""
     cache_key = "index_valuation_all"
     cached = _get_cached(cache_key, _CACHE_TTL_VALUATION)
     if cached:
         return cached
+    _start_index_background_fetch(cache_key)  # 幂等触发后台抓取
+    stale = _base_get_cache(cache_key, ttl_seconds=365 * 24 * 3600)  # 任意旧缓存
+    if stale:
+        return stale
+    return {"indices": [], "update_time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "total": 0, "data_sources": [],
+            "note": "指数数据加载中（外部源较慢，约 1-2 分钟），请稍后刷新"}
 
+
+_index_fetch_state = {"running": False, "lock": threading.Lock()}
+
+
+def _start_index_background_fetch(cache_key: str):
+    """幂等触发后台串行抓取（mini_racer 单线程安全，无超时限制，daemon 不阻塞请求）。"""
+    if _index_fetch_state["running"]:
+        return
+    with _index_fetch_state["lock"]:
+        if _index_fetch_state["running"]:
+            return
+        _index_fetch_state["running"] = True
+
+    def _run():
+        try:
+            result = _fetch_all_indices_core()
+            _set_cached(cache_key, result)
+            logger.info(f"指数估值后台抓取完成，共 {result.get('total')} 个指数")
+        except Exception as e:
+            logger.warning(f"指数估值后台抓取失败: {e}")
+        finally:
+            with _index_fetch_state["lock"]:
+                _index_fetch_state["running"] = False
+
+    threading.Thread(target=_run, daemon=True).start()
+
+
+def _fetch_all_indices_core() -> Dict:
+    """实际抓取全部指数（可能较慢，由 get_all_indices_data 在线程池内加超时执行）"""
     # 预获取标普500数据（只请求一次）
     sp500_pe = _get_sp500_pe_with_percentile()
     sp500_pb = _get_sp500_pb_with_percentile()
     sp500_div = _get_sp500_dividend_with_percentile()
 
-    results = []
-    for code, config in INDEX_CONFIG.items():
+    def _do_one(code, config):
         item = {
             "code": code,
             "name": config["name"],
@@ -882,15 +1008,27 @@ def get_all_indices_data() -> Dict:
             item["pe"] = _get_ndx_pe()
             # PB、百分位、股息率、ROE 均不设置（保持 None）
 
-        # 恒生指数/恒生科技：富途API优先
+        # 恒生指数/恒生科技：富途优先，不可用时降级到 yfinance ETF 代理 + akshare 股息率
         elif code in ("HSI", "HSTECH"):
             futu_code = FUTU_CODES.get(code, {}).get("snapshot")
-            if futu_code:
+            futu_data = None
+            if futu_code and _futu_usable():
                 futu_data = _get_futu_snapshot(futu_code)
-                item["pe"] = futu_data["pe"]
-                item["pb"] = futu_data["pb"]
+            if futu_data and (futu_data.get("pe") or futu_data.get("pb")):
+                item["pe"] = futu_data.get("pe")
+                item["pb"] = futu_data.get("pb")
                 item["dividend_yield"] = futu_data.get("dividend_yield")
             else:
+                # 富途不可用 → yfinance ETF 代理（盈富基金/恒生科技ETF，与富途同口径）
+                yf_tkr = YFINANCE_HK_FALLBACK.get(code)
+                if yf_tkr:
+                    etf_data = _get_etf_pe_pb(yf_tkr)
+                    item["pe"] = etf_data.get("pe")
+                    item["pb"] = etf_data.get("pb")
+                    if not item.get("dividend_yield"):
+                        item["dividend_yield"] = etf_data.get("dividend_yield")
+            # 股息率仍缺失时补 akshare 乐咕乐股
+            if not item.get("dividend_yield"):
                 hsi_data = _get_hsi_pe()
                 item["dividend_yield"] = hsi_data.get("dividend_yield")
             if item["pb"] and item["pe"] and item["pe"] > 0:
@@ -965,7 +1103,18 @@ def get_all_indices_data() -> Dict:
             item["dividend_yield"], item["risk_premium"]
         )
 
-        results.append(item)
+        return item
+
+    # 串行抓取：akshare 底层依赖 py_mini_racer(V8)，其 MiniRacer() 非线程安全；
+    # 上一轮 8 线程并行让多线程同时调 akshare(中证/乐咕)，V8 native crash 直接崩掉
+    # 整个后端进程（Python try/except 无法捕获）。故必须串行（单线程调用安全）。
+    # yfinance 已加 429 短路，串行也能在超时内完成；单个指数失败不影响其他。
+    results = []
+    for code, config in INDEX_CONFIG.items():
+        try:
+            results.append(_do_one(code, config))
+        except Exception as e:
+            logger.warning(f"指数 {code} 抓取失败: {e}")
 
     # 按国家/地区排序
     country_order = {"中国": 0, "中国香港": 1, "美国": 2, "日本": 3, "德国": 4, "印度": 5, "越南": 6, "澳大利亚": 7, "全球": 8}
@@ -978,7 +1127,6 @@ def get_all_indices_data() -> Dict:
         "data_sources": ["中证指数", "multpl.com", "yfinance", "富途OpenAPI", "乐咕乐股", "东方财富"],
     }
 
-    _set_cached(cache_key, result)
     return result
 
 

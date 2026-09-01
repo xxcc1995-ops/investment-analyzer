@@ -57,7 +57,12 @@ def _get_us_pe() -> Optional[float]:
 
 
 def _enrich_bond_data(bond: Dict, pe: Optional[float]) -> Dict:
-    """为债券数据添加PE和股债比"""
+    """为债券数据添加PE、盈利收益率、股债比，以及「美债10Y − 盈利收益率」差值。
+
+    差值 = 10年期国债收益率 − 标的指数盈利收益率(1/PE)。
+    缩窄（长债降得快）→ 股权风险溢价上升 → 债市资金挤出流入股市 → 股市涨；
+    走阔（盈利跌得更快）→ 长债降幅被盈利恶化抵消 → 高开低走 / 债涨股跌背离。
+    """
     if bond is None:
         return None
     bond["pe"] = round(pe, 2) if pe else None
@@ -65,9 +70,12 @@ def _enrich_bond_data(bond: Dict, pe: Optional[float]) -> Dict:
         earnings_yield = (1 / pe) * 100
         bond["stock_bond_ratio"] = round(earnings_yield / bond["yield"], 2)
         bond["earnings_yield"] = round(earnings_yield, 2)
+        # 差值 = 美债10年期收益率 − 标普500盈利收益率
+        bond["spread"] = round(bond["yield"] - earnings_yield, 2)
     else:
         bond["stock_bond_ratio"] = None
         bond["earnings_yield"] = None
+        bond["spread"] = None
     return bond
 
 

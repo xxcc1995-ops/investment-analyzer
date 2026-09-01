@@ -87,6 +87,7 @@ export default function IndexValuation() {
   const [activeTab, setActiveTab] = useState<'overview' | 'chart' | 'returns' | 'funds'>('overview')
   const [indices, setIndices] = useState<IndexData[]>([])
   const [loading, setLoading] = useState(false)
+  const [note, setNote] = useState<string>('')
   const [updateTime, setUpdateTime] = useState('')
   const [filterCategory, setFilterCategory] = useState<'all' | '宽基' | '红利'>('all')
   const [countryFilter, setCountryFilter] = useState<string>('all')
@@ -104,6 +105,7 @@ export default function IndexValuation() {
       const res = await axios.get(`${API_BASE}/index-valuation/data`)
       setIndices(res.data.indices || [])
       setUpdateTime(res.data.update_time || '')
+      setNote(res.data.note || '')
     } catch (e) {
       console.error('获取指数估值数据失败:', e)
     } finally {
@@ -112,6 +114,14 @@ export default function IndexValuation() {
   }, [])
 
   useEffect(() => { loadData() }, [loadData])
+
+  // 后台异步抓取：若后端仍在加载（note 含"加载中"且数据未到），每 5s 轮询直到有数据
+  useEffect(() => {
+    if (indices.length === 0 && note && note.includes('加载中')) {
+      const t = setTimeout(loadData, 5000)
+      return () => clearTimeout(t)
+    }
+  }, [indices.length, note, loadData])
 
   const loadHistory = useCallback(async (code: string) => {
     if (!code) return
@@ -308,7 +318,13 @@ export default function IndexValuation() {
           </table>
 
           {filtered.length === 0 && !loading && (
-            <EmptyState title="暂无数据" />
+            note ? (
+              <div style={{ textAlign: 'center', padding: 60 }}>
+                <LoadingSpinner size="medium" text={note} />
+              </div>
+            ) : (
+              <EmptyState title="暂无数据" />
+            )
           )}
 
           {/* 说明 */}

@@ -1,7 +1,8 @@
 """可转债双低轮动策略服务 - 从集思录获取可转债数据，支持多维度质量评分
 
 机构级增强：
-- 多源容错：集思录优先，AKShare(东方财富)兜底
+- 多源容错：集思录 API 优先 → 集思录网页版(Scrapling)兜底 → AKShare(东方财富)基础字段兜底
+- 数据可靠性：依赖 剩余年限/成交额/YTM 的策略在 AKShare 源下严格返回空+提示（CLAUDE.md「宁可空着」）
 - 纯债价值计算（现金流折现）
 - 税后到期收益率
 - 三低策略（低价格+低溢价+低规模）
@@ -22,10 +23,36 @@ logger = logging.getLogger(__name__)
 from app.core.cache import get_cache as _get_cache, set_cache as _set_cache, clear_cache as _clear_cache, get_realtime_ttl as _get_realtime_ttl
 from app.core.utils import safe_float as _safe_float, safe_float_or_zero as _safe_float_or_zero
 
+# ==================== 字段可用性约束（对齐 CLAUDE.md「宁可空着不要不可靠数据」）====================
+# AKShare 兜底数据（bond_zh_cov）实测不提供以下字段：剩余年限(year_left)、到期收益率(ytm_rt)、
+# 成交额/流动性(turnover)。集思录 API / 集思录网页版(Scrapling) 才提供。
+# 若某策略筛选依赖这些字段，而当前数据源非集思录，则严格返回空 + 明确提示，
+# 绝不展示"伪候选"（避免误导真金白银决策）。
+_CB_REQUIRED_FIELDS = {
+    'andaoquan': ['year_left', 'turnover', 'ytm_rt'],
+    'pancake': ['year_left', 'turnover'],
+    'dual_low': ['year_left', 'turnover'],
+    'ytm_defense': ['ytm_rt', 'year_left', 'turnover'],
+    'revision_game': ['ytm_rt', 'year_left', 'turnover'],
+    'redeem_game': ['year_left', 'turnover'],
+    'triple_low': ['year_left', 'turnover'],
+    'negative_premium': ['turnover', 'year_left'],
+    'rotation': ['year_left', 'turnover'],
+    'grid': ['year_left', 'turnover'],
+    'problem_bond': ['year_left', 'turnover'],
+}
+
+_CB_FIELD_CN = {
+    'year_left': '剩余年限',
+    'turnover': '成交额/流动性',
+    'ytm_rt': '到期收益率(YTM)',
+}
+
 # ==================== 多源容错健康追踪 ====================
 _source_health_lock = threading.Lock()
 _source_health = {
     'jisilu': {'healthy': True, 'last_fail': 0, 'cooldown': 60},
+    'jisilu_web': {'healthy': True, 'last_fail': 0, 'cooldown': 60},
     'akshare': {'healthy': True, 'last_fail': 0, 'cooldown': 60},
 }
 
@@ -56,7 +83,9 @@ def _is_source_healthy(source: str) -> bool:
 class CBService:
     """可转债双低轮动策略服务（增强版：多维度质量评分）"""
 
-    JISILU_CB_URL = 'https://www.jisilu.cn/data/cbnew/cb_list/'
+    # 注意：集思录可转债数据接口为 cb_list_new（旧接口 cb_list 已废弃，返回空）
+    JISILU_CB_URL = 'https://www.jisilu.cn/data/cbnew/cb_list_new/'
+    JISILU_CB_WEB_URL = 'https://www.jisilu.cn/data/cbnew/'
 
     HEADERS = {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
@@ -185,6 +214,93 @@ class CBService:
             return []
 
     @staticmethod
+    def _fetch_jisilu_cb_web() -> List[dict]:
+        """集思录网页版兜底（Scrapling 爬取），对齐 CLAUDE.md 第118行。
+
+        需已登录集思录（复用 _get_session 的登录态 cookie）；无登录态时返回空。
+        解析 cbnew 表格得到含 剩余年限/到期收益率/成交额 的完整字段，
+        归一化为与集思录 API 相同的 cell schema，data_source 标记 'jisilu'。
+        任何解析异常/校验失败都返回空，避免脏数据（遵循 CLAUDE.md 高置信度原则）。
+        """
+        try:
+            from app.utils.scraper import scrape, extract_table
+
+            session = CBService._get_session()
+            cookies = dict(session.cookies) if hasattr(session, 'cookies') else {}
+            if not cookies:
+                logger.info('集思录网页版兜底跳过：无登录态 cookie')
+                return []
+
+            page = scrape(CBService.JISILU_CB_WEB_URL, cookies=cookies, timeout=20)
+            rows = extract_table(page, 'table')
+            if not rows:
+                logger.warning('集思录网页版兜底：未解析到表格')
+                return []
+
+            def col(row: dict, *keys: str) -> str:
+                for h, v in row.items():
+                    for k in keys:
+                        if k and k in (h or ''):
+                            return v
+                return ''
+
+            out = []
+            for r in rows:
+                bond_id = str(col(r, '代码') or '').strip()
+                if not bond_id:
+                    continue
+                try:
+                    price = _safe_float_or_zero(col(r, '现价'))
+                    if price <= 0:
+                        continue
+                    year_left = _safe_float_or_zero(col(r, '剩余年限'))
+                    ytm = _safe_float_or_zero(col(r, '到期收益率', 'YTM'))
+                    amt_raw = str(col(r, '成交额') or '')
+                    amount = _safe_float_or_zero(amt_raw)
+                    if '亿' in amt_raw:  # 集思录成交额单位为亿元 → 转为万元供 turnover 计算
+                        amount = amount * 10000
+                    rating = str(col(r, '评级', '信用') or '').strip()
+                    if not rating or rating not in CBService.RATING_ORDER:
+                        continue
+                    # 基础校验，避免脏数据进入筛选
+                    if year_left != 0 and not (0 <= year_left <= 12):
+                        continue
+                    if not (50 <= price <= 1000):
+                        continue
+                    cell = {
+                        'bond_id': bond_id,
+                        'bond_nm': str(col(r, '名称', '转债') or '').strip(),
+                        'stock_id': '',
+                        'stock_nm': str(col(r, '正股') or '').strip(),
+                        'price': price,
+                        'convert_price': _safe_float_or_zero(col(r, '转股价')),
+                        'convert_value': _safe_float_or_zero(col(r, '转股价值')),
+                        'premium_rt': _safe_float_or_zero(col(r, '溢价率')),
+                        'rating_cd': rating,
+                        'sprice': _safe_float_or_zero(col(r, '正股价')),
+                        'curr_iss_amt': _safe_float_or_zero(col(r, '余额', '规模')),
+                        'ytm_rt': ytm,
+                        'year_left': year_left,
+                        'amount': amount,
+                        'volume': '',
+                        'force_redeem': col(r, '强赎'),
+                        # 其余字段留空，由 _normalize_cb 兜底
+                        'put_ytm_rt': '', 'next_put_dt': '', 'convert_dt': '',
+                        'redeem_price': '', 'dividend_yield': '', 'market_cap': '',
+                        'maturity_dt': '', 'orig_iss_amt': '', 'stock_pe': '',
+                        'stock_pb': '', 'convert_flag': '', 'increase_rt': '',
+                        'sincrease_rt': '',
+                    }
+                    out.append(cell)
+                except Exception:
+                    continue
+            logger.info(f'集思录网页版兜底获取可转债数据: {len(out)}只')
+            return out
+        except Exception as e:
+            logger.warning(f'集思录网页版兜底失败: {e}')
+            return []
+
+    @staticmethod
     def _fetch_cb_data() -> Tuple[List[dict], str]:
         """多源容错获取可转债数据
 
@@ -192,7 +308,7 @@ class CBService:
             (rows, data_source): 数据行列表 + 数据来源标识
             data_source: 'jisilu' / 'akshare' / 'none'
         """
-        # 1. 优先集思录
+        # 1. 优先集思录 API
         if _is_source_healthy('jisilu'):
             rows = CBService._fetch_jisilu_cb()
             if rows:
@@ -201,7 +317,16 @@ class CBService:
             else:
                 _mark_source_fail('jisilu')
 
-        # 2. AKShare兜底
+        # 2. 集思录网页版（Scrapling 爬取）兜底 —— 对齐 CLAUDE.md 第118行
+        if _is_source_healthy('jisilu_web'):
+            rows = CBService._fetch_jisilu_cb_web()
+            if rows:
+                _mark_source_ok('jisilu_web')
+                return rows, 'jisilu'
+            else:
+                _mark_source_fail('jisilu_web')
+
+        # 3. AKShare 兜底（缺 剩余年限/成交额/YTM，仅基础字段可用）
         if _is_source_healthy('akshare'):
             rows = CBService._fetch_akshare_cb()
             if rows:
@@ -251,10 +376,11 @@ class CBService:
             # 剩余规模(亿)
             curr_iss_amt = _safe_float_or_zero(cell.get('curr_iss_amt', 0))
 
-            # 成交额(万)
+            # 成交额(万)：集思录 cb_list_new 不直接给 amount，需用 成交量(手) 推算
+            # 1手=10张=1000元面值，成交额(元)=volume*10*price → 成交额(万)=volume*price/1000
             volume = _safe_float_or_zero(cell.get('volume', 0))
             amount = _safe_float_or_zero(cell.get('amount', 0))
-            turnover = amount if amount > 0 else volume * price / 10
+            turnover = amount if amount > 0 else volume * price / 1000
 
             # 正股价
             stock_price = _safe_float_or_zero(cell.get('sprice', 0))
@@ -263,8 +389,8 @@ class CBService:
             # 转债涨跌幅
             bond_change = _safe_float_or_zero(cell.get('increase_rt', 0))
 
-            # 是否强赎
-            force_redeem = cell.get('force_redeem', '')
+            # 是否强赎：cb_list_new 用 redeem_dt(强赎/赎回公告日) 标记已进入赎回流程的转债
+            force_redeem = cell.get('force_redeem', '') or cell.get('redeem_dt', '')
             # 是否到期
             is_matured = year_left <= 0
 
@@ -282,12 +408,12 @@ class CBService:
             orig_iss_amt = _safe_float_or_zero(cell.get('orig_iss_amt', 0))
             # 正股PE
             stock_pe = _safe_float_or_zero(cell.get('stock_pe', 0))
-            # 正股PB
-            stock_pb = _safe_float_or_zero(cell.get('stock_pb', 0))
+            # 正股PB（cb_list_new 字段名为 pb）
+            stock_pb = _safe_float_or_zero(cell.get('stock_pb', cell.get('pb', 0)))
             # 是否进入转股期
             convert_flag = cell.get('convert_flag', '')
-            # 强赎触发价
-            redeem_price = _safe_float_or_zero(cell.get('redeem_price', 0))
+            # 强赎触发价（cb_list_new 字段名为 real_force_redeem_price）
+            redeem_price = _safe_float_or_zero(cell.get('redeem_price', cell.get('real_force_redeem_price', 0)))
             # 正股股息率
             dividend_yield = _safe_float_or_zero(cell.get('dividend_yield', 0))
             # 正股市值(亿)
@@ -388,9 +514,11 @@ class CBService:
         if year_left <= 0.5 or price <= 0:
             return 0.01  # 默认1%
 
-        # 近似公式：coupon ≈ (price * ytm + (100 - price) / year_left) / 100
-        # 即年化利息 ≈ 持有收益 + 年化资本利得
-        coupon = (price * ytm + (100 - price) / year_left) / 100
+        # 近似公式（由 P ≈ Σ c·100/(1+y)^t + 100/(1+y)^n 一阶展开）：
+        #   y ≈ c·100/P + (100 - P)/(P·n)  →  c ≈ (P·y - (100 - P)/n) / 100
+        # 注意第二项符号：溢价债(P>100)票息应高于YTM，折价债(P<100)票息低于YTM。
+        # 旧实现误用加号，会系统性低估溢价债票息、高估折价债票息，进而错估债底。
+        coupon = (price * ytm - (100 - price) / year_left) / 100
         return max(coupon, 0.002)  # 最低0.2%
 
     @staticmethod
@@ -1165,7 +1293,7 @@ class CBService:
             'complexity': '中等',
             'min_capital': '5万+',
             'expected_return': '10-20%',
-            'description': '经典量化策略，按双低值排序轮动，历史回测长期年化10-15%。',
+            'description': '经典量化策略（集思录推广）。双低值=转债价格+溢价率×100，越低越安全（债底厚+股性弹性好）；<120算不错，<110难得。中信证券回测2019-2025.5年化13.63%、连续四年正收益，但2022年后随转债扩容与违约增多表现回落。警惕"假双低"：价格低可能是公司有风险。',
             'rules': [
                 '筛选：双低值 ≤ 130',
                 '排除：ST、强赎、剩余年限<1年',
@@ -1260,7 +1388,7 @@ class CBService:
             'complexity': '简单',
             'min_capital': '1万+',
             'expected_return': '3-6%（保底）',
-            'description': '最保守策略，只买到期收益率为正的转债，持有到期保证不亏。',
+            'description': '最保守策略（对应书中"正收益策略"）：买价<到期赎回价即YTM>0，持有到期稳赚。四条硬规矩——买价<赎回价、评级≥AA、剩余>半年、日成交额>5000万。例：苏银转债101.5买/109赎/YTM+7.1%/AAA，南银99.8/107/+5.0%/AAA。注意利息扣20%个税，税后YTM比税前低一截；前提是公司不违约。',
             'rules': [
                 '筛选：到期收益率 > 0，评级 ≥ AA',
                 '排序：到期收益率降序',
@@ -1307,7 +1435,7 @@ class CBService:
             'complexity': '较高',
             'min_capital': '3万+',
             'expected_return': '15-30%（若成功）',
-            'description': '寻找正股价接近下修触发价的转债，博弈公司下修转股价带来的价格跳跃。',
+            'description': '寻找正股价接近下修触发价的转债，博弈公司下修转股价带来的价格跳跃（对应书中"下修博弈策略"）。下修到底几乎必涨：洪涛公告次日+3.5%、海兰转股价15.16→10.88(转股价值66→100)、财通2025.6下修到底次日+4.65%收于120元。失败案例：蓝盾正股已退市，下修到0.05元也救不回；晶澳提议下修仅63.47%赞成、未过66.67%门槛被否后下跌；宏图三次下修说明基本面持续恶化。',
             'rules': [
                 '筛选：正股价/转股价在70-95%区间',
                 '优先：临近回售期、到期收益率>0',
@@ -1355,7 +1483,7 @@ class CBService:
             'complexity': '中-高',
             'min_capital': '3万+',
             'expected_return': '10-20%',
-            'description': '寻找转股价值接近130强赎线的转债，博弈公司促转股行为。',
+            'description': '寻找转股价值接近130强赎线的转债，博弈公司促转股行为（对应书中"强赎策略"）。赚钱路径：在100-120元低位买入，等正股涨起触发强赎、价格到130+时卖出赚30%-80%；强赎公告后价格回落，卖得及时利润已落袋。高位接盘是灾难：蓝盾450→100(-78%)、卡倍232→100、美诺~230→100。预防最好办法：关注集思录赎回计数(15/30)，快到15天就减仓。',
             'rules': [
                 '筛选：转股价值在100-130区间',
                 '优先：未转股比例高、剩余期限短',
@@ -1452,7 +1580,7 @@ class CBService:
             'complexity': '较高',
             'min_capital': '10万+',
             'expected_return': '2-8%（单次）',
-            'description': '当转股溢价率为负时，买入转债并申请转股，次日获得正股后卖出，赚取价差。需注意T+1风险和正股波动。',
+            'description': '当转股溢价率为负时，买入转债并申请转股，次日卖股赚价差（对应书中"负溢价转股策略"）。步骤：发现溢价率<0→买入转债→当日收盘前提交转股→次日拿到股票开盘卖出，利润=转股价值-买入价。三个坑：①T+1风险（转股拿到的是股票，次日才能卖，华兴转债有人186.2元买入、溢价-5.1%，次日正股跌导致套利失败）；②转股期限制（未到转股期负溢价没用）；③溢价率会自己修复（套利者涌入后很快回零，窗口极短）。操作要点：确认转股期、-3%以上才值得做、收盘前买入转股、次日尽早卖、小仓位试。',
             'rules': [
                 '筛选：溢价率 < -1%（扣除交易成本后仍有利润）',
                 '优先：流动性好（成交额>500万）、正股波动小',
@@ -1491,7 +1619,190 @@ class CBService:
             'sort_key': lambda b: b['premium_rt'],  # 负溢价越深越优先
             'reverse': False,
         },
+        'rotation': {
+            'name': '轮动策略',
+            'master': '集思录量化派',
+            'source': '《可转债：从入门到精通的八大战法》第四章',
+            'philosophy': '不是持有最优，而是持续趋优：定期重算全市场排名，留下靠前的、换走跌出排名的',
+            'risk_level': '中',
+            'complexity': '中等',
+            'min_capital': '5万+',
+            'expected_return': '15-25%',
+            'description': '动态调仓的进阶玩法。轮动因子不止双低，还有价格/溢价率/规模/波动率，"三低一高"（低价格+低溢价率+低剩余规模+高波动率）是当前主流。双低轮动2019-2024年化约15.2%、最大回撤约9.8%，但2022年后随转债扩容与违约增多，表现有所回落。',
+            'rules': [
+                '筛选：双低值≤130（或三低值低的），排除ST/已公告强赎/剩余<1年',
+                '重排：每周或每月重算全市场排名',
+                '换仓：跌出前20名的卖出，换入排名更靠前的',
+                '持有：等权持有10-20只，优胜劣汰',
+            ],
+            'suitable_for': [
+                '有时间操作、能坚持纪律的投资者',
+                '追求年化15-25%，能接受约8倍换手率',
+                '理解轮动因子（价格/溢价率/规模/波动率）',
+                '本金5万以上以便分散',
+            ],
+            'warnings': [
+                '频繁交易=手续费+滑点：8倍换手率会蚕食利润，建议用低佣金账户',
+                '三天打鱼两天晒网不适合：轮动精髓是"走弱的赶紧换，走强的继续留"',
+                '只看双低值不看质量：可能调入暴雷转债',
+                '历史收益≠未来：扩容+违约增多后策略衰减明显',
+            ],
+            'risks': [
+                {'name': '调仓时正好卖在低点', 'probability': '中等', 'impact': '错过反弹', 'solution': '固定周期调仓，不临时操作'},
+                {'name': '双低陷阱', 'probability': '中等', 'impact': '调入后继续跌', 'solution': '叠加质量评分过滤'},
+                {'name': '市场系统性下跌', 'probability': '低', 'impact': '全部持仓下跌', 'solution': '控制仓位、保留现金'},
+            ],
+            'pitfalls': [
+                '无纪律乱换 → 追涨杀跌，违背"趋优"本意',
+                '只看双低不看质量 → 调入C/D级转债踩雷',
+                '忽视交易成本 → 收益被手续费吃光',
+            ],
+            'filter': lambda b: (
+                b['price'] <= 130
+                and b['premium_rt'] <= 30
+                and b['curr_iss_amt'] <= 5
+                and b['year_left'] >= 1
+                and b['turnover'] >= 100
+                and CBService.RATING_ORDER.get(b['rating_cd'], 0) >= 1  # A-及以上
+            ),
+            'sort_key': lambda b: b.get('triple_low', b['price'] + b['premium_rt'] + b['curr_iss_amt'] * 10),
+            'reverse': False,
+        },
+        'grid': {
+            'name': '临期债网格策略',
+            'master': '网格交易派',
+            'source': '《可转债：从入门到精通的八大战法》第五章',
+            'philosophy': '用赎回价当锚，在价格区间里机械低买高卖"织网"赚差价',
+            'risk_level': '中',
+            'complexity': '中等',
+            'min_capital': '2万+',
+            'expected_return': '网格收益（取决于波动）',
+            'description': '临期债（剩余不到1.5年）做网格有三大优势：价格有锚（赎回价摆着，难长期偏离）、波动收敛（越临近到期越向赎回价靠拢）、T+0（当天买当天卖）。案例沪工转债近3月在105-125元晃荡、赎回价110元，用2元/格织网。实战参数见"网格交易"页。',
+            'rules': [
+                '选债：临期债（剩余0.5-1.5年），价格围绕赎回价波动',
+                '区间：看近3个月波动范围，上下留10%余量',
+                '间距：1.5%-2%一格（太密手续费吃利润，太疏错过波动）',
+                '底仓：先买30%-50%，留余量给下方网格；条件单自动执行',
+            ],
+            'suitable_for': [
+                '没时间盯盘（可用券商条件单自动织网）',
+                '想赚波动差价、又怕大跌的人（赎回价兜底）',
+                '理解网格"机械低买高卖"逻辑',
+                '本金2万以上',
+            ],
+            'warnings': [
+                '最怕跌破下限：价格跌出网格最低线就满仓，没法继续网格卖——选临期债正是靠赎回价兜底',
+                '正股突发大利空跌破区间下限，需人工止损',
+                '间距太密=手续费吃掉利润；太疏=错过波动',
+            ],
+            'risks': [
+                {'name': '跌破网格下限', 'probability': '中等', 'impact': '满仓无筹码可卖', 'solution': '选临期债（赎回价兜底）+ 设止损'},
+                {'name': '正股退市', 'probability': '低', 'impact': '本金大损', 'solution': '只选正股未退市、评级≥AA-'},
+                {'name': '流动性枯竭', 'probability': '低', 'impact': '想卖卖不出', 'solution': '成交额>50万'},
+            ],
+            'pitfalls': [
+                '不设止损 → 跌破下限后深套',
+                '区间设太宽/太窄 → 要么织不到网，要么频繁无效成交',
+                '满仓后无筹码 → 反弹也赚不到',
+            ],
+            'filter': lambda b: (
+                0.3 <= b['year_left'] <= 1.5
+                and b['price'] >= 100
+                and b['price'] <= 125
+                and CBService.RATING_ORDER.get(b['rating_cd'], 0) >= 3  # AA-及以上
+                and b['turnover'] >= 50
+            ),
+            'sort_key': lambda b: b['price'],
+            'reverse': False,
+        },
+        'problem_bond': {
+            'name': '问题债博弈策略',
+            'master': '困境博弈派',
+            'source': '《可转债：从入门到精通的八大战法》第八章',
+            'philosophy': '只抓"假问题债"——市场恐慌超跌、但基本面尚可的转债，远离真问题债',
+            'risk_level': '高',
+            'complexity': '较高',
+            'min_capital': '1万+（小仓位）',
+            'expected_return': '困境反转收益（不确定）',
+            'description': '问题债分两类：真问题债（公司确实不行，如搜特退市违约、蓝盾下修到0.05元也救不回）必远离；假问题债（评级AA以上、正股非ST、价70-90元、无违约史）可在恐慌期布局，且重整方案通常优先保护5万元以内小额债权人（如正邦、全筑）。2024年6月低价转债恐慌，基本面尚可者半年内修复（低价转债指数涨7.21%）。',
+            'rules': [
+                '仓位极小：不超过总仓位5%',
+                '只买"假问题债"：评级AA以上、正股非ST、价格70-90元',
+                '小额优先：5万元以内有重整保护',
+                '设止损：跌过一定幅度无条件砍仓，不追涨',
+            ],
+            'suitable_for': [
+                '已有正收益/双低/轮动经验的老手',
+                '能区分真假问题债（评级/审计意见/退市风险）',
+                '只用极小仓位博弈困境反转',
+                '理解重整清偿逻辑',
+            ],
+            'warnings': [
+                '新手先学好基础策略，再考虑问题债',
+                '真问题债血本无归：搜特转债跌到1.374元、蓝盾正股退市下修无效',
+                '大股东反对/正股已退市的下修救不回（晶澳63.47%未过66.67%被否）',
+                '小额保护不保证：超过5万的部分可能大幅打折',
+            ],
+            'risks': [
+                {'name': '真问题债违约', 'probability': '高(对真问题债)', 'impact': '本金损失50%-100%', 'solution': '严格只买AA以上、非ST'},
+                {'name': '继续下跌', 'probability': '中等', 'impact': '浮亏扩大', 'solution': '设止损线'},
+                {'name': '流动性枯竭', 'probability': '中等', 'impact': '想卖卖不出', 'solution': '只买成交额>30万'},
+            ],
+            'pitfalls': [
+                '把真问题债当假问题债 → 血本无归',
+                '重仓博弈 → 单只暴雷毁灭性',
+                '不止损死扛 → 越套越深',
+            ],
+            'filter': lambda b: (
+                b['price'] >= 70
+                and b['price'] <= 92
+                and CBService.RATING_ORDER.get(b['rating_cd'], 0) >= 4  # AA及以上
+                and b['premium_rt'] >= 5
+                and b['year_left'] >= 0.5
+                and b['turnover'] >= 30
+            ),
+            'sort_key': lambda b: b['price'],  # 越便宜=恐慌越深，优先看
+            'reverse': False,
+        },
     }
+
+    # 《可转债：从入门到精通的八大战法》权威八战法（按书中章节顺序）
+    EIGHT_STRATEGIES = [
+        'ytm_defense',    # 第二章 正收益策略
+        'dual_low',       # 第三章 双低策略
+        'rotation',       # 第四章 轮动策略
+        'grid',           # 第五章 临期债网格策略
+        'revision_game',  # 第六章 下修博弈策略
+        'redeem_game',    # 第七章 强赎策略
+        'problem_bond',   # 第八章 问题债博弈策略
+        'negative_premium',  # 第九章 负溢价转股策略
+    ]
+
+    @classmethod
+    def get_strategy_public(cls, key: str) -> dict:
+        """返回策略的对外公开信息（剔除 lambda，避免 JSON 序列化失败）"""
+        s = cls.STRATEGIES.get(key)
+        if not s:
+            return {}
+        return {
+            'key': key,
+            'name': s.get('name'),
+            'master': s.get('master'),
+            'source': s.get('source'),
+            'philosophy': s.get('philosophy'),
+            'risk_level': s.get('risk_level'),
+            'complexity': s.get('complexity'),
+            'min_capital': s.get('min_capital'),
+            'expected_return': s.get('expected_return'),
+            'description': s.get('description'),
+            'rules': s.get('rules', []),
+            'suitable_for': s.get('suitable_for', []),
+            'warnings': s.get('warnings', []),
+            'risks': s.get('risks', []),
+            'pitfalls': s.get('pitfalls', []),
+            'is_eight': key in cls.EIGHT_STRATEGIES,
+            'chapter': cls.EIGHT_STRATEGIES.index(key) + 1 if key in cls.EIGHT_STRATEGIES else None,
+        }
 
     @staticmethod
     def get_master_strategy(strategy: str = 'andaoquan', top_n: int = 20) -> dict:
@@ -1519,7 +1830,7 @@ class CBService:
             return {
                 'bonds': [],
                 'strategy': strategy,
-                'strategy_info': strat,
+                'strategy_info': CBService.get_strategy_public(strategy),
                 'total': 0,
                 'total_before_filter': 0,
                 'fetch_time': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
@@ -1534,8 +1845,42 @@ class CBService:
         bonds = []
         for cell in raw_bonds:
             bond = CBService._normalize_cb(cell)
-            if bond and 'ST' not in bond['bond_nm'] and 'ST' not in bond['stock_nm'] and not bond['force_redeem']:
+            if bond and 'ST' not in bond['bond_nm'] and 'ST' not in bond['stock_nm'] and not bond['force_redeem'] and '退' not in bond['bond_nm']:
                 bonds.append(bond)
+
+        # 字段可用性约束（对齐 CLAUDE.md「宁可空着不要不可靠数据」）：
+        # 若策略严格筛选依赖"剩余年限/成交额/YTM"，而当前数据源非集思录
+        # （AKShare 兜底不提供这些字段），则直接返回空 + 明确提示，绝不展示伪候选。
+        required = _CB_REQUIRED_FIELDS.get(strategy, [])
+        if required and data_source != 'jisilu':
+            missing_cn = '、'.join(_CB_FIELD_CN.get(f, f) for f in required)
+            # 区分「未登录」与「已登录但集思录接口暂时取数失败」，避免误导用户
+            from app.services.fund_service import _jisilu_logged_in
+            if _jisilu_logged_in:
+                err_msg = (
+                    f'已登录集思录，但本次未能从集思录取到完整数据（当前实际数据源：{data_source}），'
+                    f'故无法可靠筛选依赖「{missing_cn}」的策略。可能是集思录接口临时限流/网络抖动，'
+                    f'请稍后重试；若持续失败，请重新登录集思录。'
+                )
+            else:
+                err_msg = (
+                    f'当前数据源（{data_source}）不提供该策略严格筛选所需的字段：{missing_cn}。'
+                    f'AKShare 兜底数据缺这些字段，无法可靠筛选。请登录集思录'
+                    f'（或启用集思录网页版爬取）以获取剩余年限/成交额/到期收益率后重试。'
+                )
+            return {
+                'bonds': [],
+                'strategy': strategy,
+                'strategy_info': CBService.get_strategy_public(strategy),
+                'total': 0,
+                'total_before_filter': total_before,
+                'fetch_time': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                'top_n': top_n,
+                'risk_summary': {},
+                'data_source': data_source,
+                'soft_error': True,
+                'error': err_msg,
+            }
 
         # 应用策略专属筛选
         bonds = [b for b in bonds if strat['filter'](b)]
@@ -1560,7 +1905,7 @@ class CBService:
         result = {
             'bonds': top_bonds,
             'strategy': strategy,
-            'strategy_info': strat,
+            'strategy_info': CBService.get_strategy_public(strategy),
             'total': len(bonds),
             'total_before_filter': total_before,
             'fetch_time': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),

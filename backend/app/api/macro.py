@@ -7,11 +7,14 @@
   同步指标(Coincident): GDP、工业增加值、零售销售、非农就业
   滞后指标(Lagging): CPI、PPI、LPR、失业率、房价
 """
+import logging
 from fastapi import APIRouter
 from app.services.akshare_service import akshare_service
 from app.services.fred_service import fred_service
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -220,8 +223,8 @@ def get_macro_overview():
                 result["us_yield_spread"] = {"latest": us_spread[-1], "series": us_spread[-24:]}
             if cn_spread:
                 result["cn_yield_spread"] = {"latest": cn_spread[-1], "series": cn_spread[-24:]}
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning(f"收益率曲线数据获取失败: {e}")
 
     return result
 
@@ -258,8 +261,8 @@ def get_us_macro():
     if fred_available:
         try:
             fred_results = fred_service.get_batch(list(fred_enhanced_keys.keys()))
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning(f"FRED批量数据获取失败: {e}")
 
     for ak_key, ak_series in ak_data.items():
         entry = ak_series or []
@@ -556,7 +559,9 @@ def _calc_us_recession(us_ism_pmi, us_non_farm, us_yield_spread):
 
     avg = sum(scores) / len(scores) if scores else 50
     score = _clamp(round(avg))
-    recession_prob = _clamp(round(100 - score * 0.8))
+    # 衰退概率与景气评分直接对应：score=100(全面健康)->0%，score=0->100%。
+    # 旧实现用 100 - score*0.8，导致全面健康时仍显示 20%，会不合理地削弱"安全"信号。
+    recession_prob = _clamp(round(100 - score))
     return {
         "id": "us_recession",
         "name": "美国衰退风险",
@@ -1057,7 +1062,7 @@ def get_macro_signals():
                     d = datetime.strptime(str(date_str)[:10], "%Y-%m-%d")
                     days = (datetime.now() - d).days
                     freshness = "fresh" if days < 30 else "recent" if days < 90 else "stale"
-                except:
+                except Exception:
                     pass
             data_quality.append({
                 "name": name, "value": value, "source": source,

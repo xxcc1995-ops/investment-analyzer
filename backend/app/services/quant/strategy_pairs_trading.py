@@ -104,7 +104,7 @@ def estimate_half_life(spread: np.ndarray) -> float:
         if beta >= 0:
             return float('inf')
         return float(-np.log(2) / beta)
-    except:
+    except Exception:
         return float('inf')
 
 

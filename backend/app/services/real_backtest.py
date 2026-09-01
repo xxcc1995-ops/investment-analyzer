@@ -252,13 +252,13 @@ def run_real_backtest(
         完整回测结果
     """
     # 获取所有股票的历史数据
-    print("Fetching historical data...")
+    logger.info("Fetching historical data...")
     all_klines = {}
     for code, info in STOCK_UNIVERSE.items():
         klines = _fetch_kline(code, info['market'], start_date.replace('-', ''), end_date.replace('-', ''))
         if klines:
             all_klines[code] = klines
-            print(f"  {info['name']}: {len(klines)} days")
+            logger.info(f"  {info['name']}: {len(klines)} days")
 
     # 获取沪深300基准
     benchmark = _fetch_kline('000300', '1', start_date.replace('-', ''), end_date.replace('-', ''))

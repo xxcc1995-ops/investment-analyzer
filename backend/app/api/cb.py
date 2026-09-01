@@ -31,6 +31,8 @@ def get_double_low(
         exclude_force_redeem=exclude_force_redeem,
     )
 
+    if result.get('soft_error'):
+        return result
     if "error" in result:
         raise HTTPException(status_code=500, detail=result["error"])
 
@@ -48,6 +50,8 @@ def get_master_strategy(
         top_n=top_n,
     )
 
+    if result.get('soft_error'):
+        return result
     if "error" in result:
         raise HTTPException(status_code=500, detail=result["error"])
 
@@ -56,28 +60,26 @@ def get_master_strategy(
 
 @router.get("/strategies")
 def get_strategies():
-    """获取所有大师策略定义"""
+    """获取所有策略定义（含八大战法完整详情）
+
+    返回每个策略的对外公开信息（剔除 lambda），以及 eight_order——
+    《可转债：从入门到精通的八大战法》的权威八战法顺序。
+    """
     strategies = {}
-    for key, val in CBService.STRATEGIES.items():
-        strategies[key] = {
-            'name': val['name'],
-            'master': val['master'],
-            'source': val['source'],
-            'philosophy': val['philosophy'],
-            'risk_level': val['risk_level'],
-            'complexity': val['complexity'],
-            'min_capital': val['min_capital'],
-            'expected_return': val['expected_return'],
-            'description': val['description'],
-            'rules': val['rules'],
-        }
-    return {'strategies': strategies}
+    for key in CBService.STRATEGIES.keys():
+        strategies[key] = CBService.get_strategy_public(key)
+    return {
+        'strategies': strategies,
+        'eight_order': CBService.EIGHT_STRATEGIES,
+    }
 
 
 @router.get("/refresh")
 def refresh_data():
     """强制刷新可转债数据"""
     result = CBService.refresh_data()
+    if result.get('soft_error'):
+        return result
     if "error" in result:
         raise HTTPException(status_code=500, detail=result["error"])
     return result

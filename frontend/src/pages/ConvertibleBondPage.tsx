@@ -1,9 +1,11 @@
 import React, { useState, useEffect, useCallback } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { cbApi, type ConvertibleBond } from '../services/api'
 import { PageSection, DataTable, LoadingSpinner, EmptyState, StatCard, StatCardGroup } from '../components/ui'
 import type { Column } from '../components/ui'
 
 export default function ConvertibleBondPage() {
+  const navigate = useNavigate()
   const [cbBonds, setCbBonds] = useState<ConvertibleBond[]>([])
   const [cbLoading, setCbLoading] = useState(false)
   const [cbFetchTime, setCbFetchTime] = useState('')
@@ -485,16 +487,18 @@ export default function ConvertibleBondPage() {
               <div style={{ paddingLeft: '20px' }}>
                 <div>├── <strong>是</strong> → <span style={{ color: '#52c41a' }}>安道全面值策略</span>（最简单，1万起步）</div>
                 <div style={{ paddingLeft: '40px' }}>└── 想更省心？→ <span style={{ color: '#faad14' }}>摊大饼策略</span>（类指数）</div>
-                <div>└── <strong>否</strong> → 你追求什么？</div>
+                <div>└── <strong>否</strong> → 你追求什么？（对应下方八大战法）</div>
                 <div style={{ paddingLeft: '40px' }}>
-                  ├── 稳健收益 → <span style={{ color: '#1890ff' }}>双低策略</span>（经典量化）<br/>
-                  ├── 绝对保本 → <span style={{ color: '#722ed1' }}>YTM保本策略</span>（最保守）<br/>
-                  ├── 高弹性 → <span style={{ color: '#13c2c2' }}>三低策略</span>（波动大）<br/>
+                  ├── 稳健+持续优胜 → <span style={{ color: '#1890ff' }}>双低策略</span>（经典量化）/ <span style={{ color: '#13c2c2' }}>轮动策略</span>（双低进阶，定期趋优）<br/>
+                  ├── 绝对保本 → <span style={{ color: '#722ed1' }}>YTM保本策略</span>（即「正收益策略」，最保守）<br/>
+                  ├── 临近到期做差价 → <span style={{ color: '#fa8c16' }}>临期债网格策略</span>（到期前1.5年内高抛低吸）<br/>
+                  ├── 高弹性 → <span style={{ color: '#13c2c2' }}>三低策略</span>（低价格+低溢价+低规模，波动大）<br/>
                   └── 博弈收益 →<br/>
                   <span style={{ paddingLeft: '40px' }}>
-                    ├── <span style={{ color: '#f5222d' }}>下修博弈</span>（赌公司下修）<br/>
+                    ├── <span style={{ color: '#f5222d' }}>下修博弈</span>（赌公司下修转股价）<br/>
                     ├── <span style={{ color: '#ff4d4f' }}>强赎博弈</span>（赌公司促转股）<br/>
-                    └── <span style={{ color: '#eb2f96' }}>负溢价套利</span>（高级操作）
+                    ├── <span style={{ color: '#a0d911' }}>问题债博弈</span>（博弈困境反转/小额清偿）<br/>
+                    └── <span style={{ color: '#eb2f96' }}>负溢价套利</span>（高级操作，T+1转股）
                   </span>
                 </div>
               </div>
@@ -502,29 +506,25 @@ export default function ConvertibleBondPage() {
           </div>
 
           <div className="arb-risk-section">
-            <h4>📋 8种策略速览</h4>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '12px' }}>
-              {[
-                { name: '安道全面值策略', icon: '🛡️', tag: '入门', risk: '低', desc: '面值附近买入(≤105)，130元卖出', suitable: '完全新手，不想研究', avoid: '强赎公告后不卖' },
-                { name: '双低策略', icon: '📊', tag: '经典', risk: '中', desc: '双低值≤130轮动，年化10-15%', suitable: '有基础，每周1-2小时', avoid: '只看双低值不看质量' },
-                { name: '三低策略', icon: '🔻', tag: '进阶', risk: '中', desc: '低价格+低溢价+低规模，弹性大', suitable: '能承受波动，5万+', avoid: '忽略流动性风险' },
-                { name: '摊大饼策略', icon: '🥞', tag: '懒人', risk: '低-中', desc: '买一篮子低价转债，等权持有', suitable: '不想研究，3万+', avoid: '只买3-5只就说分散' },
-                { name: 'YTM保本策略', icon: '🏦', tag: '保守', risk: '低', desc: '只买YTM>0，持有到期不亏', suitable: '极度保守，1万+', avoid: '以为YTM>0就绝对安全' },
-                { name: '下修博弈策略', icon: '🎯', tag: '博弈', risk: '中-高', desc: '博弈公司下修转股价', suitable: '理解下修逻辑，3万+', avoid: '把可能当下修定' },
-                { name: '强赎博弈策略', icon: '🔥', tag: '博弈', risk: '中', desc: '转股价值接近130时布局', suitable: '能判断公司意图，3万+', avoid: '强赎公告后忘记卖' },
-                { name: '负溢价套利', icon: '💎', tag: '套利', risk: '低-中', desc: '负溢价时转股赚价差', suitable: '理解T+1，10万+', avoid: '以为负溢价=无风险' },
-              ].map((s, i) => (
-                <div key={i} style={{ padding: '10px', background: 'var(--bg-secondary)', borderRadius: '6px', border: '1px solid var(--border)', fontSize: '12px' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '6px' }}>
-                    <span>{s.icon}</span>
-                    <strong>{s.name}</strong>
-                    <span style={{ padding: '1px 5px', borderRadius: '6px', fontSize: '9px', background: s.risk === '低' ? 'rgba(82,196,26,0.15)' : s.risk === '中' ? 'rgba(250,173,20,0.15)' : 'rgba(255,77,79,0.15)', color: s.risk === '低' ? '#52c41a' : s.risk === '中' ? '#faad14' : '#ff4d4f' }}>{s.risk}</span>
-                  </div>
-                  <div style={{ color: 'var(--text-muted)', marginBottom: '4px' }}>{s.desc}</div>
-                  <div><span style={{ color: '#52c41a' }}>适合:</span> {s.suitable}</div>
-                  <div><span style={{ color: '#ff4d4f' }}>避坑:</span> {s.avoid}</div>
+            <div style={{
+              display: 'flex', alignItems: 'center', gap: '16px', flexWrap: 'wrap',
+              padding: '16px 20px', background: 'linear-gradient(135deg, rgba(88,166,255,0.08), rgba(114,46,209,0.08))',
+              border: '1px solid #30363d', borderRadius: '10px',
+            }}>
+              <div style={{ fontSize: 32 }}>📖</div>
+              <div style={{ flex: 1, minWidth: 200 }}>
+                <div style={{ fontWeight: 700, fontSize: 15, color: '#e6edf3' }}>可转债八大战法（实战手册）</div>
+                <div style={{ fontSize: 12.5, color: '#8b949e', marginTop: 2 }}>
+                  依据《可转债：从入门到精通的八大战法》整理，每个战法可直接运行实时筛选。含双低、轮动、临期债网格、下修/强赎/问题债博弈、负溢价套利等。
                 </div>
-              ))}
+              </div>
+              <button
+                className="btn-add"
+                onClick={() => navigate('/cb-strategies')}
+                style={{ background: '#58a6ff', color: '#0d1117', border: 'none', padding: '8px 18px', borderRadius: '6px', cursor: 'pointer', fontSize: '13px', fontWeight: 600 }}
+              >
+                打开八大战法界面 →
+              </button>
             </div>
           </div>
 

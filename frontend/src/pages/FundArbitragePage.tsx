@@ -1,8 +1,6 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useMemo } from 'react'
 import axios from 'axios'
 import { fundApi } from '../services/api'
-import { PageSection, TabBar, StatCard, StatCardGroup, DataTable, LoadingSpinner, EmptyState } from '../components/ui'
-import type { Column } from '../components/ui'
 
 const API_BASE = '/api'
 
@@ -13,12 +11,14 @@ interface FundEst {
   underlying_code: string; underlying_price: number; underlying_change_pct: number
   est_nav: number; premium: number; official_nav: number; official_nav_date: string
   underlying_type?: string; is_multi_underlying?: boolean
+  apply_status?: string; apply_limit?: string; redeem_status?: string; turnover?: number
   holdings_detail?: Array<{ stock_code: string; stock_name: string; sina_code: string; weight: number; price: number; change_pct: number }>
 }
 
 interface AShareFund {
   fund_code: string; fund_name: string; fund_price: number; fund_change_pct: number
   underlying_type: string; underlying_code: string
+  apply_status?: string; apply_limit?: string; turnover?: number
 }
 
 interface FundEstDetail {
@@ -111,6 +111,37 @@ const getConfidenceLabel = (c: string) => {
   return { text: '未知', color: '#6b7280', bg: 'rgba(107,114,128,0.15)' }
 }
 
+// 申购状态（徽章 + 提示），参考"套利信号"图的可申/限购/暂停/ETF不适用样式
+interface SubscribeInfo { badge: string; color: string; bg: string; border: string; tip: string }
+const getSubscribeInfo = (fund: { fund_name: string; apply_status?: string; apply_limit?: string }): SubscribeInfo => {
+  const status = fund.apply_status || ''
+  const limit = fund.apply_limit || ''
+  if (fund.fund_name.includes('ETF')) {
+    return { badge: '📦 ETF不适用', color: '#94a3b8', bg: 'rgba(100,116,139,0.15)', border: 'rgba(100,116,139,0.3)', tip: 'ETF为实物申赎，普通投资者做不了场外申购套利' }
+  }
+  if (!status) {
+    return { badge: '❔ 申购状态未知', color: '#94a3b8', bg: 'rgba(100,116,139,0.15)', border: 'rgba(100,116,139,0.3)', tip: '数据源无申购状态（未登录集思录），登录后可显示 可申/限购/暂停' }
+  }
+  const paused = status.includes('暂停') || status.includes('停止') || status.toLowerCase().includes('closed') || limit === '暂停申购'
+  if (paused) {
+    return { badge: '⛔ 暂停申购', color: '#f87171', bg: 'rgba(239,68,68,0.15)', border: 'rgba(239,68,68,0.3)', tip: '当前暂停申购（封闭期），不可申——溢价套利不可行' }
+  }
+  const limited = (status.startsWith('限') && status !== '开放申购') || (limit !== '' && limit !== '无限额')
+  if (limited) {
+    const limitText = limit && limit !== '无限额' ? limit : status
+    return { badge: `⚠️ 限购(${limitText})`, color: '#f97316', bg: 'rgba(249,115,22,0.15)', border: 'rgba(249,115,22,0.3)', tip: `通道开放但限购：${limitText}，单账户申购有上限` }
+  }
+  const limitLabel = limit === '无限额' || limit === '' ? '无限额' : limit
+  return { badge: `✅ 可申(${limitLabel})`, color: '#4ade80', bg: 'rgba(34,197,94,0.15)', border: 'rgba(34,197,94,0.3)', tip: `通道开放可申（${limitLabel}）` }
+}
+
+// 成交额格式化（万元 → 万/亿），低于1000万给出流动性警告
+const formatTurnover = (wan?: number): { text: string; color: string; warn: boolean } => {
+  if (!wan || wan <= 0) return { text: '--', color: '#64748b', warn: false }
+  const text = wan >= 10000 ? `${(wan / 10000).toFixed(2)}亿` : `${wan.toFixed(0)}万`
+  return { text, color: wan < 1000 ? '#f97316' : '#f1f5f9', warn: wan < 1000 }
+}
+
 // 溢价警报阈值
 const PREMIUM_ALERT_HIGH = 5.0   // 高溢价警报
 const PREMIUM_ALERT_LOW = -5.0   // 高折价警报
@@ -192,6 +223,8 @@ function EstimationTab() {
   const [fundDetail, setFundDetail] = useState<FundEstDetail | null>(null)
   const [detailLoading, setDetailLoading] = useState(false)
   const [showAlertsOnly, setShowAlertsOnly] = useState(false)
+  const [onlyOpenSubscribe, setOnlyOpenSubscribe] = useState(true)  // 默认只看开放申购（暂停的溢价套利无意义）
+  const [onlyLOF, setOnlyLOF] = useState(true)  // 默认只看LOF（ETF实物申赎，普通投资者做不了场外申购套利）
 
   const loadData = useCallback(async () => {
     setLoading(true)
@@ -236,6 +269,16 @@ function EstimationTab() {
     : funds.filter(f => f.underlying_type === category)
 
   let filtered = categoryFiltered.filter(f => f.premium >= filterMinPremium && f.premium <= filterMaxPremium)
+
+  // 仅显示开放申购（暂停申购的基金无法场外申购，溢价套利无意义）
+  if (onlyOpenSubscribe) {
+    filtered = filtered.filter(f => !(f.apply_status && (f.apply_status.includes('暂停') || f.apply_status.includes('停止') || f.apply_status.toLowerCase().includes('closed'))))
+  }
+
+  // 仅显示LOF（ETF为实物申赎，普通投资者做不了场外申购套利；按名称含"ETF"过滤）
+  if (onlyLOF) {
+    filtered = filtered.filter(f => !f.fund_name.includes('ETF'))
+  }
 
   // 溢价警报筛选
   const alertFunds = filtered.filter(f => f.premium >= PREMIUM_ALERT_HIGH || f.premium <= PREMIUM_ALERT_LOW)
@@ -329,6 +372,20 @@ function EstimationTab() {
           <div style={{ marginLeft: 'auto', display: 'flex', gap: '8px', alignItems: 'center' }}>
             <span style={{ fontSize: '12px', color: '#64748b' }}>💱 USD/CNY {usdcnyRate.toFixed(4)}</span>
             {hkdcnyRate > 0 && <span style={{ fontSize: '12px', color: '#64748b' }}>HKD/CNY {hkdcnyRate.toFixed(4)}</span>}
+            <button onClick={() => setOnlyOpenSubscribe(!onlyOpenSubscribe)} style={{
+              padding: '6px 12px', borderRadius: '8px', border: `1px solid ${onlyOpenSubscribe ? 'rgba(34,197,94,0.3)' : 'rgba(148,163,184,0.2)'}`,
+              background: onlyOpenSubscribe ? 'rgba(34,197,94,0.1)' : 'rgba(51,65,85,0.5)',
+              color: onlyOpenSubscribe ? '#4ade80' : '#94a3b8', cursor: 'pointer', fontSize: '12px', fontWeight: 600,
+            }}>
+              {onlyOpenSubscribe ? '✅ 仅开放申购' : '🔄 显示全部'}
+            </button>
+            <button onClick={() => setOnlyLOF(!onlyLOF)} style={{
+              padding: '6px 12px', borderRadius: '8px', border: `1px solid ${onlyLOF ? 'rgba(88,166,255,0.3)' : 'rgba(148,163,184,0.2)'}`,
+              background: onlyLOF ? 'rgba(88,166,255,0.1)' : 'rgba(51,65,85,0.5)',
+              color: onlyLOF ? '#58a6ff' : '#94a3b8', cursor: 'pointer', fontSize: '12px', fontWeight: 600,
+            }} title="LOF可场外申购套利；ETF为实物申赎，普通投资者做不了场外套利">
+              {onlyLOF ? '🔵 仅LOF' : '🔄 含ETF'}
+            </button>
             {alertFunds.length > 0 && (
               <button onClick={() => setShowAlertsOnly(!showAlertsOnly)} style={{
                 padding: '6px 12px', borderRadius: '8px', border: `1px solid ${showAlertsOnly ? 'rgba(239,68,68,0.3)' : 'rgba(148,163,184,0.2)'}`,
@@ -385,7 +442,11 @@ function EstimationTab() {
                       </div>
                       <div>
                         <div style={{ fontSize: '14px', color: '#f1f5f9', fontWeight: 500 }}>{fund.fund_name}</div>
-                        {fund.is_multi_underlying && <span style={{ fontSize: '10px', padding: '2px 6px', background: 'rgba(139,92,246,0.2)', color: '#a78bfa', borderRadius: '4px' }}>多标的</span>}
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginTop: '3px', flexWrap: 'wrap' }}>
+                          {fund.is_multi_underlying && <span style={{ fontSize: '10px', padding: '2px 6px', background: 'rgba(139,92,246,0.2)', color: '#a78bfa', borderRadius: '4px' }}>多标的</span>}
+                          {(() => { const si = getSubscribeInfo(fund); return <span style={{ fontSize: '10px', padding: '1px 6px', background: si.bg, color: si.color, border: `1px solid ${si.border}`, borderRadius: '4px', cursor: 'default' }} title={si.tip}>{si.badge}</span> })()}
+                          {(fund.turnover ?? 0) > 0 && <span style={{ fontSize: '10px', color: formatTurnover(fund.turnover).color }}>成交 {formatTurnover(fund.turnover).text}</span>}
+                        </div>
                       </div>
                       <div style={{ fontSize: '15px', fontWeight: 600, color: '#f1f5f9', fontFamily: 'monospace' }}>{fund.fund_price?.toFixed(3) ?? '--'}</div>
                       <div style={{ fontSize: '14px', fontWeight: 600, color: fund.fund_change_pct >= 0 ? '#ef4444' : '#22c55e', fontFamily: 'monospace' }}>{fund.fund_change_pct >= 0 ? '+' : ''}{fund.fund_change_pct?.toFixed(2) ?? '--'}%</div>
@@ -501,7 +562,13 @@ function EstimationTab() {
               {aShareFunds.map(fund => (
                 <div key={fund.fund_code} style={{ display: 'grid', gridTemplateColumns: '100px 1fr 100px 100px 100px', gap: '1px', padding: '12px 20px', borderBottom: '1px solid rgba(148,163,184,0.05)' }}>
                   <div style={{ fontSize: '13px', fontWeight: 600, color: '#e2e8f0', fontFamily: 'monospace' }}>{fund.fund_code}</div>
-                  <div style={{ fontSize: '13px', color: '#f1f5f9' }}>{fund.fund_name}</div>
+                  <div>
+                    <div style={{ fontSize: '13px', color: '#f1f5f9' }}>{fund.fund_name}</div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginTop: '2px' }}>
+                      {(() => { const si = getSubscribeInfo(fund); return <span style={{ fontSize: '10px', padding: '1px 6px', background: si.bg, color: si.color, border: `1px solid ${si.border}`, borderRadius: '4px', cursor: 'default' }} title={si.tip}>{si.badge}</span> })()}
+                      {(fund.turnover ?? 0) > 0 && <span style={{ fontSize: '10px', color: formatTurnover(fund.turnover).color }}>成交 {formatTurnover(fund.turnover).text}</span>}
+                    </div>
+                  </div>
                   <div style={{ fontSize: '14px', fontWeight: 600, color: '#f1f5f9', fontFamily: 'monospace' }}>{fund.fund_price.toFixed(3)}</div>
                   <div style={{ fontSize: '14px', fontWeight: 600, color: fund.fund_change_pct >= 0 ? '#ef4444' : '#22c55e', fontFamily: 'monospace' }}>{fund.fund_change_pct >= 0 ? '+' : ''}{fund.fund_change_pct.toFixed(2)}%</div>
                   <div style={{ fontSize: '11px', color: '#64748b' }}>{fund.underlying_type === 'a_index' ? '指数' : '主动'}</div>
@@ -526,6 +593,8 @@ function ArbitrageTab() {
   const [holdingDays, setHoldingDays] = useState(30)
   const [expandedFund, setExpandedFund] = useState<string | null>(null)
   const [showDiscipline, setShowDiscipline] = useState(false)
+  const [onlyLOF, setOnlyLOF] = useState(true)  // 套利扫描Tab：默认只看LOF（ETF实物申赎做不了场外申购套利）
+  const [onlyOpenSubscribe, setOnlyOpenSubscribe] = useState(true)  // 默认只看开放申购
   const [autoRefresh, setAutoRefresh] = useState(false)
   const [refreshInterval, setRefreshInterval] = useState(30)
   const [lastRefresh, setLastRefresh] = useState('')
@@ -539,6 +608,16 @@ function ArbitrageTab() {
   const [loginError, setLoginError] = useState('')
 
   useEffect(() => { fundApi.getLoginStatus().then(r => setJisiluLoggedIn(r.data.logged_in)).catch(() => {}) }, [])
+
+  // 套利扫描前端过滤：仅LOF（ETF实物申赎不能场外申购套利）+ 仅开放申购（暂停申购溢价无意义）
+  const filteredFunds = useMemo(() => {
+    if (!data?.funds) return []
+    return data.funds.filter(f => {
+      if (onlyLOF && f.fund_name.includes('ETF')) return false
+      if (onlyOpenSubscribe && f.apply_status && (f.apply_status.includes('暂停') || f.apply_status.includes('停止') || f.apply_status.toLowerCase().includes('closed'))) return false
+      return true
+    })
+  }, [data, onlyLOF, onlyOpenSubscribe])
 
   const handleLogin = async () => {
     if (!loginUser || !loginPass) return
@@ -672,12 +751,25 @@ function ArbitrageTab() {
           <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
         </div>
       ) : (
+        <>
+        <div style={{ display: 'flex', gap: '8px', alignItems: 'center', padding: '8px 12px', background: 'rgba(30,41,59,0.6)', borderRadius: '10px', border: '1px solid rgba(148,163,184,0.1)' }}>
+          <span style={{ fontSize: '12px', color: '#94a3b8' }}>筛选:</span>
+          <button onClick={() => setOnlyLOF(!onlyLOF)} style={{ padding: '6px 12px', borderRadius: '8px', border: `1px solid ${onlyLOF ? 'rgba(88,166,255,0.3)' : 'rgba(148,163,184,0.2)'}`, background: onlyLOF ? 'rgba(88,166,255,0.1)' : 'rgba(51,65,85,0.5)', color: onlyLOF ? '#58a6ff' : '#94a3b8', cursor: 'pointer', fontSize: '12px', fontWeight: 600 }} title="LOF可场外申购套利；ETF实物申赎做不了场外套利">
+            {onlyLOF ? '🔵 仅LOF' : '🔄 含ETF'}
+          </button>
+          <button onClick={() => setOnlyOpenSubscribe(!onlyOpenSubscribe)} style={{ padding: '6px 12px', borderRadius: '8px', border: `1px solid ${onlyOpenSubscribe ? 'rgba(34,197,94,0.3)' : 'rgba(148,163,184,0.2)'}`, background: onlyOpenSubscribe ? 'rgba(34,197,94,0.1)' : 'rgba(51,65,85,0.5)', color: onlyOpenSubscribe ? '#4ade80' : '#94a3b8', cursor: 'pointer', fontSize: '12px', fontWeight: 600 }}>
+            {onlyOpenSubscribe ? '✅ 仅开放申购' : '🔄 含暂停'}
+          </button>
+          <span style={{ fontSize: '11px', color: '#64748b' }}>{filteredFunds.length}/{data?.funds?.length || 0} 只</span>
+        </div>
         <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-          {data?.funds && data.funds.length > 0 ? data.funds.map(fund => {
+          {filteredFunds.length > 0 ? filteredFunds.map(fund => {
             const eval_ = fund.arb_eval
             const isExpanded = expandedFund === fund.fund_code
             const verdict = eval_?.verdict || '未知'
             const netProfit = eval_?.net_profit ?? 0
+            const si = getSubscribeInfo(fund)
+            const t = formatTurnover(fund.turnover)
             return (
               <div key={fund.fund_code} style={{ background: 'rgba(30,41,59,0.8)', borderRadius: '16px', border: `1px solid ${verdict === '可以套利' ? 'rgba(34,197,94,0.3)' : verdict === '谨慎套利' ? 'rgba(249,115,22,0.2)' : 'rgba(148,163,184,0.1)'}`, overflow: 'hidden' }}>
                 <div style={{ padding: '20px', cursor: 'pointer' }} onClick={() => setExpandedFund(isExpanded ? null : fund.fund_code)}>
@@ -687,6 +779,7 @@ function ArbitrageTab() {
                         <span style={{ fontSize: '16px', fontWeight: 700, color: '#f1f5f9' }}>{fund.fund_name}</span>
                         <span style={{ fontSize: '13px', color: '#64748b', fontFamily: 'monospace' }}>{fund.fund_code}</span>
                         {fund.is_multi_underlying && <span style={{ fontSize: '10px', padding: '2px 6px', background: 'rgba(139,92,246,0.2)', color: '#a78bfa', borderRadius: '4px' }}>多标的</span>}
+                        <span style={{ fontSize: '10px', padding: '2px 6px', background: si.bg, color: si.color, border: `1px solid ${si.border}`, borderRadius: '4px', cursor: 'default' }} title={si.tip}>{si.badge}</span>
                       </div>
                       <div style={{ display: 'flex', gap: '16px', fontSize: '13px', color: '#94a3b8', flexWrap: 'wrap' }}>
                         <span>场内 <b style={{ color: '#f1f5f9' }}>{fund.fund_price?.toFixed(3) ?? '--'}</b></span>
@@ -695,7 +788,11 @@ function ArbitrageTab() {
                         <span>实时EST <b style={{ color: '#3b82f6' }}>{fund.est_nav?.toFixed(4) ?? '--'}</b></span>
                         <span style={{ color: getPremiumColor(fund.premium_pct), fontWeight: 700 }}>溢价 {fund.premium_pct >= 0 ? '+' : ''}{fund.premium_pct?.toFixed(2) ?? '--'}%</span>
                         <span>底层 {fund.underlying_name} <b style={{ color: fund.underlying_change_pct >= 0 ? '#ef4444' : '#22c55e' }}>{fund.underlying_change_pct >= 0 ? '+' : ''}{fund.underlying_change_pct?.toFixed(2) ?? '--'}%</b></span>
-                        <span>成交额 <b style={{ color: '#f1f5f9' }}>{fund.turnover > 0 ? `${fund.turnover.toFixed(0)}万` : '--'}</b></span>
+                        <span title={t.warn ? '成交额低于1000万，流动性不足、冲击成本高' : ''}>成交额 <b style={{ color: t.color }}>{t.text}</b>{t.warn && <span style={{ fontSize: '10px', color: '#f97316' }}> ⚠️流动性</span>}</span>
+                      </div>
+                      {/* 提示行（仿套利信号图）：申购通道状态 + 成交额/流动性提示 */}
+                      <div style={{ marginTop: '8px', fontSize: '12px', color: si.color }}>
+                        💡 {si.tip}{t.warn ? `；成交额仅${t.text}，注意冲击成本` : ''}{fund.turnover <= 0 ? '；成交额数据缺失（当前数据源未提供）' : ''}
                       </div>
                     </div>
                     <div style={{ padding: '8px 16px', borderRadius: '10px', background: getVerdictBg(verdict), border: `1px solid ${getVerdictColor(verdict)}30` }}>
@@ -809,7 +906,9 @@ function ArbitrageTab() {
                             </div>
                           )}
                           {fund.turnover > 0 && (
-                            <div>日均成交额: <b>{fund.turnover.toFixed(0)}万</b></div>
+                            <div>成交额: <b style={{ color: t.color }}>{t.text}</b>
+                              {t.warn && <span style={{ fontSize: '11px', color: '#f97316', marginLeft: '8px' }}>低于1000万，流动性不足</span>}
+                            </div>
                           )}
                         </div>
                       </div>
@@ -825,6 +924,7 @@ function ArbitrageTab() {
             </div>
           )}
         </div>
+        </>
       )}
     </>
   )

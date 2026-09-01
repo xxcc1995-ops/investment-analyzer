@@ -4,6 +4,7 @@
 """
 from fastapi import APIRouter, Query
 from typing import Optional
+from app.core.validators import validate_stock_code
 from app.services.akshare_service import akshare_service
 
 router = APIRouter()
@@ -28,6 +29,7 @@ def get_commodities():
 @router.get("/history/{symbol}")
 def get_futures_history(symbol: str):
     """获取期货历史行情"""
+    symbol = validate_stock_code(symbol)
     data = akshare_service.get_futures_hist(symbol)
     return {"symbol": symbol, "data": data or [], "count": len(data) if data else 0}
 

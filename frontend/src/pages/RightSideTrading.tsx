@@ -2,7 +2,6 @@ import { useState, useCallback, useRef, useEffect, useMemo } from 'react'
 import axios from 'axios'
 import ReactECharts from 'echarts-for-react'
 import { Tooltip } from 'antd'
-import { PageSection, TabBar, StatCard, StatCardGroup, LoadingSpinner, EmptyState, ProgressBar } from '../components/ui'
 import { useTradingInterceptor } from '../hooks/useTradingInterceptor'
 import RationalCheckpoint from '../components/RationalCheckpoint'
 
@@ -114,6 +113,11 @@ interface BacktestResult {
   code: string
 }
 
+interface SignalHistoryResult extends BacktestResult {
+  reliability?: string
+  recommendation?: string
+}
+
 interface MarketTiming {
   status: string
   signal: string
@@ -220,7 +224,9 @@ export default function RightSideTrading() {
   const [showBollinger, setShowBollinger] = useState(false)
   const [backtest, setBacktest] = useState<BacktestResult | null>(null)
   const [backtestLoading, setBacktestLoading] = useState(false)
-  const [activeTab, setActiveTab] = useState<'analysis' | 'backtest' | 'scan' | 'sector' | 'watchlist'>('analysis')
+  const [signalHistory, setSignalHistory] = useState<SignalHistoryResult | null>(null)
+  const [signalHistoryLoading, setSignalHistoryLoading] = useState(false)
+  const [activeTab, setActiveTab] = useState<'analysis' | 'backtest' | 'signal' | 'scan' | 'sector' | 'watchlist'>('analysis')
 
   // Scan state
   const [scanResults, setScanResults] = useState<any>(null)
@@ -302,6 +308,20 @@ export default function RightSideTrading() {
       setError(err.response?.data?.detail || '回测失败')
     } finally {
       setBacktestLoading(false)
+    }
+  }
+
+  const loadSignalHistory = async () => {
+    if (!stockCode) return
+    setSignalHistoryLoading(true)
+    setSignalHistory(null)
+    try {
+      const res = await axios.get(`${API_BASE}/right-side/${stockCode}/signal-history`)
+      setSignalHistory(res.data)
+    } catch (err: any) {
+      setError(err.response?.data?.detail || '信号复盘加载失败')
+    } finally {
+      setSignalHistoryLoading(false)
     }
   }
 
@@ -744,6 +764,10 @@ export default function RightSideTrading() {
               padding: '8px 20px', background: activeTab === 'backtest' ? '#3b82f6' : '#1f2937',
               border: '1px solid #374151', borderRadius: 8, color: '#f3f4f6', fontSize: 13, cursor: 'pointer',
             }}>历史回测</button>
+            <button onClick={() => { setActiveTab('signal'); if (!signalHistory) loadSignalHistory() }} style={{
+              padding: '8px 20px', background: activeTab === 'signal' ? '#3b82f6' : '#1f2937',
+              border: '1px solid #374151', borderRadius: 8, color: '#f3f4f6', fontSize: 13, cursor: 'pointer',
+            }}>📈 信号复盘</button>
             <button onClick={() => { setActiveTab('scan'); if (!scanResults) loadScan() }} style={{
               padding: '8px 20px', background: activeTab === 'scan' ? '#3b82f6' : '#1f2937',
               border: '1px solid #374151', borderRadius: 8, color: '#f3f4f6', fontSize: 13, cursor: 'pointer',
@@ -1146,6 +1170,80 @@ export default function RightSideTrading() {
                                     color: val == null ? '#6b7280' : val > 0 ? '#16a34a' : '#dc2626',
                                     fontWeight: val != null ? 600 : 400,
                                   }}>
+                                    {val != null ? `${val > 0 ? '+' : ''}${val}%` : '—'}
+                                  </td>
+                                )
+                              })}
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  ) : (
+                    <div style={{ textAlign: 'center', padding: 40, color: '#6b7280' }}>暂无历史信号</div>
+                  )}
+                </>
+              )}
+            </div>
+          )}
+
+          {/* Signal History Tab */}
+          {activeTab === 'signal' && (
+            <div style={{ background: '#1f2937', borderRadius: 10, padding: 16, border: '1px solid #374151' }}>
+              <div style={{ fontSize: 14, fontWeight: 600, color: '#f3f4f6', marginBottom: 16 }}>信号复盘 · 历史胜率验证</div>
+              {signalHistoryLoading && <div style={{ textAlign: 'center', padding: 40, color: '#9ca3af' }}>正在加载历史信号复盘...</div>}
+              {signalHistory && !signalHistoryLoading && (
+                <>
+                  {signalHistory.reliability && (
+                    <div style={{ background: '#111827', borderRadius: 8, padding: 12, marginBottom: 16, fontSize: 13, color: '#9ca3af' }}>
+                      <span style={{ color: '#f3f4f6', fontWeight: 600 }}>数据可信度：</span>{signalHistory.reliability}
+                    </div>
+                  )}
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12, marginBottom: 20 }}>
+                    {[
+                      { label: '信号总数', value: signalHistory.stats.total_signals, color: '#f3f4f6', tip: '历史上出现"右侧确认"或"疑似右侧"信号的总次数。信号越多，统计越可靠。' },
+                      { label: '20日胜率', value: `${signalHistory.stats.win_rate_20d}%`, color: signalHistory.stats.win_rate_20d > 50 ? '#16a34a' : '#dc2626', tip: '出现信号后，持有20天盈利的比例。>50%=策略有效，越高越好。' },
+                      { label: '20日均收益', value: `${signalHistory.stats.avg_return_20d}%`, color: signalHistory.stats.avg_return_20d > 0 ? '#16a34a' : '#dc2626', tip: '所有信号持有20天的平均收益率。正数=平均赚钱，负数=平均亏钱。' },
+                      { label: '盈亏比', value: signalHistory.stats.profit_loss_ratio ?? '-', color: (signalHistory.stats.profit_loss_ratio ?? 0) > 1.5 ? '#16a34a' : '#dc2626', tip: '平均盈利 ÷ 平均亏损。>1.5=赚的比亏的多，策略可持续。' },
+                      { label: 'Trailing收益', value: signalHistory.stats.avg_trailing_return != null ? `${signalHistory.stats.avg_trailing_return}%` : '-', color: (signalHistory.stats.avg_trailing_return ?? 0) > 0 ? '#16a34a' : '#dc2626', tip: '模拟阶梯止损后的实际收益，比固定持有更贴近实战。' },
+                      { label: '夏普比率', value: signalHistory.stats.sharpe_like, color: signalHistory.stats.sharpe_like > 0 ? '#16a34a' : '#dc2626', tip: '收益÷波动率，衡量"性价比"。>0.5=不错，>1=很好。' },
+                    ].map((s, i) => (
+                      <div key={i} style={{ background: '#111827', borderRadius: 8, padding: 12, textAlign: 'center' }}>
+                        <div style={{ fontSize: 11, color: '#9ca3af', marginBottom: 4 }}>{s.label}<Tip text={s.tip} /></div>
+                        <div style={{ fontSize: 18, fontWeight: 700, color: s.color }}>{s.value}</div>
+                      </div>
+                    ))}
+                  </div>
+
+                  {signalHistory.recommendation && (
+                    <div style={{ background: '#10b98120', borderRadius: 8, padding: 12, marginBottom: 16, fontSize: 13, color: '#6ee7b7', border: '1px solid #10b98140' }}>
+                      {signalHistory.recommendation}
+                    </div>
+                  )}
+
+                  {signalHistory.signals.length > 0 ? (
+                    <div style={{ overflowX: 'auto' }}>
+                      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+                        <thead>
+                          <tr style={{ borderBottom: '1px solid #374151' }}>
+                            {['日期', '分数', '判定', '信号价格', '5日收益', '10日收益', '20日收益', '60日收益'].map(h => (
+                              <th key={h} style={{ padding: '8px 12px', textAlign: 'left', color: '#9ca3af', fontWeight: 500 }}>{h}</th>
+                            ))}
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {signalHistory.signals.map((s, i) => (
+                            <tr key={i} style={{ borderBottom: '1px solid #1f2937' }}>
+                              <td style={{ padding: '8px 12px', color: '#f3f4f6' }}>{s.date}</td>
+                              <td style={{ padding: '8px 12px', color: '#f3f4f6', fontWeight: 600 }}>{s.score}</td>
+                              <td style={{ padding: '8px 12px' }}>
+                                <span style={{ padding: '2px 8px', borderRadius: 4, fontSize: 11, background: getVerdictStyle(s.verdict).bg, color: '#fff' }}>{s.verdict}</span>
+                              </td>
+                              <td style={{ padding: '8px 12px', color: '#f3f4f6' }}>{s.price_at_signal}</td>
+                              {['5d', '10d', '20d', '60d'].map(period => {
+                                const val = s.returns[period as keyof typeof s.returns]
+                                return (
+                                  <td key={period} style={{ padding: '8px 12px', color: val == null ? '#6b7280' : val > 0 ? '#16a34a' : '#dc2626', fontWeight: val != null ? 600 : 400 }}>
                                     {val != null ? `${val > 0 ? '+' : ''}${val}%` : '—'}
                                   </td>
                                 )

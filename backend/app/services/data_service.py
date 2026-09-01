@@ -833,7 +833,8 @@ class DataService:
         columns = (
             "REPORT_DATE,REPORT_DATE_NAME,MONETARYFUNDS,ACCOUNTS_RECE,INVENTORY,"
             "TOTAL_CURRENT_ASSETS,TOTAL_NONCURRENT_ASSETS,TOTAL_ASSETS,"
-            "SHORT_LOAN,LONG_LOAN,TOTAL_CURRENT_LIAB,TOTAL_NONCURRENT_LIAB,"
+            "SHORT_LOAN,LONG_LOAN,BOND_PAYABLE,NOTE_PAYABLE,LEASE_LIABILITY,"
+            "TOTAL_CURRENT_LIAB,TOTAL_NONCURRENT_LIAB,"
             "TOTAL_LIABILITIES,TOTAL_EQUITY,TOTAL_PARENT_EQUITY"
         )
         raw_data = DataService._fetch_eastmoney_report_v2(
@@ -883,6 +884,9 @@ class DataService:
                 "total_assets": total_assets,
                 "short_term_borrowing": _safe_float(item.get("SHORT_LOAN")),
                 "long_term_borrowing": _safe_float(item.get("LONG_LOAN")),
+                "bonds_payable": _safe_float(item.get("BOND_PAYABLE")),
+                "notes_payable": _safe_float(item.get("NOTE_PAYABLE")),
+                "lease_liabilities": _safe_float(item.get("LEASE_LIABILITY")),
                 "total_current_liabilities": total_current_liabilities,
                 "total_non_current_liabilities": total_non_current_liabilities,
                 "total_liabilities": total_liabilities,

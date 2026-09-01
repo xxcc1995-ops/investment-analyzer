@@ -48,6 +48,7 @@ Greeks是期权价格对各种因素的敏感度，帮你理解风险：
 """
 
 import math
+import logging
 import socket
 import time
 import requests as req
@@ -55,6 +56,8 @@ from math import log, sqrt, exp
 from typing import Optional, List, Dict
 from datetime import datetime, timedelta
 from dataclasses import dataclass
+
+logger = logging.getLogger(__name__)
 
 try:
     import futu
@@ -251,8 +254,8 @@ def _fetch_hk_historical(code: str = '00700', days: int = 60) -> list:
             klines = data['data'][f'hk{clean_code}']
             rows = klines.get('qfqday') or klines.get('day') or []
             return [float(row[2]) for row in rows if len(row) >= 3]
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning(f"港股K线获取失败: {e}")
     return []
 
 def calculate_hv(prices: list, window: int = 20) -> float:
@@ -1908,7 +1911,7 @@ def get_option_chain_from_futu(
 
                     try:
                         dte = (datetime.strptime(expiry_date, '%Y-%m-%d').date() - datetime.now().date()).days
-                    except:
+                    except Exception:
                         dte = 30
 
                     last_price = float(quote.get('last_price', 0))

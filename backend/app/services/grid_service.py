@@ -21,6 +21,7 @@
 
 import time
 import math
+import logging
 import requests
 import statistics
 import random
@@ -28,6 +29,8 @@ import json
 import os
 from typing import Optional
 from datetime import datetime
+
+logger = logging.getLogger(__name__)
 from datetime import datetime, timedelta
 from dataclasses import dataclass
 
@@ -173,8 +176,8 @@ def _fetch_hk_historical(code: str = '00700', days: int = 252) -> list[dict]:
                         'volume': float(row[5]),
                     })
             return records
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning(f"历史行情获取失败: {e}")
     return []
 
 
@@ -215,8 +218,8 @@ def _fetch_a_historical(code: str = '600519', days: int = 252) -> list[dict]:
                         'volume': float(row[5]),
                     })
             return records
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning(f"历史行情获取失败: {e}")
     return []
 
 
@@ -267,8 +270,8 @@ def _get_stock_data(code: str) -> Optional[dict]:
                     'change_pct': quote.get('change_pct', 0),
                     'market': 'A',
                 }
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning(f"股票数据获取失败: {e}")
         return None
 
 
@@ -1282,8 +1285,8 @@ def _load_grid_portfolio() -> list:
         try:
             with open(_GRID_PORTFOLIO_FILE, "r", encoding="utf-8") as f:
                 return json.load(f)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning(f"加载网格组合失败: {e}")
     return []
 
 
@@ -1991,8 +1994,8 @@ def _load_health_history() -> dict:
         try:
             with open(_GRID_HEALTH_FILE, "r", encoding="utf-8") as f:
                 return json.load(f)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning(f"加载健康历史失败: {e}")
     return {}
 
 

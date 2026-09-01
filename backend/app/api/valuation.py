@@ -31,6 +31,7 @@ from app.services.dcf import (
     estimate_wacc,
 )
 from app.core.cache import get_cache, set_cache, TTL_DAILY, TTL_STATIC
+from app.core.validators import validate_stock_code
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -132,6 +133,7 @@ def valuation_dashboard(stock_code: str):
     - 综合评分
     - 估值预警
     """
+    stock_code = validate_stock_code(stock_code)
     cache_key = f"valuation_dashboard_{stock_code}"
     cached = get_cache(cache_key, TTL_DAILY)
     if cached:
@@ -212,8 +214,15 @@ def valuation_dashboard(stock_code: str):
             market_cap_yuan = market_cap * 1e8
             latest_bal = balance[0] if balance else {}
             latest_inc = income[0] if income else {}
-            total_debt = ((latest_bal.get("short_term_borrowing") or 0)
-                         + (latest_bal.get("long_term_borrowing") or 0))
+            # 带息债务：短期借款 + 长期借款 + 应付债券 + 应付票据 + 租赁负债
+            # （旧实现仅含短/长借款，会系统性低估 EV，使 EV/EBITDA 偏小）
+            total_debt = (
+                (latest_bal.get("short_term_borrowing") or 0)
+                + (latest_bal.get("long_term_borrowing") or 0)
+                + (latest_bal.get("bonds_payable") or 0)
+                + (latest_bal.get("notes_payable") or 0)
+                + (latest_bal.get("lease_liabilities") or 0)
+            )
             cash = latest_bal.get("monetary_funds") or 0
             ev_val = market_cap_yuan + total_debt - cash
 
@@ -383,6 +392,7 @@ def valuation_percentiles(stock_code: str, years: int = Query(5, ge=1, le=10, de
     - 历史百分位排名
     - 可视化用的带状图数据（p10/p25/median/p75/p90）
     """
+    stock_code = validate_stock_code(stock_code)
     cache_key = f"valuation_percentiles_{stock_code}_{years}"
     cached = get_cache(cache_key, TTL_STATIC)
     if cached:
@@ -489,6 +499,7 @@ def industry_comparison(stock_code: str):
     - 目标公司在行业中的估值排名
     - 相对估值溢价/折价
     """
+    stock_code = validate_stock_code(stock_code)
     cache_key = f"valuation_industry_{stock_code}"
     cached = get_cache(cache_key, TTL_DAILY)
     if cached:
@@ -694,6 +705,7 @@ def valuation_alerts(stock_code: str):
     - DCF内在价值 vs 市价
     - 综合评分
     """
+    stock_code = validate_stock_code(stock_code)
     try:
         # 复用dashboard的数据
         dashboard = valuation_dashboard.__wrapped__(stock_code) if hasattr(valuation_dashboard, '__wrapped__') else None
@@ -723,18 +735,18 @@ def _build_alert_summary(alerts: list, composite: dict) -> dict:
     warning_count = sum(1 for a in alerts if a.get("level") == "warning")
     safe_count = sum(1 for a in alerts if a.get("level") == "safe")
 
-    # 总体判断
-    score = composite.get("score") if composite else None
-    if score is not None:
-        if score >= 70:
-            overall = "低估区间 - 可关注买入机会"
-            color = "green"
-        elif score >= 45:
-            overall = "合理区间 - 持有观望"
-            color = "yellow"
-        else:
-            overall = "高估区间 - 注意风险"
-            color = "red"
+    # 总体判断：复用 DCF calculate_composite_score 的权威评级(level)，
+    # 避免与 dcf.py 的分档阈值(≥80严重低估/≥65低估/≥45合理/≥30偏高)冲突。
+    level = composite.get("level") if isinstance(composite, dict) else None
+    if level and level != "N/A":
+        _level_map = {
+            "严重低估": ("极度低估区间 - 可重点关注", "green"),
+            "低估": ("低估区间 - 可关注买入机会", "green"),
+            "合理": ("合理区间 - 持有观望", "yellow"),
+            "偏高": ("偏高区间 - 注意风险", "orange"),
+            "高估": ("高估区间 - 注意风险", "red"),
+        }
+        overall, color = _level_map.get(level, ("估值信号中性", "gray"))
     elif danger_count > safe_count:
         overall = "多指标显示高估 - 注意风险"
         color = "red"
@@ -772,6 +784,7 @@ def valuation_chart_data(stock_code: str):
     4. 估值仪表盘（综合评分）
     5. DCF敏感性热力图
     """
+    stock_code = validate_stock_code(stock_code)
     cache_key = f"valuation_chart_{stock_code}"
     cached = get_cache(cache_key, TTL_DAILY)
     if cached:
@@ -984,6 +997,7 @@ def stock_dcf_valuation(
 
     自动获取: FCF（从现金流表）、增长率（历史CAGR）、股本、净负债、WACC
     """
+    stock_code = validate_stock_code(stock_code)
     cache_key = f"valuation_dcf_{stock_code}_{growth_rate}_{discount_rate}_{safety_margin}"
     cached = get_cache(cache_key, TTL_DAILY)
     if cached:
@@ -1142,8 +1156,13 @@ def _calc_ev_ebitda(market_cap, price, balance, income, cashflow):
         market_cap_yuan = market_cap * 1e8
         latest_bal = balance[0]
         latest_inc = income[0]
-        total_debt = ((latest_bal.get("short_term_borrowing") or 0)
-                     + (latest_bal.get("long_term_borrowing") or 0))
+        total_debt = (
+            (latest_bal.get("short_term_borrowing") or 0)
+            + (latest_bal.get("long_term_borrowing") or 0)
+            + (latest_bal.get("bonds_payable") or 0)
+            + (latest_bal.get("notes_payable") or 0)
+            + (latest_bal.get("lease_liabilities") or 0)
+        )
         cash = latest_bal.get("monetary_funds") or 0
         ev = market_cap_yuan + total_debt - cash
         operate_profit = latest_inc.get("operate_profit")

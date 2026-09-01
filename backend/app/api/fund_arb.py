@@ -17,6 +17,7 @@ from datetime import datetime
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Query
+from app.core.validators import validate_stock_code
 from pydantic import BaseModel
 
 from app.api.fund_config import FUND_CONFIG, get_fund_config, get_underlying_symbols
@@ -77,8 +78,13 @@ def _merge_fund_data(jisilu_funds: list, est_results: dict) -> list:
             continue
 
         # 安全获取数值字段
-        turnover = _safe_float(fund.get("turnover")) or _safe_float(fund.get("amount"))
+        # turnover=成交额(万元)。注意 amount 在集思录口径是"份额(万份)"，不可当成交额用
         price = _safe_float(fund.get("price"))
+        turnover = _safe_float(fund.get("turnover"))
+        if turnover <= 0:
+            volume = _safe_float(fund.get("volume"))
+            if volume > 0 and price > 0:
+                turnover = round(volume * price, 2)  # 成交量(万份)×价格 → 万元
         nav_discount_rt = _safe_float(fund.get("nav_discount_rt"))
         increase_rt = _safe_float(fund.get("increase_rt"))
 
@@ -199,8 +205,12 @@ def scan_arbitrage(
     返回按净收益排序的套利机会列表。
     """
     try:
-        # 1. 从集思录获取全部LOF基金数据
-        jisilu_funds = FundService._fetch_jisilu_lof()
+        # 1. 从集思录获取全部LOF基金数据（经 _normalize_fund 标准化：
+        #    补齐 turnover=成交量×价格、apply_limit 限额解析，原始 cell 无这两个字段）
+        jisilu_funds = [
+            n for n in (FundService._normalize_fund(c) for c in FundService._fetch_jisilu_lof())
+            if n
+        ]
         data_source = "集思录"
 
         # 降级到备用数据源
@@ -270,11 +280,27 @@ def scan_arbitrage(
         # 6. 合并数据
         merged = _merge_fund_data(jisilu_funds, est_results)
 
+        # 6.1 申购状态兜底：集思录未提供时（未登录/备用源），用天天基金数据补齐
+        try:
+            em_status = FundService.get_em_purchase_status_map()
+            for f in merged:
+                if not f.get("apply_status"):
+                    code = f.get("fund_code", "")
+                    bare = code[2:] if code[:2] in ("SH", "SZ") else code
+                    st = em_status.get(bare)
+                    if st:
+                        f["apply_status"] = st.get("apply_status", "")
+                        f["apply_limit"] = st.get("apply_limit", "")
+                        if not f.get("redeem_status"):
+                            f["redeem_status"] = st.get("redeem_status", "")
+        except Exception as _e:
+            logger.warning(f"天天基金申购状态兜底失败(不影响scan): {_e}")
+
         # 7. 筛选
         filtered = []
         for fund in merged:
             premium_abs = abs(_safe_float(fund.get("premium_pct")))
-            amount = _safe_float(fund.get("turnover")) or _safe_float(fund.get("amount"))
+            amount = _safe_float(fund.get("turnover"))  # 成交额(万元)，勿用 amount(份额)
             fund_direction = fund.get("direction", "none")
 
             # 溢价率筛选
@@ -337,6 +363,7 @@ def get_fund_detail(fund_code: str, holding_days: int = Query(30)):
 
     包含：计算过程、持仓明细、底层资产行情、套利建议
     """
+    fund_code = validate_stock_code(fund_code)
     try:
         config = get_fund_config(fund_code)
         if not config:
@@ -355,8 +382,11 @@ def get_fund_detail(fund_code: str, holding_days: int = Query(30)):
         official_nav = nav_info.get("nav", 0)
         official_nav_date = nav_info.get("nav_date", "")
 
-        # 获取集思录数据
-        jisilu_funds = FundService._fetch_jisilu_lof()
+        # 获取集思录数据（标准化后含 turnover/apply_limit）
+        jisilu_funds = [
+            n for n in (FundService._normalize_fund(c) for c in FundService._fetch_jisilu_lof())
+            if n
+        ]
         fund_data = next((f for f in jisilu_funds if f.get("fund_id") == fund_code), {})
 
         fund_price = _safe_float(fund_data.get("price"))
@@ -487,6 +517,7 @@ def get_t_backtest(fund_code: str, days: int = Query(60, ge=10, le=250)):
     Returns:
         回测结果（胜率、收益、信号明细等）
     """
+    fund_code = validate_stock_code(fund_code)
     try:
         result = backtest_t_strategy(fund_code, days=days)
         return make_success_response(result)
@@ -565,6 +596,32 @@ def get_fund_est_list():
     支持多标的基金（如海外科技LOF），通过持仓数据计算加权涨跌幅。
     """
     try:
+        # 获取集思录申购状态（开放/暂停/限购），失败不影响EST计算
+        # 注意：LOF_FUND_CONFIG 键带 SH/SZ 前缀，集思录 fund_id 为裸6位代码，统一按裸代码建索引；
+        # 经 _normalize_fund 标准化以补齐 apply_limit（从 min_amt/apply_status 解析）
+        apply_status_map: dict = {}
+        try:
+            for _c in FundService._fetch_jisilu_lof():
+                _f = FundService._normalize_fund(_c)
+                if not _f:
+                    continue
+                _fid = _f.get("fund_id", "")
+                if _fid:
+                    apply_status_map[_fid] = {
+                        "apply_status": _f.get("apply_status", ""),
+                        "apply_limit": _f.get("apply_limit", ""),
+                        "redeem_status": _f.get("redeem_status", ""),
+                    }
+        except Exception as _e:
+            logger.warning(f"获取集思录申购状态失败(不影响EST): {_e}")
+
+        # 兜底：天天基金(akshare)申购状态，补齐集思录未覆盖的基金（匿名仅返回各列表前20条）
+        try:
+            for _code, _v in FundService.get_em_purchase_status_map().items():
+                apply_status_map.setdefault(_code, _v)
+        except Exception as _e:
+            logger.warning(f"天天基金申购状态兜底失败(不影响EST): {_e}")
+
         # 批量收集所有底层资产代码
         underlying_symbols = set()
         for config in LOF_FUND_CONFIG.values():
@@ -605,6 +662,10 @@ def get_fund_est_list():
                 bare_code = fund_code[2:] if fund_code[:2] in ('SH', 'SZ') else fund_code
                 unified_cfg = FUND_CONFIG.get(bare_code, {})
                 item["underlying_type"] = unified_cfg.get("underlying_type", "unknown")
+                _ast = apply_status_map.get(bare_code, {})
+                item["apply_status"] = _ast.get("apply_status", "")
+                item["apply_limit"] = _ast.get("apply_limit", "")
+                item["redeem_status"] = _ast.get("redeem_status", "")
                 results.append(item)
 
         for fund_code, config in MULTI_UNDERLYING_FUNDS.items():
@@ -614,6 +675,11 @@ def get_fund_est_list():
             )
             if item:
                 item["underlying_type"] = "multi"
+                _bare3 = fund_code[2:] if fund_code[:2] in ('SH', 'SZ') else fund_code
+                _ast3 = apply_status_map.get(_bare3, {})
+                item["apply_status"] = _ast3.get("apply_status", "")
+                item["apply_limit"] = _ast3.get("apply_limit", "")
+                item["redeem_status"] = _ast3.get("redeem_status", "")
                 results.append(item)
 
         # A股LOF参考数据（无EST，仅价格和涨跌幅）
@@ -634,6 +700,7 @@ def get_fund_est_list():
             change_pct = _safe_float_orig(fund_info[32], 0) if len(fund_info) > 32 else 0
             if price <= 0:
                 continue
+            _ast2 = apply_status_map.get(bare_code, {})
             a_share_funds.append({
                 "fund_code": prefixed,
                 "fund_name": cfg["name"],
@@ -641,6 +708,9 @@ def get_fund_est_list():
                 "fund_change_pct": round(change_pct, 2),
                 "underlying_type": cfg.get("underlying_type", "unknown"),
                 "underlying_code": cfg.get("underlying", ""),
+                "turnover": round(_safe_float_orig(fund_info[9], 0) / 10000, 2) if len(fund_info) > 9 else 0,
+                "apply_status": _ast2.get("apply_status", ""),
+                "apply_limit": _ast2.get("apply_limit", ""),
             })
 
         return make_success_response({

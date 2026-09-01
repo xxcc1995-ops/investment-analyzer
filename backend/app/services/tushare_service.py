@@ -2,6 +2,9 @@
 Tushare数据服务 - 高质量A股财务数据
 数据源：Tushare Pro（需要API Token）
 配置：通过环境变量 TUSHARE_TOKEN 设置Token
+
+状态（2026-07-15 审查）：当前未被任何路由调用（data_service 财务数据走东方财富API）。
+作为 CLAUDE.md 登记的数据源对接层保留；接入时需配置 TUSHARE_TOKEN 并在对应 api/service 中引用。
 """
 import os
 import time

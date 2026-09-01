@@ -407,8 +407,8 @@ def get_portfolio_summary() -> PortfolioSummary:
                 # 昨日市值 = 今日市值 / (1 + 涨跌幅%)
                 prev_value = p.market_value / (1 + quote.change_pct / 100)
                 today_pnl += p.market_value - prev_value
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning(f"组合盈亏计算失败: {e}")
 
     return PortfolioSummary(
         total_cost=round(total_cost, 2),

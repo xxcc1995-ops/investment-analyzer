@@ -39,26 +39,6 @@ export const screenerApi = {
   /** REIT风险指南 */
   getREITRiskGuide: () =>
     api.get<Record<string, unknown>>('/reit/risk-guide'),
-
-  /** 出口冠军筛选 */
-  getExportChampions: (params?: Record<string, unknown>) =>
-    api.get<ScreenerResult>('/export-champions/screener', { params }),
-
-  /** 出口冠军理念 */
-  getExportChampionsPhilosophy: () =>
-    api.get<Record<string, unknown>>('/export-champions/philosophy'),
-
-  /** JC筛选 */
-  getJC: (params?: Record<string, unknown>) =>
-    api.get<ScreenerResult>('/jc/screener', { params }),
-
-  /** JC理念 */
-  getJCPhilosophy: () =>
-    api.get<Record<string, unknown>>('/jc/philosophy'),
-
-  /** JC买入信号 */
-  getJCBuySignals: (params?: Record<string, unknown>) =>
-    api.get<ScreenerResult>('/jc/buy-signals', { params }),
 }
 
 // Re-export type for convenience

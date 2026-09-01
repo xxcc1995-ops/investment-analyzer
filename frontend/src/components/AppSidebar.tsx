@@ -16,13 +16,12 @@ import {
   AreaChartOutlined,
   SwapOutlined,
   BankOutlined,
-  TrophyOutlined,
   SafetyOutlined,
-  BulbOutlined,
   ExperimentOutlined,
   RocketOutlined,
   SafetyCertificateOutlined,
   ReconciliationOutlined,
+  RetweetOutlined,
   HeatMapOutlined,
   MonitorOutlined,
   CrownOutlined,
@@ -31,6 +30,7 @@ import {
   LinkOutlined,
   FireOutlined,
   GiftOutlined,
+  ReadOutlined,
 } from '@ant-design/icons'
 import type { MenuProps } from 'antd'
 
@@ -45,28 +45,25 @@ interface AppSidebarProps {
 
 // 菜单 key → URL 路径 映射
 const keyToPath: Record<string, string> = {
-  dailyInfo: '/',
   stock: '/stock',
   indexVal: '/index-valuation',
+  indexEarnings: '/index-earnings',
   macro: '/macro',
   futures: '/futures',
   dividend: '/dividend',
   cigarButt: '/cigar-butt',
   valueInvesting: '/value-investing',
   reit: '/reit',
-  exportChampions: '/export-champions',
-  jcScreener: '/jc-screener',
   tTrading: '/t-trading',
+  tTradingRealtime: '/t-trading-realtime',
   gridTrading: '/grid-trading',
   rightSide: '/right-side',
   futuOptionChain: '/futu-options',
   option: '/option-calculator',
-  backtestReport: '/backtest',
-  quantBacktest: '/quant-backtest',
-  drawdownControl: '/drawdown',
   fundArb: '/fund-arb',
-  tractorTrading: '/tractor',
   cb: '/cb',
+  cbNearMature: '/cb-near-mature',
+  cbStrategies: '/cb-strategies',
   cbBacktest: '/cb-backtest',
   masterStrategy: '/master-strategy',
   polymarket: '/polymarket',
@@ -74,11 +71,10 @@ const keyToPath: Record<string, string> = {
   cryptoMaster: '/crypto',
   airdropScanner: '/airdrop-scanner',
   nationalTeam: '/national-team',
-  strategyValidation: '/strategy-validation',
-  bankValuation: '/bank-valuation',
   decisionGuard: '/decision-guard',
   prefrontalTraining: '/prefrontal-training',
   portfolio: '/portfolio',
+  relativeValuation: '/relative-valuation',
   mobileSettings: '/settings',
 }
 
@@ -100,9 +96,10 @@ function getItem(
 const menuItems: MenuItem[] = [
   getItem('行情总览', 'market', <LineChartOutlined />, [
     getItem('我的持仓', 'portfolio', <PieChartOutlined />),
-    getItem('每日资讯', 'dailyInfo', <DashboardOutlined />),
     getItem('我的自选', 'stock', <DashboardOutlined />),
     getItem('指数估值', 'indexVal', <BarChartOutlined />),
+    getItem('指数盈利估值', 'indexEarnings', <FundOutlined />),
+    getItem('相对估值', 'relativeValuation', <PieChartOutlined />),
     getItem('宏观数据', 'macro', <AreaChartOutlined />),
     getItem('期货洞察', 'futures', <ExperimentOutlined />),
   ]),
@@ -110,36 +107,33 @@ const menuItems: MenuItem[] = [
     getItem('攒股收息', 'dividend', <FundOutlined />),
     getItem('捡烟蒂', 'cigarButt', <FallOutlined />),
     getItem('价投筛选', 'valueInvesting', <RiseOutlined />),
-    getItem('银行估值', 'bankValuation', <BankOutlined />),
     getItem('REIT筛选', 'reit', <BankOutlined />),
-    getItem('出口冠军', 'exportChampions', <TrophyOutlined />),
-    getItem('机哥体系', 'jcScreener', <BulbOutlined />),
   ]),
   getItem('交易系统', 'trading', <StockOutlined />, [
     getItem('做T系统', 'tTrading', <SwapOutlined />),
+    getItem('实时做T(腾讯)', 'tTradingRealtime', <AlertOutlined />),
     getItem('网格交易', 'gridTrading', <HeatMapOutlined />),
     getItem('右侧交易', 'rightSide', <RocketOutlined />),
     getItem('期权轮动(实战)', 'futuOptionChain', <PieChartOutlined />),
     getItem('期权计算', 'option', <ReconciliationOutlined />),
-    getItem('策略回测', 'backtestReport', <MonitorOutlined />),
-    getItem('量化回测', 'quantBacktest', <ExperimentOutlined />),
-    getItem('回撤控制', 'drawdownControl', <AlertOutlined />),
+  ]),
+  getItem('套利', 'arb', <RetweetOutlined />, [
+    getItem('港股打新', 'hki', <RocketOutlined />),
+    getItem('基金套利', 'fundArb', <SwapOutlined />),
   ]),
   getItem('基金与债券', 'funds', <FundOutlined />, [
-    getItem('基金套利', 'fundArb', <SwapOutlined />),
-    getItem('拖拉机套利', 'tractorTrading', <SwapOutlined />),
     getItem('可转债', 'cb', <StockOutlined />),
+    getItem('临期债筛选', 'cbNearMature', <SafetyOutlined />),
+    getItem('八大战法', 'cbStrategies', <ReadOutlined />),
     getItem('大师策略', 'masterStrategy', <CrownOutlined />),
     getItem('转债回测', 'cbBacktest', <MonitorOutlined />),
   ]),
   getItem('另类投资', 'alternative', <GlobalOutlined />, [
     getItem('Polymarket', 'polymarket', <GlobalOutlined />),
-    getItem('港股打新', 'hki', <RocketOutlined />),
     getItem('币圈大师', 'cryptoMaster', <FireOutlined />),
     getItem('空投扫描器', 'airdropScanner', <GiftOutlined />),
   ]),
   getItem('辅助工具', 'tools', <ToolOutlined />, [
-    getItem('策略验证', 'strategyValidation', <BarChartOutlined />),
     getItem('国家队监控', 'nationalTeam', <SafetyOutlined />),
     getItem('决策卫士', 'decisionGuard', <SafetyCertificateOutlined />),
     getItem('前额叶练习', 'prefrontalTraining', <ExperimentOutlined />),
@@ -175,7 +169,7 @@ function deriveActiveKey(pathname: string): string {
   // 前缀匹配（如 /stock/600519 → stock）
   if (pathname.startsWith('/stock')) return 'stock'
   // 默认
-  return 'dailyInfo'
+  return 'indexVal'
 }
 
 const AppSidebar = memo(function AppSidebar({ collapsed, onCollapse }: AppSidebarProps) {
@@ -195,7 +189,7 @@ const AppSidebar = memo(function AppSidebar({ collapsed, onCollapse }: AppSideba
 
   const handleOpenChange = (keys: string[]) => {
     const latestOpenKey = keys.find(key => openKeys.indexOf(key) === -1)
-    const rootSubmenuKeys = ['market', 'screening', 'trading', 'funds', 'alternative', 'tools', 'recommend']
+    const rootSubmenuKeys = ['market', 'screening', 'trading', 'arb', 'funds', 'alternative', 'tools', 'recommend']
     if (latestOpenKey && rootSubmenuKeys.indexOf(latestOpenKey) === -1) {
       setOpenKeys(keys)
     } else {
@@ -215,7 +209,7 @@ const AppSidebar = memo(function AppSidebar({ collapsed, onCollapse }: AppSideba
       return
     }
     // 忽略分组的点击
-    if (['market', 'screening', 'trading', 'funds', 'alternative', 'tools', 'recommend'].includes(key)) return
+    if (['market', 'screening', 'trading', 'arb', 'funds', 'alternative', 'tools', 'recommend'].includes(key)) return
     // 导航到对应路径
     const path = keyToPath[key]
     if (path) {

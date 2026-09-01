@@ -42,10 +42,6 @@ export const tradingApi = {
   /** 执行交易 */
   executeTTrade: (params: Record<string, unknown>) =>
     api.post<Record<string, unknown>>('/t-trading/execute', params),
-
-  /** 策略回测 */
-  getBacktest: (params: Record<string, unknown>) =>
-    api.get<Record<string, unknown>>('/backtest/backtest', { params }),
 }
 
 // ============ Polymarket API ============

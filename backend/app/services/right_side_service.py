@@ -5,6 +5,7 @@ import requests
 from datetime import datetime, timedelta
 
 from app.core.cache import get_cache, set_cache, cached
+from app.core.utils import fetch_tencent_names
 
 logger = logging.getLogger(__name__)
 
@@ -96,6 +97,42 @@ def fetch_ohlcv(stock_code: str, days: int = 500) -> list[dict]:
     if _is_hk_code(stock_code):
         return fetch_hk_ohlcv(stock_code, days)
     return fetch_a_share_ohlcv(stock_code, days)
+
+
+def _get_stock_name(stock_code: str) -> str:
+    """通过腾讯行情接口获取股票名称（用于扫描结果展示，K线接口不带名称）"""
+    if _is_hk_code(stock_code):
+        symbol = f'hk{stock_code}'
+    elif stock_code.startswith('6'):
+        symbol = f'sh{stock_code}'
+    else:
+        symbol = f'sz{stock_code}'
+    names = fetch_tencent_names([symbol], timeout=5)
+    return names.get(symbol, stock_code)
+
+
+def _quick_screen(code: str) -> bool:
+    """快速预筛：用少量K线过滤明显左侧股，避免全量深度分析导致超时/限流。
+
+    仅当价格站上MA20且近期未明显缩量时才进入完整 analyze_right_side。
+    """
+    try:
+        ohlcv = fetch_ohlcv(code, 60)
+        if len(ohlcv) < 20:
+            return False
+        closes = [d['close'] for d in ohlcv]
+        vols = [d['volume'] for d in ohlcv]
+        price = closes[-1]
+        ma20 = sum(closes[-20:]) / 20
+        if price < ma20:
+            return False
+        recent_vol = sum(vols[-5:]) / 5
+        base_vol = sum(vols[-20:]) / 20
+        if base_vol > 0 and recent_vol < base_vol * 0.8:
+            return False
+        return True
+    except Exception:
+        return False
 
 
 def fetch_weekly_ohlcv(stock_code: str, weeks: int = 200) -> list[dict]:
@@ -3034,35 +3071,43 @@ def batch_scan_right_side(
     if market in ("HK", "all"):
         stocks.extend([(c, "HK") for c in HK_STOCKS_LIST])
 
-    results = []
+    candidates = []
     for code, mkt in stocks:
         try:
+            # 轻量预筛：明显左侧/缩量股先跳过，避免对全池做深度分析导致超时/限流
+            if not _quick_screen(code):
+                continue
             result = analyze_right_side(code)
             if "error" in result:
                 continue
             score = result.get("score", 0)
             if score >= min_score:
-                results.append({
-                    "code": code,
-                    "name": result.get("code", code),
-                    "market": mkt,
-                    "score": score,
-                    "verdict": result.get("verdict", ""),
-                    "market_regime": result.get("market_regime", {}).get("regime", ""),
-                    "weinstein_stage": result.get("weinstein_stage", {}).get("stage", 0),
-                    "risk_reward": result.get("risk_management", {}).get("risk_reward", {}),
-                    "entry_type": result.get("entry_plan", {}).get("entry_type", "none"),
-                })
+                candidates.append((code, mkt, score, result))
         except Exception:
             continue
 
-    # 按分数排序
-    results.sort(key=lambda x: x["score"], reverse=True)
-    results = results[:limit]
+    # 按分数排序后取 top
+    candidates.sort(key=lambda x: x[2], reverse=True)
+    candidates = candidates[:limit]
+
+    results = []
+    for code, mkt, score, result in candidates:
+        results.append({
+            "code": code,
+            "name": _get_stock_name(code),
+            "market": mkt,
+            "score": score,
+            "verdict": result.get("verdict", ""),
+            "market_regime": result.get("market_regime", {}).get("regime", ""),
+            "weinstein_stage": result.get("weinstein_stage", {}).get("stage", 0),
+            "risk_reward": result.get("risk_management", {}).get("risk_reward", {}),
+            "entry_type": result.get("entry_plan", {}).get("entry_type", "none"),
+        })
 
     return {
         "results": results,
         "total": len(results),
+        "scanned": len(stocks),
         "market": market,
         "min_score": min_score,
         "update_time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
@@ -3201,8 +3246,8 @@ def _load_watchlist() -> list:
         try:
             with open(_WATCHLIST_FILE, "r", encoding="utf-8") as f:
                 return json.load(f)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning(f"自选股加载失败: {e}")
     return []
 
 

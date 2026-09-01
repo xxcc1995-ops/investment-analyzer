@@ -33,6 +33,23 @@ class QuoteData:
     bid1_volume: float = 0.0  # 买一量（股）
     ask1_price: float = 0.0  # 卖一价
     ask1_volume: float = 0.0  # 卖一量（股）
+    # 五档买卖盘（日内实时做T所需；腾讯 qt.gtimg.cn 返回 fields[9..28]）
+    bid2_price: float = 0.0
+    bid2_volume: float = 0.0
+    bid3_price: float = 0.0
+    bid3_volume: float = 0.0
+    bid4_price: float = 0.0
+    bid4_volume: float = 0.0
+    bid5_price: float = 0.0
+    bid5_volume: float = 0.0
+    ask2_price: float = 0.0
+    ask2_volume: float = 0.0
+    ask3_price: float = 0.0
+    ask3_volume: float = 0.0
+    ask4_price: float = 0.0
+    ask4_volume: float = 0.0
+    ask5_price: float = 0.0
+    ask5_volume: float = 0.0
     timestamp: str = ''  # 行情时间
     trade_date: str = ''  # 交易日期
     source: str = ''  # 数据来源标识
@@ -61,6 +78,20 @@ class QuoteData:
             'bid1_volume': self.bid1_volume,
             'ask1_price': self.ask1_price,
             'ask1_volume': self.ask1_volume,
+            'bids': [
+                {'price': self.bid1_price, 'volume': self.bid1_volume},
+                {'price': self.bid2_price, 'volume': self.bid2_volume},
+                {'price': self.bid3_price, 'volume': self.bid3_volume},
+                {'price': self.bid4_price, 'volume': self.bid4_volume},
+                {'price': self.bid5_price, 'volume': self.bid5_volume},
+            ],
+            'asks': [
+                {'price': self.ask1_price, 'volume': self.ask1_volume},
+                {'price': self.ask2_price, 'volume': self.ask2_volume},
+                {'price': self.ask3_price, 'volume': self.ask3_volume},
+                {'price': self.ask4_price, 'volume': self.ask4_volume},
+                {'price': self.ask5_price, 'volume': self.ask5_volume},
+            ],
             'trade_time': self.timestamp,
             'trade_date': self.trade_date,
             'source': self.source,

@@ -19,10 +19,13 @@
 """
 
 import math
+import logging
 import requests
 from typing import Optional
 from datetime import datetime, timedelta
 from dataclasses import dataclass, field
+
+logger = logging.getLogger(__name__)
 
 from app.services.grid_service import calculate_atr, _fetch_hk_historical
 from app.services.jc_service import INDUSTRY_POSITION, A_STOCKS_LIST, HK_STOCKS_LIST, US_STOCKS_LIST
@@ -82,8 +85,8 @@ def _fetch_a_historical(code: str, days: int = 252) -> list[dict]:
                         "amount": 0,
                     })
             return records[-days:] if len(records) > days else records
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning(f"做T服务处理失败: {e}")
 
     # Fallback: 新浪财经K线API
     try:
@@ -141,8 +144,8 @@ def _fetch_us_historical(symbol: str, days: int = 252) -> list[dict]:
                     "amount": 0,
                 })
             return records[-days:]
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning(f"做T服务处理失败: {e}")
 
     return []
 
@@ -1016,8 +1019,8 @@ def analyze_t_signal(code: str, market: str, t_capital: float = 300000) -> Optio
                     "targets": risk_info["targets"],
                     "kelly": risk_info["kelly"],
                 }
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning(f"做T回测处理失败: {e}")
 
     _set_cached(cache_key, result)
     return result
